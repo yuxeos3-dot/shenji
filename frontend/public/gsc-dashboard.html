@@ -502,6 +502,8 @@ function startGoogleOAuth(){
       callback:async r=>{
         if(r.error){alert('Google 授权失败: '+r.error);return;}
         gToken=r.access_token;
+        localStorage.setItem('g_access_token',gToken);
+        localStorage.setItem('g_token_exp',String(Date.now()+55*60*1000));
         enterDashboard();
       }
     }).requestAccessToken({prompt:'consent'});
@@ -934,7 +936,7 @@ function renderYandexDetail(yd){
 
 function showOverview(){document.getElementById('view-detail').style.display='none';document.getElementById('view-overview').style.display='block';}
 function noData(){return'<div style="padding:20px;color:var(--muted);font-size:11px;text-align:center;font-family:var(--mono)">NO DATA</div>';}
-function logout(){gToken=null;yToken=null;yUserId=null;allSites=[];yandexSites=[];document.getElementById('app').style.display='none';document.getElementById('login-screen').style.display='flex';}
+function logout(){gToken=null;yToken=null;yUserId=null;allSites=[];yandexSites=[];localStorage.removeItem('g_access_token');localStorage.removeItem('g_token_exp');document.getElementById('app').style.display='none';document.getElementById('login-screen').style.display='flex';}
 
 // ═══ EXPORTS ═══
 function exportOverview(){
@@ -1011,18 +1013,26 @@ function hideLoad(){const el=document.getElementById('loading');if(el)el.classLi
 
 // Restore Yandex Client ID
 window.addEventListener('DOMContentLoaded',()=>{
-  const params = new URLSearchParams(window.location.search);
-  // Inject Client ID from URL param if provided
-  const urlCid = params.get('cid');
-  if(urlCid){
-    const el = document.getElementById('client-id-input');
-    if(el) el.value = urlCid;
+  // Apply URL params (injected by parent iframe)
+  const params=new URLSearchParams(window.location.search);
+  const urlCid=params.get('cid');
+  const urlYtk=params.get('ytk');
+  if(urlCid){const el=document.getElementById('client-id-input');if(el)el.value=urlCid;}
+
+  // Yandex token
+  const HARDCODED_TOKEN=urlYtk||'y0__xDKxafgCBiX0z8g7tjA9RY6_2WTWgBQ78k2YJBOmtrgozXq9w';
+  yToken=HARDCODED_TOKEN;
+  localStorage.setItem('yx_token',HARDCODED_TOKEN);
+
+  // Restore Google token if still valid (55min window)
+  const savedToken=localStorage.getItem('g_access_token');
+  const savedExp=parseInt(localStorage.getItem('g_token_exp')||'0');
+  if(savedToken&&Date.now()<savedExp){
+    gToken=savedToken;
+    document.getElementById('login-screen').style.display='none';
+    enterDashboard();
   }
-  // Yandex token: URL param > localStorage > hardcoded
-  const urlYtk = params.get('ytk');
-  const HARDCODED_TOKEN = urlYtk || localStorage.getItem('yx_token') || 'y0__xDKxafgCBiX0z8g7tjA9RY6_2WTWgBQ78k2YJBOmtrgozXq9w';
-  yToken = HARDCODED_TOKEN;
-  localStorage.setItem('yx_token', HARDCODED_TOKEN);
+  // else: login screen stays, user clicks button once
 });
 </script>
 </body>
