@@ -1,7 +1,9 @@
 package db
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"log"
 	"os"
 
@@ -83,6 +85,8 @@ CREATE TABLE IF NOT EXISTS audit_results (
     suggestions     TEXT DEFAULT '',
     summary         TEXT DEFAULT '',
     ai_model        TEXT DEFAULT '',
+    v6_report       TEXT DEFAULT '',
+    raw_ai_response TEXT DEFAULT '',
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -201,6 +205,20 @@ CREATE TABLE IF NOT EXISTS oauth_tokens (
     expires_at   DATETIME,
     created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Indexes for frequently queried columns
+CREATE INDEX IF NOT EXISTS idx_audit_tasks_site_id    ON audit_tasks(site_id);
+CREATE INDEX IF NOT EXISTS idx_audit_tasks_status     ON audit_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_audit_tasks_created_at ON audit_tasks(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_pages_task_id    ON audit_pages(task_id);
+CREATE INDEX IF NOT EXISTS idx_audit_results_task_id  ON audit_results(task_id);
+CREATE INDEX IF NOT EXISTS idx_site_pages_site_id     ON site_pages(site_id);
+CREATE INDEX IF NOT EXISTS idx_gsc_data_site_date     ON gsc_data(site_id, date);
+CREATE INDEX IF NOT EXISTS idx_ga_data_site_date      ON ga_data(site_id, date);
+CREATE INDEX IF NOT EXISTS idx_yandex_data_site_date  ON yandex_data(site_id, date);
+CREATE INDEX IF NOT EXISTS idx_dead_link_site_id      ON dead_link_results(site_id);
+CREATE INDEX IF NOT EXISTS idx_ext_links_site_id      ON external_links(site_id);
+CREATE INDEX IF NOT EXISTS idx_daily_reports_user     ON daily_reports(user_id, report_date);
 `
 
 func Init() {
@@ -210,23 +228,30 @@ func Init() {
 	}
 
 	var err error
-	DB, err = sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	DB, err = sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL&_foreign_keys=on")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
 
 	DB.SetMaxOpenConns(1)
 
+	// Additional PRAGMAs (idempotent).
+	for _, p := range []string{
+		"PRAGMA journal_mode=WAL;",
+		"PRAGMA synchronous=NORMAL;",
+		"PRAGMA busy_timeout=5000;",
+		"PRAGMA temp_store=MEMORY;",
+	} {
+		if _, err := DB.Exec(p); err != nil {
+			log.Printf("PRAGMA failed (%s): %v", p, err)
+		}
+	}
+
 	if _, err := DB.Exec(schema); err != nil {
 		log.Fatalf("Failed to create schema: %v", err)
 	}
 
-	seedDefaultAdmin()
-	seedDefaultSettings()
-
-	log.Println("Database initialized successfully")
-
-	// Migrate existing databases - add per-site schedule columns if not exist
+	// Migrate existing databases.
 	migrations := []string{
 		"ALTER TABLE sites ADD COLUMN audit_schedule_enabled TEXT DEFAULT 'false'",
 		"ALTER TABLE sites ADD COLUMN audit_interval_hours INTEGER DEFAULT 0",
@@ -244,12 +269,22 @@ func Init() {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		"ALTER TABLE audit_results ADD COLUMN v6_report TEXT DEFAULT ''",
+		"ALTER TABLE audit_results ADD COLUMN raw_ai_response TEXT DEFAULT ''",
 	}
 	for _, m := range migrations {
-		DB.Exec(m) // ignore errors (column already exists)
+		DB.Exec(m) // ignore errors (column/table already exists)
 	}
+
+	seedDefaultAdmin()
+	seedDefaultSettings()
+
+	log.Println("Database initialized successfully")
 }
 
+// seedDefaultAdmin creates an admin account on first run. The password is taken
+// from ADMIN_INIT_PASSWORD if set; otherwise a strong random password is
+// generated and printed to the log exactly once. The operator must log in with
+// it and change the password immediately.
 func seedDefaultAdmin() {
 	var count int
 	if err := DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
@@ -259,7 +294,18 @@ func seedDefaultAdmin() {
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("Admin@123456"), 12)
+	password := os.Getenv("ADMIN_INIT_PASSWORD")
+	generated := false
+	if password == "" {
+		buf := make([]byte, 16)
+		if _, err := rand.Read(buf); err != nil {
+			log.Fatalf("Failed to generate admin password: %v", err)
+		}
+		password = base64.RawURLEncoding.EncodeToString(buf)
+		generated = true
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
 	if err != nil {
 		log.Fatalf("Failed to hash password: %v", err)
 	}
@@ -271,7 +317,17 @@ func seedDefaultAdmin() {
 	if err != nil {
 		log.Fatalf("Failed to create default admin: %v", err)
 	}
-	log.Println("Default admin created: admin@seo-system.local / Admin@123456")
+
+	if generated {
+		log.Println("╔════════════════════════════════════════════════════════════════════╗")
+		log.Println("║ FIRST-RUN ADMIN ACCOUNT CREATED                                    ║")
+		log.Println("║ Email:    admin@seo-system.local                                   ║")
+		log.Printf("║ Password: %-56s ║", password)
+		log.Println("║ (This password will NOT be shown again — change it on first login) ║")
+		log.Println("╚════════════════════════════════════════════════════════════════════╝")
+	} else {
+		log.Println("Default admin created (password from ADMIN_INIT_PASSWORD env)")
+	}
 }
 
 func seedDefaultSettings() {

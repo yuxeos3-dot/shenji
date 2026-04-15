@@ -54,6 +54,7 @@ type AnalysisResult struct {
 	Suggestions    string          `json:"suggestions"`
 	Summary        string          `json:"summary"`
 	V6Report       string          `json:"v6_report"` // full JSON of V6Report
+	RawResponse    string          `json:"raw_response"`
 }
 
 type GSCDataForPrompt struct {
@@ -499,13 +500,18 @@ func CallAI(prompt string) (*AnalysisResult, string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// Cap response body size at 20 MiB to avoid OOM from pathological responses.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
 	if err != nil {
 		return nil, model, fmt.Errorf("读取AI响应失败: %w", err)
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, model, fmt.Errorf("AI返回错误 (HTTP %d): %s", resp.StatusCode, string(body))
+		snippet := string(body)
+		if len(snippet) > 2000 {
+			snippet = snippet[:2000]
+		}
+		return nil, model, fmt.Errorf("AI返回错误 (HTTP %d): %s", resp.StatusCode, snippet)
 	}
 
 	var apiResp struct {
@@ -522,18 +528,23 @@ func CallAI(prompt string) (*AnalysisResult, string, error) {
 	}
 
 	if len(apiResp.Choices) == 0 {
-		return nil, model, fmt.Errorf("AI未返回结果，响应体: %s", string(body)[:min(500, len(body))])
+		snippet := string(body)
+		if len(snippet) > 500 {
+			snippet = snippet[:500]
+		}
+		return nil, model, fmt.Errorf("AI未返回结果，响应体: %s", snippet)
 	}
 
 	finishReason := apiResp.Choices[0].FinishReason
-	content := apiResp.Choices[0].Message.Content
+	rawContent := apiResp.Choices[0].Message.Content
 
 	// If output was truncated due to token limit, return error so user knows to retry
 	if finishReason == "length" {
-		return nil, model, fmt.Errorf("AI输出被截断（token超限），当前max_tokens=%d不足，请联系管理员提升token上限或减少监控页面数量", 16000)
+		return &AnalysisResult{RawResponse: rawContent}, model,
+			fmt.Errorf("AI输出被截断（token超限），当前max_tokens=%d不足，请联系管理员提升token上限或减少监控页面数量", 16000)
 	}
 
-	content = extractJSON(content)
+	content := extractJSON(rawContent)
 
 	// Try to repair truncated JSON by closing unclosed brackets
 	content = repairJSON(content)
@@ -569,23 +580,19 @@ func CallAI(prompt string) (*AnalysisResult, string, error) {
 			SecurityIssues: json.RawMessage("[]"),
 			PerfIssues:     json.RawMessage("[]"),
 			V6Report:       string(cleanJSON),
+			RawResponse:    rawContent,
 		}
 		return result, model, nil
 	}
 
-	// Fallback — JSON parse failed, return error with preview
+	// Fallback — JSON parse failed. Return the raw response so the caller can
+	// persist it for debugging, and surface a preview in the error message.
 	preview := content
 	if len(preview) > 200 {
 		preview = preview[:200]
 	}
-	return nil, model, fmt.Errorf("AI返回内容无法解析为报告格式，内容预览: %s", preview)
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	return &AnalysisResult{RawResponse: rawContent}, model,
+		fmt.Errorf("AI返回内容无法解析为报告格式，内容预览: %s", preview)
 }
 
 func extractJSON(s string) string {

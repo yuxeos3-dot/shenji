@@ -127,7 +127,7 @@ func main() {
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "8088"
 	}
 
 	log.Printf("SEO巡站系统启动，端口: %s", port)
