@@ -182,7 +182,6 @@ async function loadData() {
       url_static: s.url_static || '',
     }
     // Load schedule settings
-    const s = siteRes.data
     schedEnabled.value = s.audit_schedule_enabled === 'true'
     if (s.audit_interval_hours > 0) {
       schedMode.value = 'interval'
