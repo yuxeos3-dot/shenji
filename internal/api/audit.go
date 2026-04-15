@@ -81,7 +81,42 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 	}
 	updateProgress(45)
 
-	// Step 2: Fetch site_pages (user-managed pages with pre-fetched HTML)
+	// Step 2: Auto re-fetch all site_pages to ensure fresh HTML
+	updateProgress(40)
+	log.Printf("开始自动抓取站点[%s]的所有监控页面源码...", siteID)
+	pageRows, err := db.DB.Query(
+		"SELECT id, name, url FROM site_pages WHERE site_id = ?", siteID,
+	)
+	if err == nil {
+		type pageInfo struct {
+			id   int64
+			name string
+			url  string
+		}
+		var pageList []pageInfo
+		for pageRows.Next() {
+			var p pageInfo
+			if err := pageRows.Scan(&p.id, &p.name, &p.url); err == nil {
+				pageList = append(pageList, p)
+			}
+		}
+		pageRows.Close()
+
+		for i, p := range pageList {
+			result := crawler.FetchPage(crawler.URLSpec{PageType: p.name, URL: p.url}, 30*time.Second)
+			now := time.Now().Format("2006-01-02 15:04:05")
+			db.DB.Exec(`UPDATE site_pages SET last_html=?, last_fetched_at=?, status_code=?, ttfb_ms=? WHERE id=?`,
+				result.HTML, now, result.StatusCode, result.TTFB, p.id)
+			progress := 40 + (i+1)*10/max(len(pageList), 1)
+			if progress > 50 {
+				progress = 50
+			}
+			updateProgress(progress)
+		}
+		log.Printf("站点[%s]共抓取 %d 个页面", siteID, len(pageList))
+	}
+
+	// Step 3: Fetch site_pages (now freshly fetched above)
 	var sitePages []ai.SitePageForPrompt
 	rows, err := db.DB.Query(
 		"SELECT name, url, last_html, last_fetched_at, status_code, ttfb_ms FROM site_pages WHERE site_id = ? AND last_html != ''",
@@ -102,7 +137,7 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 	}
 	updateProgress(55)
 
-	// Step 3: Fetch analytics data
+	// Step 4: Fetch analytics data
 	var gscData *ai.GSCDataForPrompt
 	var gaData *ai.GADataForPrompt
 	var yandexData *ai.YandexDataForPrompt
@@ -324,4 +359,12 @@ func GetAuditPageByType(c *gin.Context) {
 		"ttfb_ms": ttfb, "html": html, "html_size": htmlSize,
 		"error_msg": errorMsg, "fetched_at": fetchedAt,
 	}})
+}
+
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

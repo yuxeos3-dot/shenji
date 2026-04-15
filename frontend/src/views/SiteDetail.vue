@@ -302,7 +302,7 @@ async function saveSchedule() {
 
 async function triggerAudit() {
   auditing.value = true
-  try { await api.triggerAudit(route.params.id); ElMessage.success('审计任务已启动'); loadData() } catch {} finally { auditing.value = false }
+  try { await api.triggerAudit(route.params.id); ElMessage.success('巡检已启动 — 将自动抓取最新源码后开始分析'); loadData() } catch {} finally { auditing.value = false }
 }
 
 onMounted(loadData)

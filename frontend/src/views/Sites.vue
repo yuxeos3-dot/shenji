@@ -191,7 +191,7 @@ async function deleteSite(row) {
   } catch {}
 }
 async function triggerAudit(row) {
-  try { const res = await api.triggerAudit(row.id); ElMessage.success(`巡检任务已启动（任务ID：${res.data.task_id}）`); loadSites() } catch {}
+  try { const res = await api.triggerAudit(row.id); ElMessage.success(`巡检已启动（任务ID：${res.data.task_id}）— 将自动抓取最新源码后开始分析`); loadSites() } catch {}
 }
 onMounted(loadSites)
 </script>
