@@ -58,14 +58,14 @@
             <span class="domain-text">{{ row.domain }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="120">
+        <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <span class="status-badge" :class="'status-' + row.status">
               {{ row.status === 'active' ? '🟢 启用' : '⚪ 停用' }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="last_audit_status" label="最近巡检" width="140">
+        <el-table-column prop="last_audit_status" label="最近巡检" width="120">
           <template #default="{ row }">
             <span v-if="row.last_audit_status" class="audit-badge" :class="'audit-' + row.last_audit_status">
               {{ auditLabel(row.last_audit_status) }}
@@ -73,12 +73,12 @@
             <span v-else class="no-audit">暂未巡检</span>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="添加时间" width="180">
+        <el-table-column prop="created_at" label="添加时间" width="160">
           <template #default="{ row }">
             <span class="date-text">{{ row.created_at }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="340" fixed="right">
+        <el-table-column label="操作" width="380" fixed="right">
           <template #default="{ row }">
             <div class="action-btns">
               <el-button class="btn-action btn-audit" size="small" @click="triggerAudit(row)">🔍 立即巡检</el-button>
