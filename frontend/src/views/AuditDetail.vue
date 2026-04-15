@@ -28,7 +28,7 @@
             <span style="font-size:13px;color:var(--ink-mid)">{{ task.finished_at || '—' }}</span>
           </div>
         </div>
-        <a v-if="task.status==='done'" :href="downloadUrl" class="btn btn-download" target="_blank">
+        <button v-if="task.status==='done'" class="btn btn-download" @click="downloadReport" :disabled="downloading">
           📥 下载 Word 报告
         </a>
       </div>
@@ -75,7 +75,7 @@
         <button :class="['filter-btn', 'sev-btn-serious', filterSev==='严重'&&'filter-active']" @click="filterSev='严重';page=1">严重 ({{ countBySev('严重') }})</button>
         <button :class="['filter-btn', 'sev-btn-medium', filterSev==='中等'&&'filter-active']" @click="filterSev='中等';page=1">中等 ({{ countBySev('中等') }})</button>
         <button :class="['filter-btn', 'sev-btn-low', filterSev==='低'&&'filter-active']" @click="filterSev='低';page=1">低 ({{ countBySev('低') }})</button>
-        <a v-if="task && task.status==='done'" :href="downloadUrl" class="btn-dl-inline" target="_blank">📥 下载报告</a>
+        <button v-if="task && task.status==='done'" class="btn-dl-inline" @click="downloadReport">📥 下载报告</button>
       </div>
 
       <!-- 问题卡片 -->
@@ -150,7 +150,29 @@ const page = ref(1)
 const PAGE_SIZE = 20
 let pollTimer = null
 
-const downloadUrl = computed(() => api.downloadAuditReport(route.params.taskId))
+const downloading = ref(false)
+
+async function downloadReport() {
+  downloading.value = true
+  try {
+    const token = localStorage.getItem('token')
+    const resp = await fetch(`/api/v1/audits/${route.params.taskId}/report/download`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    if (!resp.ok) { const d = await resp.json(); ElMessage.error(d.error || '下载失败'); return }
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    const el = document.createElement('a')
+    el.href = url
+    const disp = resp.headers.get('Content-Disposition') || ''
+    const match = disp.match(/filename="(.+)"/)
+    el.download = match ? match[1] : `SEO审计报告_${route.params.taskId}.docx`
+    document.body.appendChild(el); el.click(); document.body.removeChild(el)
+    URL.revokeObjectURL(url)
+    ElMessage.success('报告下载成功')
+  } catch (e) { ElMessage.error('下载失败：' + e.message) }
+  finally { downloading.value = false }
+}
 
 function severityClass(sev) {
   if (sev === '致命') return 'fatal'

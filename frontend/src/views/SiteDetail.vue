@@ -107,7 +107,9 @@
             <td style="font-size:12px;color:var(--ink-soft)">{{ a.finished_at || '—' }}</td>
             <td style="display:flex;gap:6px;align-items:center">
               <button class="btn btn-xs" @click="$router.push(`/sites/${$route.params.id}/audit/${a.id}`)">查看详情</button>
-              <a v-if="a.status==='done'" :href="`/api/v1/audits/${a.id}/report/download`" target="_blank" class="btn btn-xs btn-dl">📥 下载报告</a>
+              <button v-if="a.status==='done'" class="btn btn-xs btn-dl" @click="downloadReport(a.id)" :disabled="a.downloading">
+                {{ a.downloading ? '生成中...' : '📥 下载报告' }}
+              </button>
               <button class="btn btn-xs btn-del-audit" @click="deleteAudit(a)" :disabled="a.status==='running'">🗑️</button>
             </td>
           </tr>
@@ -210,7 +212,7 @@ async function loadData() {
       api.listSitePages(route.params.id).catch(() => ({ data: [] })),
     ])
     site.value = siteRes.data
-    audits.value = auditsRes.data
+    audits.value = auditsRes.data.map(a => ({ ...a, downloading: false }))
     sitePages.value = (pagesRes.data || []).map(p => ({ ...p, fetching: false }))
     // Load schedule settings
     const s = siteRes.data
@@ -234,6 +236,27 @@ const pollTimer = ref(null)
 onMounted(loadData)
 onUnmounted(() => { if (pollTimer.value) clearTimeout(pollTimer.value) })
 watch(() => route.params.id, () => { if (route.params.id) { if (pollTimer.value) clearTimeout(pollTimer.value); loadData() } })
+
+async function downloadReport(taskId) {
+  const audit = audits.value.find(a => a.id === taskId)
+  if (audit) audit.downloading = true
+  try {
+    const token = localStorage.getItem('token')
+    const resp = await fetch(`/api/v1/audits/${taskId}/report/download`, { headers: { Authorization: `Bearer ${token}` } })
+    if (!resp.ok) { const data = await resp.json(); ElMessage.error(data.error || '下载失败'); return }
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    const el = document.createElement('a')
+    el.href = url
+    const disp = resp.headers.get('Content-Disposition') || ''
+    const match = disp.match(/filename="(.+)"/)
+    el.download = match ? match[1] : `SEO审计报告_${taskId}.docx`
+    document.body.appendChild(el); el.click(); document.body.removeChild(el)
+    URL.revokeObjectURL(url)
+    ElMessage.success('报告下载成功')
+  } catch (e) { ElMessage.error('下载失败：' + e.message) }
+  finally { if (audit) audit.downloading = false }
+}
 
 async function deleteAudit(a) {
   try {

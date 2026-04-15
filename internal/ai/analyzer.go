@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"seo-system/internal/crawler"
@@ -562,6 +563,21 @@ func min(a, b int) int {
 }
 
 func extractJSON(s string) string {
+	s = strings.TrimSpace(s)
+	// Strip markdown code blocks: ```json ... ``` or ``` ... ```
+	if strings.HasPrefix(s, "```") {
+		lines := strings.Split(s, "\n")
+		if len(lines) >= 2 {
+			inner := strings.Join(lines[1:], "\n")
+			// Remove trailing ```
+			if idx := strings.LastIndex(inner, "```"); idx >= 0 {
+				inner = inner[:idx]
+			}
+			s = strings.TrimSpace(inner)
+		}
+	}
+
+	// Find first { and matching }
 	start := -1
 	end := -1
 	depth := 0
@@ -572,6 +588,25 @@ func extractJSON(s string) string {
 			}
 			depth++
 		} else if c == '}' {
+			depth--
+			if depth == 0 {
+				end = i + 1
+				break
+			}
+		}
+	}
+	if start >= 0 && end > start {
+		return s[start:end]
+	}
+	// Try array [...]
+	start, end, depth = -1, -1, 0
+	for i, c := range s {
+		if c == '[' {
+			if start == -1 {
+				start = i
+			}
+			depth++
+		} else if c == ']' {
 			depth--
 			if depth == 0 {
 				end = i + 1
