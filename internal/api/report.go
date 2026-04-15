@@ -43,10 +43,27 @@ func DownloadAuditReport(c *gin.Context) {
 		return
 	}
 
+	// Strip markdown code blocks if present
+	v6Report = strings.TrimSpace(v6Report)
+	if strings.HasPrefix(v6Report, "```") {
+		lines := strings.Split(v6Report, "\n")
+		if len(lines) > 2 {
+			inner := strings.Join(lines[1:], "\n")
+			if idx := strings.LastIndex(inner, "```"); idx >= 0 {
+				inner = inner[:idx]
+			}
+			v6Report = strings.TrimSpace(inner)
+		}
+	}
+	// Find JSON start
+	if start := strings.Index(v6Report, "{"); start > 0 {
+		v6Report = v6Report[start:]
+	}
+
 	// Validate JSON
 	var reportData map[string]interface{}
 	if err := json.Unmarshal([]byte(v6Report), &reportData); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "报告数据格式异常"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "报告数据格式异常，请重新运行巡检"})
 		return
 	}
 

@@ -3,7 +3,7 @@
     <div class="back-row">
       <a href="#" @click.prevent="$router.push(`/sites/${$route.params.id}`)" class="back-btn">← 返回站点</a>
       <span class="back-sep">·</span>
-      <span class="back-url">审计 #{{ $route.params.taskId }}</span>
+      <span class="back-url">审计 {{ $route.params.taskId }}</span>
     </div>
 
     <!-- 任务状态卡片 -->
@@ -128,10 +128,10 @@
       <div class="running-note">{{ task.progress }}%　完成后将自动显示完整报告</div>
     </div>
 
-    <!-- 旧版报告降级 -->
+    <!-- 已完成但报告解析失败 -->
     <div v-else-if="result && task && task.status==='done' && !v6Report" class="panel">
-      <div v-if="result.summary" class="summary-bar">💡 {{ result.summary }}</div>
-      <div v-if="result.suggestions" class="suggestions-box">{{ result.suggestions }}</div>
+      <div class="summary-bar">⚠️ 报告数据需要重新生成，请点击「立即巡检」重新审计以获取完整报告格式。</div>
+      <div v-if="result.summary && !result.summary.startsWith('{')" class="suggestions-box">{{ result.summary }}</div>
     </div>
   </div>
 </template>
@@ -224,7 +224,27 @@ async function loadData() {
     task.value = res.data.task
     result.value = res.data.result
     if (res.data.result?.v6_report) {
-      try { v6Report.value = JSON.parse(res.data.result.v6_report) } catch {}
+      try {
+        let raw = res.data.result.v6_report
+        // Strip markdown code blocks
+        raw = raw.trim()
+        if (raw.startsWith('```')) {
+          const lines = raw.split('\n')
+          raw = lines.slice(1).join('\n')
+          const lastTick = raw.lastIndexOf('```')
+          if (lastTick >= 0) raw = raw.substring(0, lastTick)
+          raw = raw.trim()
+        }
+        // Find JSON object start
+        const start = raw.indexOf('{')
+        if (start >= 0) raw = raw.substring(start)
+        const parsed = JSON.parse(raw)
+        if (parsed.chapters && parsed.chapters.length > 0) {
+          v6Report.value = parsed
+        }
+      } catch (e) {
+        console.warn('v6_report parse error:', e)
+      }
     }
     if (task.value.status === 'running' || task.value.status === 'pending') {
       pollTimer = setTimeout(loadData, 3000)
