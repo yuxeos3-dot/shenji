@@ -59,6 +59,7 @@ export default {
   listAudits: (siteId) => api.get(`/v1/sites/${siteId}/audits`),
   getAudit: (taskId) => api.get(`/v1/audits/${taskId}`),
   getAuditPages: (taskId) => api.get(`/v1/audits/${taskId}/pages`),
+  downloadAuditReport: (taskId) => `/api/v1/audits/${taskId}/report/download`,
 
   // Site Pages
   listSitePages: (siteId) => api.get(`/v1/sites/${siteId}/pages`),

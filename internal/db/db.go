@@ -217,6 +217,7 @@ func Init() {
 			ttfb_ms INTEGER DEFAULT 0,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
+		"ALTER TABLE audit_results ADD COLUMN v6_report TEXT DEFAULT ''",
 	}
 	for _, m := range migrations {
 		DB.Exec(m) // ignore errors (column already exists)

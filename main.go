@@ -65,6 +65,7 @@ func main() {
 		v1.GET("/audits/:task_id", api.GetAudit)
 		v1.GET("/audits/:task_id/pages", api.GetAuditPages)
 		v1.GET("/audits/:task_id/pages/:type", api.GetAuditPageByType)
+		v1.GET("/audits/:task_id/report/download", api.DownloadAuditReport)
 
 		// Site Pages (custom pages management)
 		v1.GET("/sites/:id/pages", api.ListSitePages)

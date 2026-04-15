@@ -67,34 +67,53 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 		db.DB.Exec("UPDATE audit_tasks SET progress=? WHERE id=?", progress, taskID)
 	}
 
-	// Step 1: Crawl all pages
+	// Step 1: Crawl standard pages
 	updateProgress(10)
-	pages := crawler.CrawlAllPages(site)
-	updateProgress(40)
+	crawlPages := crawler.CrawlAllPages(site)
+	updateProgress(35)
 
 	// Save crawled pages
-	for _, p := range pages {
+	for _, p := range crawlPages {
 		db.DB.Exec(
 			"INSERT INTO audit_pages (task_id, page_type, url, status_code, ttfb_ms, html, html_size, error_msg) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 			taskID, p.PageType, p.URL, p.StatusCode, p.TTFB, p.HTML, p.HTMLSize, p.Error,
 		)
 	}
-	updateProgress(50)
+	updateProgress(45)
 
-	// Step 2: Fetch GSC/GA/Yandex data
+	// Step 2: Fetch site_pages (user-managed pages with pre-fetched HTML)
+	var sitePages []ai.SitePageForPrompt
+	rows, err := db.DB.Query(
+		"SELECT name, url, last_html, last_fetched_at, status_code, ttfb_ms FROM site_pages WHERE site_id = ? AND last_html != ''",
+		siteID,
+	)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var p ai.SitePageForPrompt
+			var fetchedAt *string
+			if err := rows.Scan(&p.Name, &p.URL, &p.HTML, &fetchedAt, &p.StatusCode, &p.TTFB); err == nil {
+				if fetchedAt != nil {
+					p.LastFetchedAt = *fetchedAt
+				}
+				sitePages = append(sitePages, p)
+			}
+		}
+	}
+	updateProgress(55)
+
+	// Step 3: Fetch analytics data
 	var gscData *ai.GSCDataForPrompt
 	var gaData *ai.GADataForPrompt
 	var yandexData *ai.YandexDataForPrompt
 
-	// Try to get latest data from database
 	var gscClicks, gscImpressions int
 	var gscCTR, gscPosition float64
 	var gscKeywords, gscPages string
-	err := db.DB.QueryRow(
+	if err := db.DB.QueryRow(
 		"SELECT clicks, impressions, ctr, position, keywords_json, pages_json FROM gsc_data WHERE site_id = ? ORDER BY date DESC LIMIT 1",
 		siteID,
-	).Scan(&gscClicks, &gscImpressions, &gscCTR, &gscPosition, &gscKeywords, &gscPages)
-	if err == nil {
+	).Scan(&gscClicks, &gscImpressions, &gscCTR, &gscPosition, &gscKeywords, &gscPages); err == nil {
 		gscData = &ai.GSCDataForPrompt{
 			Clicks: gscClicks, Impressions: gscImpressions,
 			CTR: gscCTR, Position: gscPosition,
@@ -104,11 +123,10 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 
 	var gaSessions, gaUsers, gaPageviews int
 	var gaChannels string
-	err = db.DB.QueryRow(
+	if err := db.DB.QueryRow(
 		"SELECT sessions, users, pageviews, channels_json FROM ga_data WHERE site_id = ? ORDER BY date DESC LIMIT 1",
 		siteID,
-	).Scan(&gaSessions, &gaUsers, &gaPageviews, &gaChannels)
-	if err == nil {
+	).Scan(&gaSessions, &gaUsers, &gaPageviews, &gaChannels); err == nil {
 		gaData = &ai.GADataForPrompt{
 			Sessions: gaSessions, Users: gaUsers, Pageviews: gaPageviews, Channels: gaChannels,
 		}
@@ -116,19 +134,18 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 
 	var yandexIndexCount int
 	var yandexErrors string
-	err = db.DB.QueryRow(
+	if err := db.DB.QueryRow(
 		"SELECT index_count, errors_json FROM yandex_data WHERE site_id = ? ORDER BY date DESC LIMIT 1",
 		siteID,
-	).Scan(&yandexIndexCount, &yandexErrors)
-	if err == nil {
+	).Scan(&yandexIndexCount, &yandexErrors); err == nil {
 		yandexData = &ai.YandexDataForPrompt{IndexCount: yandexIndexCount, Errors: yandexErrors}
 	}
 
 	updateProgress(60)
 
-	// Step 3: Build prompt and call AI
-	prompt := ai.BuildAnalysisPrompt(site.Domain, pages, gscData, gaData, yandexData)
-	updateProgress(70)
+	// Step 4: Build v6 prompt and call AI
+	prompt := ai.BuildV6AuditPrompt(site.Domain, sitePages, crawlPages, gscData, gaData, yandexData)
+	updateProgress(65)
 
 	analysisResult, model, err := ai.CallAI(prompt)
 	if err != nil {
@@ -139,22 +156,20 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 	}
 	updateProgress(90)
 
-	// Step 4: Save results
+	// Step 5: Save results (including v6_report)
 	seoJSON, _ := json.Marshal(analysisResult.SEOIssues)
 	codeJSON, _ := json.Marshal(analysisResult.CodeIssues)
 	secJSON, _ := json.Marshal(analysisResult.SecurityIssues)
 	perfJSON, _ := json.Marshal(analysisResult.PerfIssues)
 
 	db.DB.Exec(
-		`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, v6_report)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		taskID, string(seoJSON), string(codeJSON), string(secJSON), string(perfJSON),
-		analysisResult.Suggestions, analysisResult.Summary, model,
+		analysisResult.Suggestions, analysisResult.Summary, model, analysisResult.V6Report,
 	)
 
 	db.DB.Exec("UPDATE audit_tasks SET status='done', progress=100, finished_at=? WHERE id=?", time.Now(), taskID)
-
-	// Step 5: Send Telegram notification
 	telegram.SendNotification("审计完成", siteName+" 审计完成: "+analysisResult.Summary)
 }
 
@@ -227,11 +242,11 @@ func GetAudit(c *gin.Context) {
 	}
 
 	// Get results if exists
-	var seoIssues, codeIssues, secIssues, perfIssues, suggestions, summary, aiModel string
+	var seoIssues, codeIssues, secIssues, perfIssues, suggestions, summary, aiModel, v6Report string
 	err = db.DB.QueryRow(
-		"SELECT seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model FROM audit_results WHERE task_id = ?",
+		"SELECT seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, COALESCE(v6_report,'') FROM audit_results WHERE task_id = ?",
 		taskID,
-	).Scan(&seoIssues, &codeIssues, &secIssues, &perfIssues, &suggestions, &summary, &aiModel)
+	).Scan(&seoIssues, &codeIssues, &secIssues, &perfIssues, &suggestions, &summary, &aiModel, &v6Report)
 
 	var resultData interface{}
 	if err == nil {
@@ -243,6 +258,7 @@ func GetAudit(c *gin.Context) {
 			"suggestions":     suggestions,
 			"summary":         summary,
 			"ai_model":        aiModel,
+			"v6_report":       v6Report,
 		}
 	}
 
