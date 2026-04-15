@@ -107,32 +107,6 @@
         <el-form-item label="站点名称">
           <el-input v-model="form.name" placeholder="我的网站" />
         </el-form-item>
-
-        <div class="form-section-title">Yandex 配置 <span class="optional-tag">可选</span></div>
-        <el-form-item label="Yandex 主机ID">
-          <el-input v-model="form.yandex_host_id" placeholder="Yandex Webmaster 中的 Host ID" />
-        </el-form-item>
-
-        <div class="form-section-title">页面 URL 配置 <span class="optional-tag">可选</span></div>
-        <div class="url-tip">填写各页面类型的示例 URL，用于巡检时抓取和分析</div>
-        <el-form-item label="分类页">
-          <el-input v-model="form.url_category" placeholder="/category/movies" />
-        </el-form-item>
-        <el-form-item label="详情页">
-          <el-input v-model="form.url_detail" placeholder="/movie/123" />
-        </el-form-item>
-        <el-form-item label="新闻列表页">
-          <el-input v-model="form.url_news_list" placeholder="/news" />
-        </el-form-item>
-        <el-form-item label="新闻详情页">
-          <el-input v-model="form.url_news_detail" placeholder="/news/123" />
-        </el-form-item>
-        <el-form-item label="搜索页">
-          <el-input v-model="form.url_search" placeholder="/search?q=test" />
-        </el-form-item>
-        <el-form-item label="静态页">
-          <el-input v-model="form.url_static" placeholder="/about" />
-        </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">

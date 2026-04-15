@@ -10,16 +10,59 @@
       <div class="panel-header">
         <h2>📋 站点信息</h2>
         <button class="btn btn-primary" @click="triggerAudit" :disabled="auditing">
-          {{ auditing ? '审计中...' : '🔍 立即审计' }}
+          {{ auditing ? '巡检中...' : '🔍 立即巡检' }}
         </button>
       </div>
       <div class="info-grid">
         <div class="info-item"><span class="info-label">域名</span><span class="info-val">{{ site.domain }}</span></div>
         <div class="info-item"><span class="info-label">名称</span><span class="info-val">{{ site.name }}</span></div>
-        <div class="info-item"><span class="info-label">GSC 站点地址</span><span class="info-val">{{ site.gsc_site_url || '—' }}</span></div>
-        <div class="info-item"><span class="info-label">GA 媒体资源ID</span><span class="info-val">{{ site.ga_property_id || '—' }}</span></div>
-        <div class="info-item"><span class="info-label">Yandex 主机ID</span><span class="info-val">{{ site.yandex_host_id || '—' }}</span></div>
-        <div class="info-item"><span class="info-label">状态</span><span class="info-val"><span class="badge badge-ok">{{ site.status }}</span></span></div>
+        <div class="info-item"><span class="info-label">状态</span><span class="info-val"><span class="badge badge-ok">{{ site.status === 'active' ? '启用' : '停用' }}</span></span></div>
+      </div>
+    </div>
+
+    <!-- 站点详细配置 -->
+    <div class="panel" style="margin-bottom:18px">
+      <div class="panel-header">
+        <h2>⚙️ 站点配置</h2>
+        <button class="btn btn-primary btn-sm" @click="saveSiteConfig" :disabled="savingConfig">{{ savingConfig ? '保存中...' : '💾 保存配置' }}</button>
+      </div>
+
+      <div class="config-section-title">数据平台配置</div>
+      <div class="config-grid">
+        <div class="config-field">
+          <label class="config-label">Yandex 主机ID</label>
+          <input class="config-input" v-model="editForm.yandex_host_id" placeholder="Yandex Webmaster 中的 Host ID" />
+        </div>
+      </div>
+
+      <div class="config-section-title" style="margin-top:18px">页面 URL 配置
+        <span class="config-tip">填写各页面类型的示例 URL，巡检时用于抓取分析</span>
+      </div>
+      <div class="config-grid">
+        <div class="config-field">
+          <label class="config-label">分类页</label>
+          <input class="config-input" v-model="editForm.url_category" placeholder="/category/movies" />
+        </div>
+        <div class="config-field">
+          <label class="config-label">详情页</label>
+          <input class="config-input" v-model="editForm.url_detail" placeholder="/movie/123" />
+        </div>
+        <div class="config-field">
+          <label class="config-label">新闻列表页</label>
+          <input class="config-input" v-model="editForm.url_news_list" placeholder="/news" />
+        </div>
+        <div class="config-field">
+          <label class="config-label">新闻详情页</label>
+          <input class="config-input" v-model="editForm.url_news_detail" placeholder="/news/123" />
+        </div>
+        <div class="config-field">
+          <label class="config-label">搜索页</label>
+          <input class="config-input" v-model="editForm.url_search" placeholder="/search?q=test" />
+        </div>
+        <div class="config-field">
+          <label class="config-label">静态页</label>
+          <input class="config-input" v-model="editForm.url_static" placeholder="/about" />
+        </div>
       </div>
     </div>
 
@@ -109,6 +152,11 @@ const route = useRoute()
 const site = ref({})
 const audits = ref([])
 const auditing = ref(false)
+const savingConfig = ref(false)
+const editForm = ref({
+  yandex_host_id: '', url_category: '', url_detail: '',
+  url_news_list: '', url_news_detail: '', url_search: '', url_static: ''
+})
 
 // Per-site schedule
 const schedEnabled = ref(false)
@@ -122,6 +170,17 @@ async function loadData() {
     const [siteRes, auditsRes] = await Promise.all([api.getSite(route.params.id), api.listAudits(route.params.id)])
     site.value = siteRes.data
     audits.value = auditsRes.data
+    // Populate edit form
+    const s = siteRes.data
+    editForm.value = {
+      yandex_host_id: s.yandex_host_id || '',
+      url_category: s.url_category || '',
+      url_detail: s.url_detail || '',
+      url_news_list: s.url_news_list || '',
+      url_news_detail: s.url_news_detail || '',
+      url_search: s.url_search || '',
+      url_static: s.url_static || '',
+    }
     // Load schedule settings
     const s = siteRes.data
     schedEnabled.value = s.audit_schedule_enabled === 'true'
@@ -133,6 +192,16 @@ async function loadData() {
       dailyHour.value = s.audit_daily_hour >= 0 ? s.audit_daily_hour : 9
     }
   } catch {}
+}
+
+async function saveSiteConfig() {
+  savingConfig.value = true
+  try {
+    await api.updateSite(route.params.id, { ...site.value, ...editForm.value })
+    ElMessage.success('站点配置已保存')
+    loadData()
+  } catch {}
+  finally { savingConfig.value = false }
 }
 
 async function saveSchedule() {
@@ -198,6 +267,16 @@ watch(() => route.params.id, () => { if (route.params.id) loadData() })
 .progress-bar { display:inline-block; width:80px; height:6px; background:var(--border-light); border-radius:3px; overflow:hidden; vertical-align:middle; margin-right:6px; }
 .progress-fill { height:100%; background:linear-gradient(135deg,var(--sun),var(--coral)); border-radius:3px; transition:width .3s; }
 .progress-text { font-size:11px; font-weight:700; color:var(--ink-soft); }
+
+/* ── 站点配置面板 ── */
+.config-section-title { font-size:12px; font-weight:800; letter-spacing:.06em; color:var(--sun-deep); margin-bottom:12px; padding-bottom:8px; border-bottom:2px solid var(--sun-glow); display:flex; align-items:center; gap:10px; }
+.config-tip { font-size:11.5px; font-weight:500; color:var(--ink-soft); letter-spacing:0; }
+.config-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
+.config-field { display:flex; flex-direction:column; gap:6px; }
+.config-label { font-size:12.5px; font-weight:600; color:var(--ink-mid); }
+.config-input { width:100%; padding:9px 12px; border:1.5px solid var(--border); border-radius:var(--r-sm); font-size:13.5px; font-family:inherit; background:var(--surface); color:var(--ink); outline:none; transition:border-color .18s, box-shadow .18s; }
+.config-input:focus { border-color:var(--sun); box-shadow:0 0 0 3px rgba(249,115,22,.12); background:#FFFDF9; }
+.btn-sm { padding:6px 14px !important; font-size:12.5px !important; }
 
 /* ── 站点独立巡检计划 ── */
 .schedule-desc { font-size:13px; color:var(--ink-soft); line-height:1.6; margin-bottom:18px; padding:12px 14px; background:var(--warn-bg); border:1px solid var(--warn-border); border-radius:var(--r-sm); }
