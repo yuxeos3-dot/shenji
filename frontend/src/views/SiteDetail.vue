@@ -31,7 +31,12 @@
     <div class="panel" style="margin-bottom:18px">
       <div class="panel-header">
         <h2>📄 页面管理</h2>
-        <button class="btn btn-primary btn-sm" @click="showAddPage=true">＋ 添加页面</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm btn-fetch-all" @click="fetchAllPages" :disabled="fetchingAll">
+            {{ fetchingAll ? '抓取中...' : '⚡ 一键抓取全部' }}
+          </button>
+          <button class="btn btn-primary btn-sm" @click="showAddPage=true">＋ 添加页面</button>
+        </div>
       </div>
       <div class="page-tip">添加需要监控的页面，支持实时抓取 HTML 源码查看</div>
 
@@ -184,6 +189,7 @@ const addingPage = ref(false)
 const newPage = ref({ name: '', url: '' })
 const showSource = ref(false)
 const sourceData = ref({})
+const fetchingAll = ref(false)
 
 // Per-site schedule
 const schedEnabled = ref(false)
@@ -213,6 +219,24 @@ async function loadData() {
       dailyHour.value = s.audit_daily_hour >= 0 ? s.audit_daily_hour : 9
     }
   } catch {}
+}
+
+async function fetchAllPages() {
+  if (!sitePages.value.length) { ElMessage.warning('暂无页面，请先添加'); return }
+  fetchingAll.value = true
+  ElMessage.info(`开始抓取 ${sitePages.value.length} 个页面...`)
+  let ok = 0, fail = 0
+  for (const p of sitePages.value) {
+    p.fetching = true
+    try {
+      await api.fetchSitePage(route.params.id, p.id)
+      ok++
+    } catch { fail++ }
+    finally { p.fetching = false }
+  }
+  fetchingAll.value = false
+  ElMessage.success(`抓取完成：成功 ${ok} 个${fail ? `，失败 ${fail} 个` : ''}`)
+  loadData()
 }
 
 async function addPage() {
@@ -348,6 +372,9 @@ watch(() => route.params.id, () => { if (route.params.id) loadData() })
 .page-time { font-size:11.5px; color:var(--ink-hint); }
 .page-no-fetch { font-size:12px; color:var(--ink-hint); }
 .page-actions { display:flex; gap:6px; flex-shrink:0; }
+.btn-fetch-all { background:linear-gradient(135deg,#F59E0B,#F97316) !important; color:#fff !important; border-color:transparent !important; box-shadow:0 4px 14px rgba(245,158,11,.4) !important; }
+.btn-fetch-all:hover { filter:brightness(1.08); transform:translateY(-1px); }
+.btn-fetch-all:disabled { opacity:.6; cursor:not-allowed; transform:none; }
 .btn-fetch { background:var(--sun-light) !important; border-color:var(--peach) !important; color:var(--sun-deep) !important; }
 .btn-fetch:hover { background:linear-gradient(135deg,var(--sun),var(--coral)) !important; color:#fff !important; }
 .btn-fetch:disabled { opacity:.6; cursor:not-allowed; }
