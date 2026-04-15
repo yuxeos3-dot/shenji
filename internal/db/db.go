@@ -133,6 +133,19 @@ CREATE TABLE IF NOT EXISTS yandex_data (
     UNIQUE(site_id, date)
 );
 
+-- 站点自定义页面表
+CREATE TABLE IF NOT EXISTS site_pages (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id        INTEGER NOT NULL REFERENCES sites(id),
+    name           TEXT NOT NULL,
+    url            TEXT NOT NULL,
+    last_html      TEXT DEFAULT '',
+    last_fetched_at DATETIME,
+    status_code    INTEGER DEFAULT 0,
+    ttfb_ms        INTEGER DEFAULT 0,
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 每日汇报表
 CREATE TABLE IF NOT EXISTS daily_reports (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -192,6 +205,18 @@ func Init() {
 		"ALTER TABLE sites ADD COLUMN audit_schedule_enabled TEXT DEFAULT 'false'",
 		"ALTER TABLE sites ADD COLUMN audit_interval_hours INTEGER DEFAULT 0",
 		"ALTER TABLE sites ADD COLUMN audit_daily_hour INTEGER DEFAULT -1",
+		"ALTER TABLE sites ADD COLUMN url_pages_json TEXT DEFAULT '[]'",
+		`CREATE TABLE IF NOT EXISTS site_pages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			site_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			url TEXT NOT NULL,
+			last_html TEXT DEFAULT '',
+			last_fetched_at DATETIME,
+			status_code INTEGER DEFAULT 0,
+			ttfb_ms INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
 	}
 	for _, m := range migrations {
 		DB.Exec(m) // ignore errors (column already exists)

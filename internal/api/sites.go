@@ -20,6 +20,7 @@ type CreateSiteRequest struct {
 	URLNewsDetail         string `json:"url_news_detail"`
 	URLSearch             string `json:"url_search"`
 	URLStatic             string `json:"url_static"`
+	URLPagesJSON          string `json:"url_pages_json"`
 	AuditScheduleEnabled  string `json:"audit_schedule_enabled"`
 	AuditIntervalHours    int    `json:"audit_interval_hours"`
 	AuditDailyHour        int    `json:"audit_daily_hour"`
@@ -84,11 +85,11 @@ func CreateSite(c *gin.Context) {
 	result, err := db.DB.Exec(
 		`INSERT INTO sites (domain, name, gsc_site_url, ga_property_id, yandex_host_id,
 		 url_category, url_detail, url_news_list, url_news_detail, url_search, url_static,
-		 audit_schedule_enabled, audit_interval_hours, audit_daily_hour, created_by)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 url_pages_json, audit_schedule_enabled, audit_interval_hours, audit_daily_hour, created_by)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		req.Domain, req.Name, req.GscSiteURL, req.GaPropertyID, req.YandexHostID,
 		req.URLCategory, req.URLDetail, req.URLNewsList, req.URLNewsDetail, req.URLSearch, req.URLStatic,
-		req.AuditScheduleEnabled, req.AuditIntervalHours, req.AuditDailyHour, userID,
+		req.URLPagesJSON, req.AuditScheduleEnabled, req.AuditIntervalHours, req.AuditDailyHour, userID,
 	)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "创建失败，域名可能已存在"})

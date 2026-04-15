@@ -66,6 +66,13 @@ func main() {
 		v1.GET("/audits/:task_id/pages", api.GetAuditPages)
 		v1.GET("/audits/:task_id/pages/:type", api.GetAuditPageByType)
 
+		// Site Pages (custom pages management)
+		v1.GET("/sites/:id/pages", api.ListSitePages)
+		v1.POST("/sites/:id/pages", api.CreateSitePage)
+		v1.DELETE("/sites/:id/pages/:page_id", api.DeleteSitePage)
+		v1.POST("/sites/:id/pages/:page_id/fetch", api.FetchSitePage)
+		v1.GET("/sites/:id/pages/:page_id/source", api.GetSitePageSource)
+
 		// GSC
 		v1.GET("/oauth/gsc", api.GetGSCAuthURL)
 		v1.GET("/oauth/gsc/callback", api.GSCCallback)

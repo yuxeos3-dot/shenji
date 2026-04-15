@@ -20,51 +20,67 @@
       </div>
     </div>
 
-    <!-- 站点详细配置 -->
+    <!-- 页面管理 -->
     <div class="panel" style="margin-bottom:18px">
       <div class="panel-header">
-        <h2>⚙️ 站点配置</h2>
-        <button class="btn btn-primary btn-sm" @click="saveSiteConfig" :disabled="savingConfig">{{ savingConfig ? '保存中...' : '💾 保存配置' }}</button>
+        <h2>📄 页面管理</h2>
+        <button class="btn btn-primary btn-sm" @click="showAddPage=true">＋ 添加页面</button>
+      </div>
+      <div class="page-tip">添加需要监控的页面，支持实时抓取 HTML 源码查看</div>
+
+      <!-- 添加页面表单 -->
+      <div class="add-page-form" v-if="showAddPage">
+        <input class="config-input" v-model="newPage.name" placeholder="页面名称（如：首页、详情页）" style="width:180px" />
+        <input class="config-input" v-model="newPage.url" placeholder="完整 URL（https://example.com/page）" style="flex:1" />
+        <button class="btn btn-primary btn-sm" @click="addPage" :disabled="addingPage">{{ addingPage ? '添加中...' : '确认添加' }}</button>
+        <button class="btn btn-sm" @click="showAddPage=false;newPage={name:'',url:''}">取消</button>
       </div>
 
-      <div class="config-section-title">数据平台配置</div>
-      <div class="config-grid">
-        <div class="config-field">
-          <label class="config-label">Yandex 主机ID</label>
-          <input class="config-input" v-model="editForm.yandex_host_id" placeholder="Yandex Webmaster 中的 Host ID" />
+      <!-- 页面列表 -->
+      <div v-if="sitePages.length" class="pages-list">
+        <div class="page-row" v-for="p in sitePages" :key="p.id">
+          <div class="page-info">
+            <span class="page-name">{{ p.name }}</span>
+            <a :href="p.url" target="_blank" class="page-url">{{ p.url }}</a>
+          </div>
+          <div class="page-meta" v-if="p.last_fetched_at">
+            <span :class="['page-status', p.status_code===200?'status-ok':'status-err']">{{ p.status_code }}</span>
+            <span class="page-ttfb">{{ p.ttfb_ms }}ms</span>
+            <span class="page-time">🕐 {{ p.last_fetched_at }}</span>
+          </div>
+          <div class="page-meta" v-else>
+            <span class="page-no-fetch">尚未抓取</span>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-sm btn-fetch" @click="fetchPage(p)" :disabled="p.fetching">
+              {{ p.fetching ? '抓取中...' : '⚡ 实时抓取' }}
+            </button>
+            <button class="btn btn-sm btn-source" @click="viewSource(p)" :disabled="!p.last_fetched_at">
+              🔍 源码查询
+            </button>
+            <button class="btn btn-sm btn-del-page" @click="deletePage(p)">🗑️</button>
+          </div>
         </div>
       </div>
-
-      <div class="config-section-title" style="margin-top:18px">页面 URL 配置
-        <span class="config-tip">填写各页面类型的示例 URL，巡检时用于抓取分析</span>
-      </div>
-      <div class="config-grid">
-        <div class="config-field">
-          <label class="config-label">分类页</label>
-          <input class="config-input" v-model="editForm.url_category" placeholder="/category/movies" />
-        </div>
-        <div class="config-field">
-          <label class="config-label">详情页</label>
-          <input class="config-input" v-model="editForm.url_detail" placeholder="/movie/123" />
-        </div>
-        <div class="config-field">
-          <label class="config-label">新闻列表页</label>
-          <input class="config-input" v-model="editForm.url_news_list" placeholder="/news" />
-        </div>
-        <div class="config-field">
-          <label class="config-label">新闻详情页</label>
-          <input class="config-input" v-model="editForm.url_news_detail" placeholder="/news/123" />
-        </div>
-        <div class="config-field">
-          <label class="config-label">搜索页</label>
-          <input class="config-input" v-model="editForm.url_search" placeholder="/search?q=test" />
-        </div>
-        <div class="config-field">
-          <label class="config-label">静态页</label>
-          <input class="config-input" v-model="editForm.url_static" placeholder="/about" />
-        </div>
-      </div>
+      <div v-else class="pages-empty">暂无页面，点击「添加页面」开始监控</div>
     </div>
+
+    <!-- 源码查看弹窗 -->
+    <el-dialog v-model="showSource" :title="`源码查询 — ${sourceData.name}`" width="80%" class="source-dialog">
+      <div class="source-meta" v-if="sourceData.last_fetched_at">
+        <span class="source-badge">🕐 抓取时间：{{ sourceData.last_fetched_at }}</span>
+        <span class="source-badge">📡 URL：{{ sourceData.url }}</span>
+        <span :class="['source-badge', sourceData.status_code===200?'badge-ok-s':'badge-err-s']">
+          状态码：{{ sourceData.status_code }}
+        </span>
+        <span class="source-badge">⏱ 响应：{{ sourceData.ttfb_ms }}ms</span>
+      </div>
+      <pre class="source-code">{{ sourceData.html }}</pre>
+      <template #footer>
+        <button class="btn btn-sm" @click="copySource">📋 复制源码</button>
+        <button class="btn btn-primary btn-sm" @click="showSource=false">关 闭</button>
+      </template>
+    </el-dialog>
 
     <div class="panel">
       <div class="panel-header"><h2>📊 审计历史</h2></div>
@@ -153,10 +169,14 @@ const site = ref({})
 const audits = ref([])
 const auditing = ref(false)
 const savingConfig = ref(false)
-const editForm = ref({
-  yandex_host_id: '', url_category: '', url_detail: '',
-  url_news_list: '', url_news_detail: '', url_search: '', url_static: ''
-})
+
+// Page management
+const sitePages = ref([])
+const showAddPage = ref(false)
+const addingPage = ref(false)
+const newPage = ref({ name: '', url: '' })
+const showSource = ref(false)
+const sourceData = ref({})
 
 // Per-site schedule
 const schedEnabled = ref(false)
@@ -167,21 +187,16 @@ const savingSched = ref(false)
 
 async function loadData() {
   try {
-    const [siteRes, auditsRes] = await Promise.all([api.getSite(route.params.id), api.listAudits(route.params.id)])
+    const [siteRes, auditsRes, pagesRes] = await Promise.all([
+      api.getSite(route.params.id),
+      api.listAudits(route.params.id),
+      api.listSitePages(route.params.id).catch(() => ({ data: [] })),
+    ])
     site.value = siteRes.data
     audits.value = auditsRes.data
-    // Populate edit form
-    const s = siteRes.data
-    editForm.value = {
-      yandex_host_id: s.yandex_host_id || '',
-      url_category: s.url_category || '',
-      url_detail: s.url_detail || '',
-      url_news_list: s.url_news_list || '',
-      url_news_detail: s.url_news_detail || '',
-      url_search: s.url_search || '',
-      url_static: s.url_static || '',
-    }
+    sitePages.value = (pagesRes.data || []).map(p => ({ ...p, fetching: false }))
     // Load schedule settings
+    const s = siteRes.data
     schedEnabled.value = s.audit_schedule_enabled === 'true'
     if (s.audit_interval_hours > 0) {
       schedMode.value = 'interval'
@@ -193,14 +208,50 @@ async function loadData() {
   } catch {}
 }
 
-async function saveSiteConfig() {
-  savingConfig.value = true
+async function addPage() {
+  if (!newPage.value.name) { ElMessage.warning('请填写页面名称'); return }
+  if (!newPage.value.url || !newPage.value.url.startsWith('http')) {
+    ElMessage.warning('请填写完整 URL（以 http:// 或 https:// 开头）'); return
+  }
+  addingPage.value = true
   try {
-    await api.updateSite(route.params.id, { ...site.value, ...editForm.value })
-    ElMessage.success('站点配置已保存')
+    await api.createSitePage(route.params.id, newPage.value)
+    ElMessage.success('页面添加成功')
+    showAddPage.value = false
+    newPage.value = { name: '', url: '' }
     loadData()
   } catch {}
-  finally { savingConfig.value = false }
+  finally { addingPage.value = false }
+}
+
+async function deletePage(p) {
+  try {
+    await api.deleteSitePage(route.params.id, p.id)
+    ElMessage.success('已删除')
+    loadData()
+  } catch {}
+}
+
+async function fetchPage(p) {
+  p.fetching = true
+  try {
+    const res = await api.fetchSitePage(route.params.id, p.id)
+    ElMessage.success(`抓取完成，状态码：${res.data.status_code}，耗时：${res.data.ttfb_ms}ms`)
+    loadData()
+  } catch {}
+  finally { p.fetching = false }
+}
+
+async function viewSource(p) {
+  try {
+    const res = await api.getSitePageSource(route.params.id, p.id)
+    sourceData.value = res.data
+    showSource.value = true
+  } catch {}
+}
+
+function copySource() {
+  navigator.clipboard.writeText(sourceData.value.html || '').then(() => ElMessage.success('源码已复制'))
 }
 
 async function saveSchedule() {
@@ -266,6 +317,42 @@ watch(() => route.params.id, () => { if (route.params.id) loadData() })
 .progress-bar { display:inline-block; width:80px; height:6px; background:var(--border-light); border-radius:3px; overflow:hidden; vertical-align:middle; margin-right:6px; }
 .progress-fill { height:100%; background:linear-gradient(135deg,var(--sun),var(--coral)); border-radius:3px; transition:width .3s; }
 .progress-text { font-size:11px; font-weight:700; color:var(--ink-soft); }
+
+/* ── 页面管理 ── */
+.page-tip { font-size:12.5px; color:var(--ink-soft); margin-bottom:16px; }
+.add-page-form { display:flex; gap:10px; align-items:center; padding:14px 16px; background:var(--surface-3); border-radius:var(--r-sm); margin-bottom:16px; flex-wrap:wrap; }
+.pages-list { display:flex; flex-direction:column; gap:0; border:1.5px solid var(--border-light); border-radius:var(--r-sm); overflow:hidden; }
+.page-row { display:flex; align-items:center; gap:14px; padding:12px 16px; border-bottom:1px solid var(--border-light); flex-wrap:wrap; }
+.page-row:last-child { border-bottom:none; }
+.page-row:hover { background:var(--sun-light); }
+.page-info { display:flex; flex-direction:column; gap:3px; flex:1; min-width:200px; }
+.page-name { font-weight:700; font-size:14px; color:var(--ink); }
+.page-url { font-size:12px; color:var(--info); word-break:break-all; }
+.page-url:hover { text-decoration:underline; }
+.page-meta { display:flex; align-items:center; gap:10px; flex-shrink:0; }
+.page-status { font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700; padding:2px 8px; border-radius:5px; }
+.status-ok { background:var(--ok-bg); color:var(--ok); }
+.status-err { background:var(--err-bg); color:var(--err); }
+.page-ttfb { font-size:12px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; }
+.page-time { font-size:11.5px; color:var(--ink-hint); }
+.page-no-fetch { font-size:12px; color:var(--ink-hint); }
+.page-actions { display:flex; gap:6px; flex-shrink:0; }
+.btn-fetch { background:var(--sun-light) !important; border-color:var(--peach) !important; color:var(--sun-deep) !important; }
+.btn-fetch:hover { background:linear-gradient(135deg,var(--sun),var(--coral)) !important; color:#fff !important; }
+.btn-fetch:disabled { opacity:.6; cursor:not-allowed; }
+.btn-source { background:var(--surface-3) !important; }
+.btn-source:disabled { opacity:.4; cursor:not-allowed; }
+.btn-del-page { color:var(--err) !important; border-color:#FFCDD2 !important; background:#FFF5F5 !important; }
+.btn-del-page:hover { background:var(--err) !important; color:#fff !important; }
+.pages-empty { text-align:center; padding:36px; color:var(--ink-hint); font-size:13.5px; }
+
+/* ── 源码弹窗 ── */
+.source-meta { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+.source-badge { font-size:12px; font-weight:600; padding:4px 10px; background:var(--surface-3); border-radius:6px; color:var(--ink-mid); }
+.badge-ok-s { background:var(--ok-bg); color:var(--ok); }
+.badge-err-s { background:var(--err-bg); color:var(--err); }
+.source-code { background:#1E1E1E; color:#D4D4D4; padding:16px 20px; border-radius:var(--r-sm); font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.6; overflow:auto; max-height:60vh; white-space:pre-wrap; word-break:break-all; }
+:deep(.source-dialog .el-dialog__footer) { display:flex; gap:8px; justify-content:flex-end; }
 
 /* ── 站点配置面板 ── */
 .config-section-title { font-size:12px; font-weight:800; letter-spacing:.06em; color:var(--sun-deep); margin-bottom:12px; padding-bottom:8px; border-bottom:2px solid var(--sun-glow); display:flex; align-items:center; gap:10px; }

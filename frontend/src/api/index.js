@@ -60,6 +60,13 @@ export default {
   getAudit: (taskId) => api.get(`/v1/audits/${taskId}`),
   getAuditPages: (taskId) => api.get(`/v1/audits/${taskId}/pages`),
 
+  // Site Pages
+  listSitePages: (siteId) => api.get(`/v1/sites/${siteId}/pages`),
+  createSitePage: (siteId, data) => api.post(`/v1/sites/${siteId}/pages`, data),
+  deleteSitePage: (siteId, pageId) => api.delete(`/v1/sites/${siteId}/pages/${pageId}`),
+  fetchSitePage: (siteId, pageId) => api.post(`/v1/sites/${siteId}/pages/${pageId}/fetch`),
+  getSitePageSource: (siteId, pageId) => api.get(`/v1/sites/${siteId}/pages/${pageId}/source`),
+
   // GSC
   getGSCAuthURL: () => api.get('/v1/oauth/gsc'),
   syncGSC: (siteId) => api.post(`/v1/sites/${siteId}/gsc/sync`),

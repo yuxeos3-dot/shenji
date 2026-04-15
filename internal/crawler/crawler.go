@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -39,13 +40,19 @@ type PageResult struct {
 }
 
 type SiteConfig struct {
-	Domain       string
-	URLCategory  string
-	URLDetail    string
-	URLNewsList  string
+	Domain        string
+	URLCategory   string
+	URLDetail     string
+	URLNewsList   string
 	URLNewsDetail string
-	URLSearch    string
-	URLStatic   string
+	URLSearch     string
+	URLStatic     string
+	URLPagesJSON  string // JSON: [{name, url}, ...]
+}
+
+type CustomPage struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
 }
 
 func BuildURLList(site SiteConfig) []URLSpec {
@@ -83,6 +90,21 @@ func BuildURLList(site SiteConfig) []URLSpec {
 		urls = append(urls, URLSpec{PageType: PageTypeStatic, URL: ensureAbsURL(domain, site.URLStatic)})
 	} else {
 		urls = append(urls, URLSpec{PageType: PageTypeStatic, URL: domain + "/about"})
+	}
+
+	// Parse custom pages from JSON
+	if site.URLPagesJSON != "" && site.URLPagesJSON != "[]" {
+		var customPages []CustomPage
+		if err := json.Unmarshal([]byte(site.URLPagesJSON), &customPages); err == nil {
+			for _, p := range customPages {
+				if p.URL != "" {
+					urls = append(urls, URLSpec{
+						PageType: "custom_" + p.Name,
+						URL:      ensureAbsURL(domain, p.URL),
+					})
+				}
+			}
+		}
 	}
 
 	return urls
