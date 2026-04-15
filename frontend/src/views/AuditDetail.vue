@@ -3,7 +3,7 @@
     <div class="back-row">
       <a href="#" @click.prevent="$router.push(`/sites/${$route.params.id}`)" class="back-btn">← 返回站点</a>
       <span class="back-sep">·</span>
-      <span class="back-url">审计 {{ $route.params.taskId }}</span>
+      <span class="back-url">审计详情</span>
     </div>
 
     <!-- 任务状态卡片 -->
@@ -29,8 +29,13 @@
           </div>
         </div>
         <button v-if="task.status==='done'" class="btn btn-download" @click="downloadReport" :disabled="downloading">
-          📥 下载 Word 报告
+          {{ downloading ? '生成中...' : '📥 下载 Word 报告' }}
         </button>
+      </div>
+
+      <!-- 失败错误信息 -->
+      <div v-if="task.status==='error'" class="error-bar">
+        ❌ 审计失败原因：{{ task.error_msg || 'AI接口超时或配置错误，请检查系统设置中的AI接口配置，然后重新巡检' }}
       </div>
 
       <!-- 报告概览 -->
@@ -262,6 +267,7 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
 .back-sep { color:var(--ink-hint); }
 .back-url { font-size:14px; font-weight:700; color:var(--ink); }
 
+.error-bar { background:var(--err-bg); border:1.5px solid var(--err-border); border-radius:var(--r-sm); padding:12px 16px; font-size:13.5px; color:var(--err); font-weight:600; margin-top:12px; line-height:1.6; }
 .panel { background:var(--surface); border-radius:var(--r); box-shadow:var(--s1); border:1.5px solid var(--border-light); padding:22px 26px; }
 .panel-amber { background:linear-gradient(135deg,#FFFDF8 0%,#FFF8EC 60%,#FFF2D8 100%); border-color:var(--peach); }
 

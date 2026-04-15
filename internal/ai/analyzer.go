@@ -342,9 +342,9 @@ func BuildV6AuditPrompt(domain string, sitePages []SitePageForPrompt, crawlPages
 		prompt += "### 【手动监控页面 — 用户已预先抓取】\n\n"
 		for _, p := range sitePages {
 			html := p.HTML
-			if len(html) > 15000 {
-				// Keep full <head> + first 10000 chars of body
-				html = html[:15000] + "\n... [已截断，保留前15000字符]"
+			if len(html) > 8000 {
+				// Keep full <head> + first part of <body>
+				html = html[:8000] + "\n... [已截断]"
 			}
 			prompt += fmt.Sprintf("#### 页面：%s\n- URL: %s\n- 状态码: %d  TTFB: %dms  抓取时间: %s\n\n```html\n%s\n```\n\n---\n\n",
 				p.Name, p.URL, p.StatusCode, p.TTFB, p.LastFetchedAt, html)
@@ -359,8 +359,8 @@ func BuildV6AuditPrompt(domain string, sitePages []SitePageForPrompt, crawlPages
 				continue
 			}
 			html := p.HTML
-			if len(html) > 12000 {
-				html = html[:12000] + "\n... [已截断，保留前12000字符]"
+			if len(html) > 6000 {
+				html = html[:6000] + "\n... [已截断]"
 			}
 			errInfo := ""
 			if p.Error != "" {
