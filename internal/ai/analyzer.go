@@ -342,9 +342,8 @@ func BuildV6AuditPrompt(domain string, sitePages []SitePageForPrompt, crawlPages
 		prompt += "### 【手动监控页面 — 用户已预先抓取】\n\n"
 		for _, p := range sitePages {
 			html := p.HTML
-			if len(html) > 8000 {
-				// Keep full <head> + first part of <body>
-				html = html[:8000] + "\n... [已截断]"
+			if len(html) > 15000 {
+				html = html[:15000] + "\n... [已截断，保留前15000字符]"
 			}
 			prompt += fmt.Sprintf("#### 页面：%s\n- URL: %s\n- 状态码: %d  TTFB: %dms  抓取时间: %s\n\n```html\n%s\n```\n\n---\n\n",
 				p.Name, p.URL, p.StatusCode, p.TTFB, p.LastFetchedAt, html)
@@ -359,8 +358,8 @@ func BuildV6AuditPrompt(domain string, sitePages []SitePageForPrompt, crawlPages
 				continue
 			}
 			html := p.HTML
-			if len(html) > 6000 {
-				html = html[:6000] + "\n... [已截断]"
+			if len(html) > 12000 {
+				html = html[:12000] + "\n... [已截断，保留前12000字符]"
 			}
 			errInfo := ""
 			if p.Error != "" {
@@ -477,7 +476,7 @@ func CallAI(prompt string) (*AnalysisResult, string, error) {
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
-		"max_tokens":  8000,
+		"max_tokens":  16000,
 		"temperature": 0.2,
 	}
 
@@ -528,9 +527,32 @@ func CallAI(prompt string) (*AnalysisResult, string, error) {
 	content := apiResp.Choices[0].Message.Content
 	content = extractJSON(content)
 
+	// Try to repair truncated JSON by closing unclosed brackets
+	content = repairJSON(content)
+
 	// Try to parse as V6Report
 	var v6 V6Report
 	if err := json.Unmarshal([]byte(content), &v6); err == nil && len(v6.Chapters) > 0 {
+		// Recalculate totals if zero
+		if v6.TotalIssues == 0 {
+			for _, ch := range v6.Chapters {
+				v6.TotalIssues += len(ch.Issues)
+				for _, iss := range ch.Issues {
+					switch iss.Severity {
+					case "致命":
+						v6.Fatal++
+					case "严重":
+						v6.Serious++
+					case "中等":
+						v6.Medium++
+					case "低":
+						v6.Low++
+					}
+				}
+			}
+		}
+		// Re-serialize clean JSON
+		cleanJSON, _ := json.Marshal(v6)
 		result := &AnalysisResult{
 			Summary:        v6.Summary,
 			Suggestions:    fmt.Sprintf("共发现%d个问题（致命:%d 严重:%d 中等:%d 低:%d）", v6.TotalIssues, v6.Fatal, v6.Serious, v6.Medium, v6.Low),
@@ -538,19 +560,23 @@ func CallAI(prompt string) (*AnalysisResult, string, error) {
 			CodeIssues:     json.RawMessage("[]"),
 			SecurityIssues: json.RawMessage("[]"),
 			PerfIssues:     json.RawMessage("[]"),
-			V6Report:       content,
+			V6Report:       string(cleanJSON),
 		}
 		return result, model, nil
 	}
 
-	// Fallback
+	// Fallback — store raw but mark as unparsed
+	summary := "AI返回了响应但JSON解析失败，请重新巡检"
+	if len(content) > 100 {
+		summary = "报告生成中，数据处理异常，请重新巡检"
+	}
 	result := &AnalysisResult{
-		Summary:        content[:min(200, len(content))],
+		Summary:        summary,
 		SEOIssues:      json.RawMessage("[]"),
 		CodeIssues:     json.RawMessage("[]"),
 		SecurityIssues: json.RawMessage("[]"),
 		PerfIssues:     json.RawMessage("[]"),
-		V6Report:       content,
+		V6Report:       "",
 	}
 	return result, model, nil
 }
@@ -616,6 +642,59 @@ func extractJSON(s string) string {
 	}
 	if start >= 0 && end > start {
 		return s[start:end]
+	}
+	return s
+}
+
+// repairJSON tries to close unclosed JSON by counting brackets
+func repairJSON(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) == 0 {
+		return s
+	}
+
+	// Count unclosed braces and brackets
+	braces := 0
+	brackets := 0
+	inString := false
+	escaped := false
+
+	for _, c := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if c == '\\' && inString {
+			escaped = true
+			continue
+		}
+		if c == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		switch c {
+		case '{':
+			braces++
+		case '}':
+			braces--
+		case '[':
+			brackets++
+		case ']':
+			brackets--
+		}
+	}
+
+	// Close unclosed structures
+	for brackets > 0 {
+		s += "]"
+		brackets--
+	}
+	for braces > 0 {
+		s += "}"
+		braces--
 	}
 	return s
 }
