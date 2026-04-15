@@ -171,7 +171,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
@@ -219,7 +219,17 @@ async function loadData() {
       dailyHour.value = s.audit_daily_hour >= 0 ? s.audit_daily_hour : 9
     }
   } catch {}
+
+  // 有进行中任务则3秒后自动刷新
+  const hasRunning = audits.value.some(a => a.status === 'running' || a.status === 'pending')
+  if (hasRunning) pollTimer.value = setTimeout(loadData, 3000)
 }
+
+const pollTimer = ref(null)
+
+onMounted(loadData)
+onUnmounted(() => { if (pollTimer.value) clearTimeout(pollTimer.value) })
+watch(() => route.params.id, () => { if (route.params.id) { if (pollTimer.value) clearTimeout(pollTimer.value); loadData() } })
 
 async function fetchAllPages() {
   if (!sitePages.value.length) { ElMessage.warning('暂无页面，请先添加'); return }
@@ -304,9 +314,6 @@ async function triggerAudit() {
   auditing.value = true
   try { await api.triggerAudit(route.params.id); ElMessage.success('巡检已启动 — 将自动抓取最新源码后开始分析'); loadData() } catch {} finally { auditing.value = false }
 }
-
-onMounted(loadData)
-watch(() => route.params.id, () => { if (route.params.id) loadData() })
 </script>
 
 <style scoped>
