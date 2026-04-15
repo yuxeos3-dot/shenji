@@ -4,11 +4,160 @@
     <div class="page-header">
       <div class="header-left">
         <h1 class="page-title">站点管理</h1>
-        <span class="page-subtitle">管理所有监控站点，触发巡检任务</span>
+        <span class="page-subtitle">管理所有监控站点，触发深度巡检任务</span>
       </div>
       <el-button class="btn-sunrise" @click="openAddDialog">
         <span class="btn-icon">+</span> 添加站点
       </el-button>
+    </div>
+
+    <!-- 系统能力介绍卡片 -->
+    <div class="capability-card">
+      <div class="cap-header">
+        <span class="cap-icon">🚀</span>
+        <div>
+          <div class="cap-title">SEO 深度审计系统 · 工作流 v6</div>
+          <div class="cap-subtitle">基于源码级分析，覆盖 24 大类 180+ 检查点，媲美专业 SEO 机构的全自动审计引擎</div>
+        </div>
+      </div>
+
+      <div class="cap-grid">
+        <div class="cap-item">
+          <div class="cap-item-icon">🔍</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">TDK 与基础 Meta</div>
+            <div class="cap-item-desc">检查 Title/Description/Keywords 长度规范、关键词覆盖、跨页面重复、Open Graph、Twitter Card、Canonical 自引用等 20+ 细项</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">📐</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">H 标签结构</div>
+            <div class="cap-item-desc">H1 唯一性、CSS 隐藏检测、H2-H6 层次跳级、关键词覆盖、各页面类型 H1 模板一致性分析</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">🖼️</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">图片 SEO</div>
+            <div class="cap-item-desc">alt 属性完整性、无意义 alt 检测、首屏图片禁 lazy-load、width/height 防 CLS、WebP/AVIF 格式检测</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">🔗</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">链接与内链架构</div>
+            <div class="cap-item-desc">内链数量统计、孤立页面发现、nofollow 合理性、锚文本描述性检测、面包屑导航完整性、分页 rel=next/prev</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">📊</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">结构化数据 Schema</div>
+            <div class="cap-item-desc">VideoObject / Movie / TVSeries / Article / BreadcrumbList / WebSite SearchAction / AggregateRating / Organization 完整性验证</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">🤖</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">robots.txt & Sitemap</div>
+            <div class="cap-item-desc">重要路径误屏蔽检测、Sitemap 可访问性、lastmod 真实性验证、子 Sitemap 格式、视频/新闻专项 Sitemap 检测</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">⚡</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">Core Web Vitals HTML 信号</div>
+            <div class="cap-item-desc">LCP 候选元素 fetchpriority="high"、首屏图片 preload、render-blocking 资源、font-display、关键 CSS 内联</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">🔒</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">安全响应头</div>
+            <div class="cap-item-desc">HSTS / CSP / X-Frame-Options / X-Content-Type-Options / Server 版本泄露 / X-Powered-By 暴露 / 混合内容检测</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">📱</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">移动端适配</div>
+            <div class="cap-item-desc">viewport meta、字体大小适配、水平滚动触发元素、点击目标尺寸（≥48px）、PC 与移动端响应一致性</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">🧩</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">JavaScript SEO</div>
+            <div class="cap-item-desc">纯 CSR SPA 检测（致命）、Vue/React 模板语法暴露、noscript 降级、重要内容 JS 依赖、JSON-LD 动态注入风险</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">↩️</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">重定向规范化</div>
+            <div class="cap-item-desc">HTTP→HTTPS 跳转、www/non-www 统一、多跳重定向链（301→302→200）、分页第1页规范化、URL 大小写统一</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">🕸️</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">爬虫陷阱检测</div>
+            <div class="cap-item-desc">分面导航无限 URL、Session ID 出现在 URL、日历归档无限翻页、Sitemap 含参数 URL、软 404 检测</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">🏆</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">E-E-A-T 权威性信号</div>
+            <div class="cap-item-desc">作者页面/Schema Author 字段、关于我们/联系方式页面、DMCA 声明、外链权威来源、组织信息完整性</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">💾</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">资源压缩与缓存</div>
+            <div class="cap-item-desc">gzip/br 压缩检测、静态资源 Cache-Control、图片 WebP/AVIF 格式、CSS/JS 压缩状态、第三方脚本负担</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">🎬</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">视频/影视站专项</div>
+            <div class="cap-item-desc">VideoObject Schema 完整性、视频标题关键词、缩略图声明、视频 Sitemap 存在性、播出平台信息</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">🔄</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">重复内容处理</div>
+            <div class="cap-item-desc">多 URL 同内容检测、Canonical 正确性、标签页/分类页内容高度重叠、打印版/移动版 Canonical 处理</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">🌐</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">国际化 & 多语言</div>
+            <div class="cap-item-desc">hreflang 配置正确性、HTML lang 属性、UTF-8 字符集、Canonical 与 hreflang 关系一致性</div>
+          </div>
+        </div>
+        <div class="cap-item">
+          <div class="cap-item-icon">👻</div>
+          <div class="cap-item-content">
+            <div class="cap-item-title">隐藏文本检测</div>
+            <div class="cap-item-desc">position:absolute;left:-9999px 关键词堆砌、display:none 包含关键词、同色文字、font-size:0 文字 — Google 惩罚项</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cap-footer">
+        <span class="cap-tag">📋 每次审计输出 35-70+ 独立问题</span>
+        <span class="cap-tag">📄 自动生成 Word 审计报告</span>
+        <span class="cap-tag">🎯 每个问题附带真实源码证据</span>
+        <span class="cap-tag">✅ 每个问题给出可执行 HTML 修复代码</span>
+        <span class="cap-tag">⚡ 支持一键实时抓取页面源码</span>
+        <span class="cap-tag">📡 对接 GSC / GA / Yandex 数据</span>
+      </div>
     </div>
 
     <!-- 统计卡片 -->
@@ -225,10 +374,33 @@ onMounted(loadSites)
 <style scoped>
 .sites-page { padding: 0; }
 
-.page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:28px; }
-.header-left { display:flex; flex-direction:column; gap:4px; }
-.page-title { margin:0; font-size:24px; font-weight:800; color:var(--ink); letter-spacing:-0.02em; }
-.page-subtitle { font-size:13px; color:var(--ink-soft); font-weight:500; }
+.page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+
+/* ── 系统能力介绍卡片 ── */
+.capability-card {
+  background: linear-gradient(135deg, #FFFDF8 0%, #FFF8EC 60%, #FFF2D8 100%);
+  border: 1.5px solid var(--peach);
+  border-radius: var(--r);
+  box-shadow: var(--s2);
+  padding: 22px 26px;
+  margin-bottom: 24px;
+}
+.cap-header { display:flex; align-items:flex-start; gap:14px; margin-bottom:20px; padding-bottom:16px; border-bottom:1.5px solid var(--peach); }
+.cap-icon { font-size:36px; flex-shrink:0; }
+.cap-title { font-size:17px; font-weight:800; color:var(--ink); letter-spacing:-.3px; margin-bottom:4px; }
+.cap-subtitle { font-size:13px; color:var(--ink-soft); line-height:1.6; }
+
+.cap-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:18px; }
+@media(max-width:1100px) { .cap-grid { grid-template-columns:repeat(2,1fr); } }
+
+.cap-item { display:flex; align-items:flex-start; gap:10px; background:rgba(255,255,255,.7); border-radius:var(--r-sm); padding:12px 14px; border:1px solid var(--border-light); }
+.cap-item:hover { background:#fff; box-shadow:var(--s1); }
+.cap-item-icon { font-size:20px; flex-shrink:0; margin-top:1px; }
+.cap-item-title { font-size:13px; font-weight:700; color:var(--ink); margin-bottom:3px; }
+.cap-item-desc { font-size:11.5px; color:var(--ink-soft); line-height:1.55; }
+
+.cap-footer { display:flex; flex-wrap:wrap; gap:8px; padding-top:14px; border-top:1.5px solid var(--peach); }
+.cap-tag { display:inline-flex; align-items:center; gap:5px; padding:5px 12px; background:linear-gradient(135deg,var(--sun),var(--coral)); color:#fff; border-radius:20px; font-size:12px; font-weight:700; box-shadow:0 2px 8px rgba(249,115,22,.25); }
 
 .stats-row { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; margin-bottom:24px; }
 .stat-card { display:flex; align-items:center; gap:16px; padding:20px 24px; }
