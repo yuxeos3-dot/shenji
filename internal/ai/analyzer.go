@@ -107,7 +107,7 @@ func BuildV6AuditPrompt(domain string, sitePages []SitePageForPrompt, crawlPages
 1. **严格基于证据**：每个问题必须引用真实HTML源码片段作为evidence_code，不允许编造
 2. **穷尽式查找**：目标35-70个独立问题，覆盖所有已抓取页面
 3. **可执行建议**：每个fix_suggestion必须含具体HTML代码示例或操作步骤
-4. **全面覆盖**：必须检查以下24大类+5个附加类，每类至少输出1条问题（无问题则输出"良好"级别的确认）
+4. **全面覆盖**：必须检查以下24大类+6个附加类，每类至少输出1条问题
 
 ---
 
@@ -275,31 +275,60 @@ func BuildV6AuditPrompt(domain string, sitePages []SitePageForPrompt, crawlPages
 - 内部链接是否全部使用HTTPS
 - form action是否使用HTTPS
 
-### 附加类A 隐藏文本检测
-- CSS position:absolute;left:-9999px
-- display:none 包含关键词
-- color与background相同的文字
-- font-size:0的文字
+### 附加类A 隐藏文本与黑帽手法（Google惩罚项）
+- CSS position:absolute;left:-9999px 隐藏关键词
+- display:none 包含SEO关键词文字
+- 前景色与背景色相同的文字
+- font-size:0 隐藏文字
+- overflow:hidden 裁剪含关键词内容
+- clip:rect(1px,1px,1px,1px) 隐藏内容
 
-### 附加类B 关键词堆砌
-- meta keywords是否过长(>200字)
-- 正文是否有异常关键词密度
-- 是否有隐藏的关键词列表
+### 附加类B 关键词堆砌检测
+- meta keywords超过200字
+- 正文关键词密度异常（同一词出现>15次/1000字）
+- 隐藏的关键词列表区块
+- Footer区域堆砌城市/品牌词
 
-### 附加类C 技术债务
-- 是否有console.error/警告暗示
-- 是否有TODO/FIXME注释暴露在HTML中
-- 是否有测试代码残留
+### 附加类C 代码质量问题
+- HTML嵌套结构合法性（未闭合标签、错误嵌套如p>div）
+- 同一页面重复ID属性（违反HTML规范）
+- 内联style过度使用（>20处，维护困难）
+- HTML注释中暴露敏感信息（路径/版本/TODO/FIXME/API密钥）
+- 大量 href="javascript:void(0)" 无效链接
+- form元素缺少action属性
+- 空alt/title批量检测
+- script标签内遗留调试console.log/测试代码
+- 未使用的隐藏input字段（潜在信息泄露）
 
-### 附加类D 社交媒体集成
-- og:image比例是否正确(1200x630)
-- twitter:image是否设置
-- 分享按钮是否影响加载速度
+### 附加类D 安全漏洞风险
+- Server响应头版本号暴露（Apache/2.4.51、nginx/1.18.0等）
+- X-Powered-By泄露框架版本（PHP/8.1.0、Express/4.x等）
+- X-Generator暴露CMS版本（WordPress 6.x等）
+- HTML源码中API密钥/Token硬编码
+- /uploads/、/backup/、/config/ 等敏感目录
+- 混合内容（HTTP资源在HTTPS页面加载）
+- Cookie缺少Secure/HttpOnly/SameSite属性
+- CORS配置过宽（Access-Control-Allow-Origin: *）
+- 管理员路径未被robots屏蔽（/admin/、/wp-admin/）
 
-### 附加类E 辅助功能(影响SEO)
-- 是否有skip navigation
-- form元素是否有label
-- aria-label是否合理使用
+### 附加类E 页面加载速度优化
+- 同步JS在<head>中阻塞渲染（应加async/defer属性）
+- 第三方脚本数量统计（广告/统计/社交/客服 >5个）
+- 未使用preconnect/dns-prefetch提前建立连接
+- 字体文件缺少font-display:swap（导致FOIT/FOUT）
+- 大量使用@import串行加载CSS
+- 图片未使用CDN加速（直接用本站域名）
+- 大型JS库整体引入未按需加载
+- 第三方iframe（广告/视频）阻塞主线程
+
+### 附加类F 深度白帽SEO优化建议（必须独立成章输出）
+基于以上所有发现，以运营视角输出可落地的SEO优化路线图，作为单独一章：
+1. **关键词策略**：基于现有TDK和H标签，给出目标关键词布局调整方案和3-5个长尾词方向
+2. **内链建设方案**：识别权重高的页面，给出内链传递路径建议和锚文本优化方案
+3. **内容优化清单**：首页/列表页/详情页各自的内容充实具体建议（目标字数/段落结构/多媒体配比）
+4. **3个月技术修复计划**：按"影响权重×修复难度"优先级排序，给出第1个月/第2个月/第3个月应完成的修复项
+5. **运营可立即执行的动作**：无需开发介入，运营人员自己就能做的10条优化项（修改Title/Description/alt/内链锚文本等）
+6. **与行业最佳实践的差距**：对比同类头部站点应具备的SEO基础设施，指出3个最关键缺口
 
 ---
 
@@ -409,11 +438,13 @@ func BuildV6AuditPrompt(domain string, sitePages []SitePageForPrompt, crawlPages
 2. id全局连续，从1开始
 3. evidence_code必须是从上方源码中提取的真实片段，不允许编造
 4. fix_suggestion必须包含可执行的HTML代码或具体操作步骤
-5. 总问题数不少于35个
-6. 必须覆盖24大类，每类至少1个问题
-7. 按章节分组，章节标题格式："一、TDK与基础Meta"、"二、H标签结构"...
-8. 先输出fatal和serious问题，再输出medium和low
-9. 章节顺序按优先级排列，最重要的问题在最前面
+5. **总问题数不少于40个**
+6. **必须覆盖24大类+6附加类，每类至少1个问题**
+7. **必须有独立的"深度白帽SEO优化建议"章节（附加类F）**，包含运营可执行的具体建议
+8. 按章节分组，章节标题格式："一、TDK与基础Meta"、"二、H标签结构"...
+9. 最后一章必须是"深度白帽SEO优化建议"
+10. 先输出fatal和serious问题，再输出medium和low
+11. 章节顺序按优先级排列，最重要的问题在最前面
 `, domain, time.Now().Format("2006-01-02"))
 
 	return prompt
