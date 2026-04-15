@@ -21,291 +21,33 @@
         </div>
       </div>
 
-      <div class="cap-section-title">📋 检查覆盖范围</div>
-      <div class="cap-grid">
+      <div class="cap-text">
+        每次巡检自动触发以下全部检查，覆盖 28 大类 200+ 检查点：<br><br>
 
-        <div class="cap-item">
-          <div class="cap-item-icon">🏷️</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">TDK 与基础 Meta</div>
-            <div class="cap-item-desc">Title 长度（30–60字）、关键词覆盖率、跨页面重复检测；Description 120–160 字规范、实质性内容检查；Open Graph og:title/og:description/og:image 完整性；Twitter Card 配置；Canonical 自引用正确性；meta robots 指令合理性</div>
-          </div>
-        </div>
+        <strong>SEO 基础</strong>：TDK 查询（Title/Description/Keywords 长度规范、关键词覆盖、跨页面重复）、H 标签查询（H1 唯一性/隐藏检测/H2-H6 层级跳跃）、图片 SEO 查询（alt 完整性与描述性、首屏禁 lazy-load、width/height 防 CLS）、链接与内链查询（孤立页面、锚文本描述性、内链数量）、结构化数据查询（VideoObject/Article/BreadcrumbList/AggregateRating 字段完整性）、Canonical 查询（自引用/重复内容处理）、Open Graph 查询（og:title/og:description/og:image 完整性）。<br><br>
 
-        <div class="cap-item">
-          <div class="cap-item-icon">📐</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">H 标签结构与关键词布局</div>
-            <div class="cap-item-desc">H1 唯一性与存在性、CSS display:none/position:absolute 隐藏 H1 检测（Google 惩罚项）、H2–H6 层级跳跃检测、H 标签关键词密度、各页面类型 H1 模板一致性、H 标签与 Title 关键词呼应</div>
-          </div>
-        </div>
+        <strong>技术 SEO</strong>：robots.txt 查询（重要路径误屏蔽、应屏蔽路径未屏蔽）、Sitemap 查询（格式/可访问性/lastmod 真实性/爬虫陷阱参数 URL）、重定向规范化查询（HTTP→HTTPS/www统一/多跳重定向链检测）、爬虫陷阱查询（分面导航无限 URL、Session ID 进 URL、软 404）、移动端适配查询（viewport/字体大小/点击目标尺寸）、分页 SEO 查询（Title 差异化/Canonical/误设 noindex）、JavaScript SEO 查询（纯 CSR SPA 致命检测/模板语法暴露/noscript 降级）、多域名权重查询（镜像站 Canonical/子域名权重分散）。<br><br>
 
-        <div class="cap-item">
-          <div class="cap-item-icon">🖼️</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">图片 SEO 全项检测</div>
-            <div class="cap-item-desc">alt 属性完整性与描述性（拒绝"image123"类无效 alt）、首屏图片禁止 loading="lazy"（影响 LCP）、图片 width/height 属性防止布局偏移（CLS）、WebP/AVIF 现代格式使用率、图片文件名语义化、og:image 尺寸规范（1200×630）</div>
-          </div>
-        </div>
+        <strong>性能与速度</strong>：Core Web Vitals 查询（LCP 元素 fetchpriority/首屏图片 preload/render-blocking 资源识别）、加载速度查询（同步 JS 阻塞渲染/第三方脚本数量统计/font-display 策略/preconnect 配置）、资源压缩查询（gzip/brotli 压缩/Cache-Control/ETag/CDN 命中率）。<br><br>
 
-        <div class="cap-item">
-          <div class="cap-item-icon">🔗</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">链接与内链架构</div>
-            <div class="cap-item-desc">首页内链数量（建议 >50 条有意义链接）、孤立页面发现（无内链指向的页面）、nofollow 使用合理性分析、锚文本描述性检测（拒绝"点击这里"式锚文本）、面包屑导航完整性、分页 rel=next/prev 规范、导航菜单覆盖核心分类</div>
-          </div>
-        </div>
+        <strong>安全</strong>：安全响应头查询（HSTS/CSP/X-Frame-Options/X-Content-Type-Options/Referrer-Policy/Permissions-Policy）、服务器信息泄露查询（Server 版本号/X-Powered-By/X-Generator 暴露）、HTTPS 合规查询（混合内容/Cookie Secure+HttpOnly+SameSite 属性/CORS 配置）、敏感信息查询（API 密钥硬编码/敏感路径暴露/注释泄露）。<br><br>
 
-        <div class="cap-item">
-          <div class="cap-item-icon">📊</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">结构化数据 Schema</div>
-            <div class="cap-item-desc">VideoObject / Movie / TVSeries / Article / NewsArticle / BreadcrumbList / WebSite+SearchAction / AggregateRating（含 ratingCount）/ Organization / Author / FAQ / HowTo / ItemList 字段完整性验证；JSON-LD 格式合法性；@type 与页面类型匹配</div>
-          </div>
-        </div>
+        <strong>代码质量</strong>：代码规范查询（HTML 嵌套合法性/重复 ID/内联样式过度/调试代码残留/TODO-FIXME 注释暴露）、隐藏文本查询（position:-9999px/display:none/同色文字/font-size:0 — Google 手动惩罚项）、关键词堆砌查询（keywords 过长/正文异常密度/隐藏关键词列表）。<br><br>
 
-        <div class="cap-item">
-          <div class="cap-item-icon">🤖</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">robots.txt & Sitemap 专项</div>
-            <div class="cap-item-desc">重要路径意外屏蔽检测（/category/、/movie/、/article/）、应屏蔽路径未屏蔽（/admin/、/api/、/login/）、Sitemap 格式与可访问性、lastmod 真实性验证（批量伪造检测）、视频/新闻专项 Sitemap、Sitemap URL 含参数爬虫陷阱</div>
-          </div>
-        </div>
+        <strong>内容质量</strong>：内容充实度查询（首页 >200 字/详情页正文丰富度/模板重复比例）、E-E-A-T 查询（作者信息/关于我们/DMCA/Organization Schema）、国际化查询（hreflang/HTML lang/UTF-8）、RSS Feed 查询（可访问性/域名一致性/更新时效）、无障碍访问查询（form label/aria-label/语义化标签）、视频影视专项查询（VideoObject 必填字段/视频 Sitemap/TVSeries 层级）、社交媒体查询（og:image 比例/Twitter Card/GTM 追踪）。<br><br>
 
-        <div class="cap-item">
-          <div class="cap-item-icon">⚡</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">Core Web Vitals HTML 信号</div>
-            <div class="cap-item-desc">LCP 候选元素 fetchpriority="high" 检测、首屏关键图片 preload link 标签、render-blocking CSS/JS 资源识别、font-display 字体加载策略、关键 CSS 内联优化、LCP 图片误加 lazy-load（致命性能问题）</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">🚀</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">页面加载速度优化</div>
-            <div class="cap-item-desc">第三方脚本数量与阻塞分析、同步 JS 在 &lt;head&gt; 中加载检测、CSS/JS 文件是否压缩（minified）、图片尺寸是否优化、字体文件加载方式、资源合并与分割策略、preconnect/dns-prefetch 配置</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">💾</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">资源压缩与缓存策略</div>
-            <div class="cap-item-desc">gzip/brotli 压缩启用状态（Content-Encoding 头检测）、静态资源 Cache-Control 配置、ETag/Last-Modified 协商缓存、CDN 命中率（CF-Cache-Status）、图片 CDN 使用情况、资源版本控制</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">🔒</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">安全响应头全检</div>
-            <div class="cap-item-desc">HSTS（Strict-Transport-Security）强制 HTTPS、CSP（Content-Security-Policy）内容安全策略、X-Frame-Options 点击劫持防护、X-Content-Type-Options MIME 嗅探防护、Referrer-Policy 信息泄露控制、Permissions-Policy 浏览器权限控制</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">🕵️</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">服务器信息泄露检测</div>
-            <div class="cap-item-desc">Server 响应头版本号暴露（如 Apache/2.4.51）、X-Powered-By 框架版本泄露（如 PHP/8.1.0）、X-Generator CMS 版本暴露、X-AspNet-Version 泄露、Via CDN 节点信息、HTML 注释中的敏感路径/版本信息</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">🛡️</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">HTTPS 与安全合规</div>
-            <div class="cap-item-desc">混合内容（HTTP 资源加载在 HTTPS 页面）、内部链接全部使用 HTTPS、form action 安全性、SSL 证书状态、cookie 安全属性（Secure/HttpOnly/SameSite）、敏感接口是否暴露给爬虫</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">💻</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">代码质量问题</div>
-            <div class="cap-item-desc">HTML 结构合法性（嵌套错误、未闭合标签）、重复 ID 属性、内联样式过度使用、TODO/FIXME/测试代码残留在 HTML 中、console.error 暗示、无效的 href="javascript:void(0)"、空 alt/title 属性批量检测</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">🧩</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">JavaScript SEO 专项</div>
-            <div class="cap-item-desc">纯 CSR SPA 检测（body 只有 &lt;div id="app"&gt; — 致命问题）、Vue/React 模板指令暴露在 HTML 中、noscript 降级内容、重要导航/内容依赖 JS 渲染、JSON-LD 动态注入风险、Service Worker 干扰爬取</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">↩️</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">重定向规范化</div>
-            <div class="cap-item-desc">HTTP→HTTPS 301 正确跳转、www/non-www 统一规范、多跳重定向链检测（301→302→200 性能损耗）、URL 大小写无规范化、双斜杠 URL、/index.html 冗余、分页第1页重定向到无分页版本</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">🕸️</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">爬虫陷阱全检</div>
-            <div class="cap-item-desc">分面导航无限 URL（?sort=&genre=&year= 组合爆炸）、Session ID 出现在 URL 中、日历归档无限翻页、Sitemap 含参数 URL 陷阱、无限滚动页面爬取盲区、软 404（返回 200 但内容提示不存在）</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">📱</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">移动端适配全检</div>
-            <div class="cap-item-desc">viewport meta 标签配置正确性、正文字体大小 ≥16px（避免小字体惩罚）、水平滚动触发元素检测、点击目标尺寸 ≥48px（避免误触）、PC 与移动端 UA 响应内容一致性、独立移动站点检测</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">🔄</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">重复内容处理</div>
-            <div class="cap-item-desc">多 URL 访问同一内容检测、Canonical 处理正确性、标签页/分类页内容高度重叠分析、打印版/移动版 Canonical、分页内容重复、参数化 URL 重复内容、404 页面内容是否被索引</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">✍️</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">内容质量评估</div>
-            <div class="cap-item-desc">首页文字内容 >200 字检测、详情页正文充实度、模板重复内容比例、关键词堆砌（Keyword Stuffing）检测、内容对用户真实价值评估、更新时效性（lastmod 与实际内容一致性）</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">👻</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">隐藏文本与黑帽手法检测</div>
-            <div class="cap-item-desc">position:absolute;left:-9999px 关键词堆砌、display:none 包含关键词文字、同色文字（前景色=背景色）、font-size:0 隐藏文字、overflow:hidden 裁剪内容 — 以上均为 Google 惩罚项，会导致手动降权</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">🏆</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">E-E-A-T 权威性信号</div>
-            <div class="cap-item-desc">作者页面与 Schema Author 字段完整性、关于我们/联系方式/隐私政策页面、DMCA 版权声明、外链权威来源（Wikipedia/官方机构）、Organization Schema 组织信息、用户评分与评论结构化数据</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">🎬</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">视频/影视站 SEO 专项</div>
-            <div class="cap-item-desc">VideoObject Schema 必填字段（name/description/thumbnailUrl/uploadDate/duration）、视频标题关键词布局、缩略图 CDN 可访问性、视频 Sitemap 完整性、播出平台/来源信息声明、连续剧 TVSeries+TVEpisode 层级</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">🌐</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">国际化与多语言</div>
-            <div class="cap-item-desc">hreflang 标签配置正确性（x-default 必须存在）、HTML lang 属性语言代码规范、UTF-8 字符集声明、Canonical 与 hreflang 关系一致性（不能相互矛盾）、多语言版本 Sitemap 分割策略</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">♿</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">无障碍访问（影响 SEO）</div>
-            <div class="cap-item-desc">form 元素是否有 label 关联、图片 alt 对屏幕阅读器友好、aria-label 合理使用、skip navigation 链接、语义化 HTML 标签使用（nav/main/article/section/header/footer）</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">📰</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">RSS Feed 质量</div>
-            <div class="cap-item-desc">Feed 是否存在且可访问、Feed 中域名是否与主域一致（镜像站风险）、Feed 更新时效性、Feed 中 URL 是否为 Canonical URL、Feed 内容完整度</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">🔢</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">分页 SEO 专项</div>
-            <div class="cap-item-desc">分页 Title 差异化（第2页不能与第1页 Title 相同）、分页 Canonical 指向正确、第2+页误设 noindex 检测、分页参数是否在 Sitemap 暴露（爬虫陷阱）、分页面包屑层级</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">🗂️</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">多域名与权重分散</div>
-            <div class="cap-item-desc">全站 HTML 中提取所有自有域名、镜像站 Canonical 是否指向主域、镜像站是否有独立 Sitemap（不应有）、www/non-www 权重分散、子域名策略评估</div>
-          </div>
-        </div>
-
-        <div class="cap-item">
-          <div class="cap-item-icon">🌟</div>
-          <div class="cap-item-content">
-            <div class="cap-item-title">社交媒体集成</div>
-            <div class="cap-item-desc">og:image 尺寸规范（1200×630）、Twitter Card 类型配置（summary_large_image）、Facebook Pixel / GTM 追踪代码、分享按钮是否对页面速度造成影响、微信/微博分享 meta 配置</div>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- 深度SEO建议模块说明 -->
-      <div class="cap-section-title" style="margin-top:6px">🎯 深度白帽 SEO 优化建议（每次巡检独家输出）</div>
-      <div class="seo-advice-grid">
-        <div class="advice-item">
-          <div class="advice-icon">📈</div>
-          <div class="advice-content">
-            <div class="advice-title">关键词策略建议</div>
-            <div class="advice-desc">基于页面现有内容，给出目标关键词布局方案、长尾词挖掘方向、关键词密度调整建议，让内容团队有明确的优化方向</div>
-          </div>
-        </div>
-        <div class="advice-item">
-          <div class="advice-icon">🏗️</div>
-          <div class="advice-content">
-            <div class="advice-title">内链建设方案</div>
-            <div class="advice-desc">识别权重高的页面与孤立页面，给出内链传递路径建议，帮助提升重要落地页的页面权重（PageRank 流动）</div>
-          </div>
-        </div>
-        <div class="advice-item">
-          <div class="advice-icon">📝</div>
-          <div class="advice-content">
-            <div class="advice-title">内容优化执行清单</div>
-            <div class="advice-desc">基于源码分析，给出每类页面的内容充实建议，包括字数要求、段落结构、多媒体配比、内容独特性提升方向</div>
-          </div>
-        </div>
-        <div class="advice-item">
-          <div class="advice-icon">🔧</div>
-          <div class="advice-content">
-            <div class="advice-title">技术修复优先级排序</div>
-            <div class="advice-desc">将所有发现的问题按"影响权重 × 修复难度"矩阵排序，给出先修什么、后修什么的明确执行计划，避免资源浪费</div>
-          </div>
-        </div>
-        <div class="advice-item">
-          <div class="advice-icon">📊</div>
-          <div class="advice-content">
-            <div class="advice-title">竞争对手差距分析</div>
-            <div class="advice-desc">根据站点类型对比行业最佳实践，指出与头部同类站点的差距，提供可落地的追赶方案</div>
-          </div>
-        </div>
-        <div class="advice-item">
-          <div class="advice-icon">🎓</div>
-          <div class="advice-content">
-            <div class="advice-title">运营人员可执行手册</div>
-            <div class="advice-desc">针对非技术运营人员，用白话解释每个问题为什么影响排名，给出无需开发介入就能执行的优化动作（如修改 Title、补充描述、添加 alt 等）</div>
-          </div>
-        </div>
+        <strong>深度白帽 SEO 建议</strong>：每次巡检额外输出独立一章可落地的 SEO 优化路线图 —— 关键词策略布局、内链建设方案（PageRank 流动路径）、内容优化清单（字数/结构/多媒体配比）、3 个月技术修复优先级计划、运营人员无需开发介入可立即执行的 10 条动作、与行业头部站点的关键差距分析。让运营人员不但知道有问题，更知道怎么改、改哪里最有效。
       </div>
 
       <div class="cap-footer">
-        <span class="cap-tag">📋 每次输出 35–70 个独立问题</span>
+        <span class="cap-tag">📋 每次输出 40–70 个独立问题</span>
         <span class="cap-tag">📄 自动生成 Word 审计报告</span>
         <span class="cap-tag">🎯 每个问题附真实源码证据</span>
         <span class="cap-tag">✅ 每个修复含可执行 HTML 代码</span>
         <span class="cap-tag">⚡ 实时抓取页面源码分析</span>
         <span class="cap-tag">📡 融合 GSC / GA / Yandex 数据</span>
-        <span class="cap-tag">🤖 AI 大模型深度理解语义</span>
-        <span class="cap-tag">🎓 白帽 SEO 白话建议</span>
+        <span class="cap-tag">🤖 AI 大模型深度语义分析</span>
+        <span class="cap-tag">🎓 白帽 SEO 运营白话建议</span>
       </div>
     </div>
 
@@ -462,20 +204,9 @@ onMounted(loadSites)
 .cap-icon { font-size:36px; flex-shrink:0; }
 .cap-title { font-size:17px; font-weight:800; color:var(--ink); letter-spacing:-.3px; margin-bottom:4px; }
 .cap-subtitle { font-size:13px; color:var(--ink-soft); line-height:1.7; max-width:900px; }
-.cap-section-title { font-size:14px; font-weight:800; color:var(--sun-deep); margin:0 0 14px; display:flex; align-items:center; gap:6px; }
-.cap-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:22px; }
-.cap-item { display:flex; align-items:flex-start; gap:10px; background:rgba(255,255,255,.75); border-radius:var(--r-sm); padding:12px 14px; border:1px solid rgba(255,200,120,.4); transition:all .18s; }
-.cap-item:hover { background:#fff; box-shadow:var(--s1); transform:translateY(-1px); }
-.cap-item-icon { font-size:20px; flex-shrink:0; margin-top:1px; }
-.cap-item-title { font-size:13px; font-weight:700; color:var(--ink); margin-bottom:4px; }
-.cap-item-desc { font-size:11.5px; color:var(--ink-soft); line-height:1.6; }
-
-/* ── 深度SEO建议 ── */
-.seo-advice-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:18px; }
-.advice-item { display:flex; align-items:flex-start; gap:10px; background:linear-gradient(135deg,rgba(37,99,235,.06),rgba(59,130,246,.04)); border-radius:var(--r-sm); padding:12px 14px; border:1px solid rgba(37,99,235,.15); }
-.advice-icon { font-size:22px; flex-shrink:0; }
-.advice-title { font-size:13px; font-weight:700; color:#1D4ED8; margin-bottom:4px; }
-.advice-desc { font-size:11.5px; color:var(--ink-soft); line-height:1.6; }
+.cap-section-title { font-size:14px; font-weight:800; color:var(--sun-deep); margin:0 0 12px; }
+.cap-text { font-size:13.5px; color:var(--ink-mid); line-height:1.85; margin-bottom:18px; }
+.cap-text strong { color:var(--ink); font-weight:700; }
 
 .cap-footer { display:flex; flex-wrap:wrap; gap:8px; padding-top:14px; border-top:1.5px solid var(--peach); }
 .cap-tag { display:inline-flex; align-items:center; gap:5px; padding:5px 12px; background:linear-gradient(135deg,var(--sun),var(--coral)); color:#fff; border-radius:20px; font-size:12px; font-weight:700; box-shadow:0 2px 8px rgba(249,115,22,.25); }
