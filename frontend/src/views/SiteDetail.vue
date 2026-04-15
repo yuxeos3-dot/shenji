@@ -100,7 +100,7 @@
         <thead><tr><th>ID</th><th>状态</th><th>进度</th><th>开始时间</th><th>完成时间</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="a in audits" :key="a.id">
-            <td style="font-weight:800;color:var(--sun)">#{{ a.id }}</td>
+            <td style="font-weight:800;color:var(--sun)">{{ a.id }}</td>
             <td><span class="badge" :class="a.status==='done'?'badge-ok':a.status==='running'?'badge-warn':'badge-err'">{{ a.status==='done'?'已完成':a.status==='running'?'进行中':a.status==='pending'?'等待中':'失败' }}</span></td>
             <td><div class="progress-bar"><div class="progress-fill" :style="{width:a.progress+'%'}"></div></div><span class="progress-text">{{ a.progress }}%</span></td>
             <td style="font-size:12px;color:var(--ink-soft)">{{ a.created_at }}</td>
