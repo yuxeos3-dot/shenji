@@ -102,7 +102,7 @@
       <el-form :model="form" label-width="110px" class="sunrise-form">
         <div class="form-section-title">基本信息</div>
         <el-form-item label="域名">
-          <el-input v-model="form.domain" placeholder="example.com（不含 https://）" />
+          <el-input v-model="form.domain" placeholder="https://example.com（必须包含 https:// 或 http://）" />
         </el-form-item>
         <el-form-item label="站点名称">
           <el-input v-model="form.name" placeholder="我的网站" />
@@ -181,6 +181,9 @@ async function loadSites() {
 
 async function saveSite() {
   if (!form.value.domain) { ElMessage.warning('请填写域名'); return }
+  if (!form.value.domain.startsWith('http://') && !form.value.domain.startsWith('https://')) {
+    ElMessage.warning('域名必须以 https:// 或 http:// 开头'); return
+  }
   if (!form.value.name) { ElMessage.warning('请填写站点名称'); return }
   try {
     if (editId.value) {

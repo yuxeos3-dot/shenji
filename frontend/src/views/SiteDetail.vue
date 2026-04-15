@@ -14,7 +14,14 @@
         </button>
       </div>
       <div class="info-grid">
-        <div class="info-item"><span class="info-label">域名</span><span class="info-val">{{ site.domain }}</span></div>
+        <div class="info-item">
+          <span class="info-label">域名</span>
+          <span class="info-val">
+            <a :href="site.domain" target="_blank" class="domain-link">
+              {{ site.domain }} <span class="link-icon">↗</span>
+            </a>
+          </span>
+        </div>
         <div class="info-item"><span class="info-label">名称</span><span class="info-val">{{ site.name }}</span></div>
         <div class="info-item"><span class="info-label">状态</span><span class="info-val"><span class="badge badge-ok">{{ site.status === 'active' ? '启用' : '停用' }}</span></span></div>
       </div>
@@ -317,6 +324,10 @@ watch(() => route.params.id, () => { if (route.params.id) loadData() })
 .progress-bar { display:inline-block; width:80px; height:6px; background:var(--border-light); border-radius:3px; overflow:hidden; vertical-align:middle; margin-right:6px; }
 .progress-fill { height:100%; background:linear-gradient(135deg,var(--sun),var(--coral)); border-radius:3px; transition:width .3s; }
 .progress-text { font-size:11px; font-weight:700; color:var(--ink-soft); }
+
+.domain-link { color:var(--info); font-weight:700; font-size:14px; display:inline-flex; align-items:center; gap:4px; }
+.domain-link:hover { color:var(--sun); text-decoration:underline; }
+.link-icon { font-size:12px; opacity:.7; }
 
 /* ── 页面管理 ── */
 .page-tip { font-size:12.5px; color:var(--ink-soft); margin-bottom:16px; }
