@@ -8,7 +8,7 @@
 
     <div v-if="task" class="panel panel-amber" style="margin-bottom:18px">
       <div class="info-grid-3">
-        <div class="info-item"><span class="info-label">状态</span><span class="badge" :class="task.status==='done'?'badge-ok':task.status==='running'?'badge-warn':'badge-err'">{{ task.status }}</span></div>
+        <div class="info-item"><span class="info-label">状态</span><span class="badge" :class="task.status==='done'?'badge-ok':task.status==='running'?'badge-warn':'badge-err'">{{ task.status==='done'?'已完成':task.status==='running'?'进行中':task.status==='pending'?'等待中':'失败' }}</span></div>
         <div class="info-item"><span class="info-label">进度</span><div style="display:flex;align-items:center;gap:8px"><div class="progress-bar" style="width:120px"><div class="progress-fill" :style="{width:task.progress+'%'}"></div></div><span class="progress-text">{{ task.progress }}%</span></div></div>
         <div class="info-item"><span class="info-label">时间</span><span style="font-size:13px;color:var(--ink-mid)">{{ task.created_at }}</span></div>
       </div>

@@ -16,9 +16,9 @@
       <div class="info-grid">
         <div class="info-item"><span class="info-label">域名</span><span class="info-val">{{ site.domain }}</span></div>
         <div class="info-item"><span class="info-label">名称</span><span class="info-val">{{ site.name }}</span></div>
-        <div class="info-item"><span class="info-label">GSC URL</span><span class="info-val">{{ site.gsc_site_url || '—' }}</span></div>
-        <div class="info-item"><span class="info-label">GA Property</span><span class="info-val">{{ site.ga_property_id || '—' }}</span></div>
-        <div class="info-item"><span class="info-label">Yandex Host</span><span class="info-val">{{ site.yandex_host_id || '—' }}</span></div>
+        <div class="info-item"><span class="info-label">GSC 站点地址</span><span class="info-val">{{ site.gsc_site_url || '—' }}</span></div>
+        <div class="info-item"><span class="info-label">GA 媒体资源ID</span><span class="info-val">{{ site.ga_property_id || '—' }}</span></div>
+        <div class="info-item"><span class="info-label">Yandex 主机ID</span><span class="info-val">{{ site.yandex_host_id || '—' }}</span></div>
         <div class="info-item"><span class="info-label">状态</span><span class="info-val"><span class="badge badge-ok">{{ site.status }}</span></span></div>
       </div>
     </div>
