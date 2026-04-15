@@ -189,7 +189,9 @@ func GetGAData(c *gin.Context) {
 		var date, channelsJSON, pagesJSON string
 		var sessions, users, pageviews int
 		var bounceRate, avgDuration float64
-		rows.Scan(&date, &sessions, &users, &pageviews, &bounceRate, &avgDuration, &channelsJSON, &pagesJSON)
+		if err := rows.Scan(&date, &sessions, &users, &pageviews, &bounceRate, &avgDuration, &channelsJSON, &pagesJSON); err != nil {
+			continue
+		}
 		data = append(data, gin.H{
 			"date": date, "sessions": sessions, "users": users, "pageviews": pageviews,
 			"bounce_rate": bounceRate, "avg_duration": avgDuration,

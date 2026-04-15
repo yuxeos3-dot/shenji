@@ -47,7 +47,9 @@ func ListReports(c *gin.Context) {
 	for rows.Next() {
 		var id, userID int64
 		var userName, reportDate, content, tasksDone, tasksTodo, issues, createdAt string
-		rows.Scan(&id, &userID, &userName, &reportDate, &content, &tasksDone, &tasksTodo, &issues, &createdAt)
+		if err := rows.Scan(&id, &userID, &userName, &reportDate, &content, &tasksDone, &tasksTodo, &issues, &createdAt); err != nil {
+			continue
+		}
 		reports = append(reports, gin.H{
 			"id": id, "user_id": userID, "user_name": userName,
 			"report_date": reportDate, "content": content,
@@ -141,7 +143,9 @@ func ExportReports(c *gin.Context) {
 	var data []gin.H
 	for rows.Next() {
 		var date, name, content, tasksDone, tasksTodo, issues string
-		rows.Scan(&date, &name, &content, &tasksDone, &tasksTodo, &issues)
+		if err := rows.Scan(&date, &name, &content, &tasksDone, &tasksTodo, &issues); err != nil {
+			continue
+		}
 		data = append(data, gin.H{
 			"date": date, "name": name, "content": content,
 			"tasks_done": json.RawMessage(tasksDone), "tasks_todo": json.RawMessage(tasksTodo),

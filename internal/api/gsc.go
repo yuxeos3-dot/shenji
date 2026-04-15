@@ -309,7 +309,9 @@ func GetGSCData(c *gin.Context) {
 		var date, keywords, pages, devices, countries string
 		var clicks, impressions int
 		var ctr, position float64
-		rows.Scan(&date, &clicks, &impressions, &ctr, &position, &keywords, &pages, &devices, &countries)
+		if err := rows.Scan(&date, &clicks, &impressions, &ctr, &position, &keywords, &pages, &devices, &countries); err != nil {
+			continue
+		}
 		data = append(data, gin.H{
 			"date": date, "clicks": clicks, "impressions": impressions,
 			"ctr": ctr, "position": position,

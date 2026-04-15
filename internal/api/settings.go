@@ -39,7 +39,9 @@ func GetSettings(c *gin.Context) {
 	settings := make(map[string]string)
 	for rows.Next() {
 		var key, value string
-		rows.Scan(&key, &value)
+		if err := rows.Scan(&key, &value); err != nil {
+			continue
+		}
 		settings[key] = maskValue(key, value)
 	}
 
@@ -54,8 +56,8 @@ func SaveSettings(c *gin.Context) {
 	}
 
 	for key, value := range settings {
-		// Skip masked values (user didn't change them)
-		if strings.Contains(value, "****") {
+		// Skip masked values for sensitive keys (user didn't change them)
+		if sensitiveKeys[key] && strings.HasPrefix(value, "****") {
 			continue
 		}
 		if err := db.SetSetting(key, value); err != nil {

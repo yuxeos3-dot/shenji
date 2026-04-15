@@ -79,7 +79,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import apiClient from '../api'
@@ -106,6 +106,7 @@ async function syncGA() { syncing.value.ga = true; try { await apiClient.syncGA(
 async function syncYandex() { syncing.value.yandex = true; try { await apiClient.syncYandex(route.params.id); ElMessage.success('Yandex同步成功'); loadData() } catch {} finally { syncing.value.yandex = false } }
 
 onMounted(loadData)
+watch(() => route.params.id, () => { if (route.params.id) loadData() })
 </script>
 
 <style scoped>

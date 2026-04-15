@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 
 	"seo-system/internal/db"
@@ -37,7 +38,9 @@ func ListUsers(c *gin.Context) {
 		var name, email, role, telegramID string
 		var createdAt string
 		var lastLogin *string
-		rows.Scan(&id, &name, &email, &role, &telegramID, &createdAt, &lastLogin)
+		if err := rows.Scan(&id, &name, &email, &role, &telegramID, &createdAt, &lastLogin); err != nil {
+			continue
+		}
 		users = append(users, gin.H{
 			"id":          id,
 			"name":        name,
@@ -111,7 +114,7 @@ func DeleteUser(c *gin.Context) {
 
 	// Prevent deleting self
 	currentUserID := c.GetInt64("user_id")
-	if id == string(rune(currentUserID)) {
+	if id == fmt.Sprintf("%d", currentUserID) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "不能删除自己"})
 		return
 	}

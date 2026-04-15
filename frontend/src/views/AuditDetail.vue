@@ -69,7 +69,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '../api'
 import IssueList from '../components/IssueList.vue'
@@ -86,7 +86,7 @@ function parseJSON(str) {
   try { const p = typeof str === 'string' ? JSON.parse(str) : str; return Array.isArray(p) ? p : [] } catch { return [] }
 }
 
-onMounted(async () => {
+async function loadData() {
   try {
     const [auditRes, pagesRes] = await Promise.all([api.getAudit(route.params.taskId), api.getAuditPages(route.params.taskId)])
     task.value = auditRes.data.task
@@ -94,7 +94,10 @@ onMounted(async () => {
     pages.value = pagesRes.data
     if (pages.value.length) activePage.value = pages.value[0].page_type
   } catch {}
-})
+}
+
+onMounted(loadData)
+watch(() => route.params.taskId, () => { if (route.params.taskId) loadData() })
 </script>
 
 <style scoped>

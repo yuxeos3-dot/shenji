@@ -177,7 +177,9 @@ func ListAudits(c *gin.Context) {
 		var progress int
 		var errorMsg, createdAt string
 		var finishedAt *string
-		rows.Scan(&id, &siteIDVal, &triggeredBy, &status, &progress, &errorMsg, &createdAt, &finishedAt)
+		if err := rows.Scan(&id, &siteIDVal, &triggeredBy, &status, &progress, &errorMsg, &createdAt, &finishedAt); err != nil {
+			continue
+		}
 		audits = append(audits, gin.H{
 			"id":           id,
 			"site_id":      siteIDVal,
@@ -264,7 +266,9 @@ func GetAuditPages(c *gin.Context) {
 		var id int64
 		var pageType, url, html, errorMsg, fetchedAt string
 		var statusCode, ttfb, htmlSize int
-		rows.Scan(&id, &pageType, &url, &statusCode, &ttfb, &html, &htmlSize, &errorMsg, &fetchedAt)
+		if err := rows.Scan(&id, &pageType, &url, &statusCode, &ttfb, &html, &htmlSize, &errorMsg, &fetchedAt); err != nil {
+			continue
+		}
 		pages = append(pages, gin.H{
 			"id":          id,
 			"page_type":   pageType,

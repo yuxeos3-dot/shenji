@@ -44,7 +44,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
@@ -68,6 +68,7 @@ async function triggerAudit() {
 }
 
 onMounted(loadData)
+watch(() => route.params.id, () => { if (route.params.id) loadData() })
 </script>
 
 <style scoped>

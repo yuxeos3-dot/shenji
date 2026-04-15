@@ -328,7 +328,9 @@ func GetYandexData(c *gin.Context) {
 	for rows.Next() {
 		var date, keywordsJSON, errorsJSON string
 		var clicks, impressions, indexCount int
-		rows.Scan(&date, &clicks, &impressions, &indexCount, &keywordsJSON, &errorsJSON)
+		if err := rows.Scan(&date, &clicks, &impressions, &indexCount, &keywordsJSON, &errorsJSON); err != nil {
+			continue
+		}
 		data = append(data, gin.H{
 			"date": date, "clicks": clicks, "impressions": impressions,
 			"index_count":   indexCount,

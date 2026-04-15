@@ -41,7 +41,9 @@ func ListSites(c *gin.Context) {
 		var id int64
 		var domain, name, gscURL, gaID, yandexID, status, createdAt string
 		var lastAuditStatus, lastAuditTime *string
-		rows.Scan(&id, &domain, &name, &gscURL, &gaID, &yandexID, &status, &createdAt, &lastAuditStatus, &lastAuditTime)
+		if err := rows.Scan(&id, &domain, &name, &gscURL, &gaID, &yandexID, &status, &createdAt, &lastAuditStatus, &lastAuditTime); err != nil {
+			continue
+		}
 		sites = append(sites, gin.H{
 			"id":                id,
 			"domain":            domain,

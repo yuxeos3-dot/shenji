@@ -33,10 +33,10 @@
       <div v-if="!editId" class="form-group"><label>密码</label><input v-model="form.password" type="password" /></div>
       <div class="form-group">
         <label>角色</label>
-        <select v-model="form.role">
-          <option value="admin">管理员</option>
-          <option value="member">成员</option>
-        </select>
+        <el-select v-model="form.role" style="width:100%">
+          <el-option label="管理员" value="admin" />
+          <el-option label="成员" value="member" />
+        </el-select>
       </div>
       <div class="form-group"><label>Telegram ID</label><input v-model="form.telegram_id" /></div>
       <template #footer>

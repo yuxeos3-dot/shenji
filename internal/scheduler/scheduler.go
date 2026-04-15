@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"log"
+	"strconv"
+	"sync"
 	"time"
 
 	"seo-system/internal/crawler"
@@ -67,7 +69,9 @@ func runScheduledAudit() {
 	for rows.Next() {
 		var id int64
 		var domain, name, urlCat, urlDet, urlNL, urlND, urlSearch, urlStatic string
-		rows.Scan(&id, &domain, &name, &urlCat, &urlDet, &urlNL, &urlND, &urlSearch, &urlStatic)
+		if err := rows.Scan(&id, &domain, &name, &urlCat, &urlDet, &urlNL, &urlND, &urlSearch, &urlStatic); err != nil {
+			continue
+		}
 		sites = append(sites, siteInfo{
 			ID:   id,
 			Name: name,
@@ -83,9 +87,26 @@ func runScheduledAudit() {
 		})
 	}
 
-	for _, site := range sites {
-		go runSiteAudit(site.ID, site.Name, site.Config)
+	// Limit concurrent audits
+	maxConcurrent := 3
+	if v := db.GetSetting("max_concurrent_audit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxConcurrent = n
+		}
 	}
+
+	sem := make(chan struct{}, maxConcurrent)
+	var wg sync.WaitGroup
+	for _, site := range sites {
+		wg.Add(1)
+		go func(s siteInfo) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			runSiteAudit(s.ID, s.Name, s.Config)
+		}(site)
+	}
+	wg.Wait()
 }
 
 func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
