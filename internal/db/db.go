@@ -194,7 +194,7 @@ func Init() {
 		"ALTER TABLE sites ADD COLUMN audit_daily_hour INTEGER DEFAULT -1",
 	}
 	for _, m := range migrations {
-		db.DB.Exec(m) // ignore errors (column already exists)
+		DB.Exec(m) // ignore errors (column already exists)
 	}
 }
 
