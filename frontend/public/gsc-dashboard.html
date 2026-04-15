@@ -44,7 +44,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
 
 /* LOGIN */
-#login-screen{position:fixed;inset:0;z-index:500;background:var(--panel);display:flex;align-items:center;justify-content:center;background-image:radial-gradient(ellipse 70% 50% at 50% 0%,rgba(0,113,227,.07) 0%,transparent 60%)}
+#login-screen{position:fixed;inset:0;z-index:500;background:var(--panel);display:none;align-items:center;justify-content:center;background-image:radial-gradient(ellipse 70% 50% at 50% 0%,rgba(0,113,227,.07) 0%,transparent 60%)}
 .login-wrap{width:440px;max-width:92vw;text-align:center}
 .login-badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--blue);background:var(--blue-l);border-radius:20px;padding:5px 14px;margin-bottom:28px}
 .lbdot{width:6px;height:6px;border-radius:50%;background:var(--blue);animation:blink 1.4s infinite}
@@ -1011,32 +1011,53 @@ function hideLoad(){const el=document.getElementById('loading');if(el)el.classLi
 
 // Restore Yandex Client ID
 window.addEventListener('DOMContentLoaded',()=>{
-  // Read config from URL params (injected by parent page)
+  // Read config from URL params
   const params = new URLSearchParams(window.location.search);
   const urlCid = params.get('cid');
   const urlYtk = params.get('ytk');
   
-  // Apply Client ID if provided
   if(urlCid){
     const el = document.getElementById('client-id-input');
     if(el) el.value = urlCid;
   }
   
-  // Apply Yandex token if provided, else use hardcoded
   const HARDCODED_TOKEN = urlYtk || 'y0__xDKxafgCBiX0z8g7tjA9RY6_2WTWgBQ78k2YJBOmtrgozXq9w';
   yToken = HARDCODED_TOKEN;
   localStorage.setItem('yx_token', HARDCODED_TOKEN);
-  
-  // Auto-login if both tokens are ready (token passed directly from parent)
-  const gtkParam = params.get('gtk');
-  if(gtkParam){
-    gToken = gtkParam;
-    // Hide login screen, go directly to dashboard
-    const ls = document.getElementById('login-screen');
-    if(ls) ls.style.display = 'none';
-    enterDashboard();
-  }
+
+  // Attempt auto/silent Google login
+  const cid = urlCid || document.getElementById('client-id-input')?.value?.trim();
+  if(cid){
+    // Load GIS library then attempt silent token
+    const tryAutoLogin = () => {
+      try{
+        google.accounts.oauth2.initTokenClient({
+          client_id: cid,
+          scope: GSCOPES,
+          prompt: '',   // empty = silent if already authorized, no popup
+          callback: async r => {
+            if(r.error || !r.access_token){ showLoginScreen(); return; }
+            gToken = r.access_token;
+            enterDashboard();
+          },
+          error_callback: () => { showLoginScreen(); }
+        }).requestAccessToken({prompt:''});
+      }catch(e){ showLoginScreen(); }
+    };
+    if(!window.google?.accounts){
+      const s=document.createElement('script');
+      s.src='https://accounts.google.com/gsi/client';
+      s.onload=tryAutoLogin;
+      s.onerror=()=>showLoginScreen();
+      document.head.appendChild(s);
+    }else{ tryAutoLogin(); }
+  }else{ showLoginScreen(); }
 });
+
+function showLoginScreen(){
+  const ls=document.getElementById('login-screen');
+  if(ls) ls.style.display='flex';
+}
 </script>
 </body>
 </html>
