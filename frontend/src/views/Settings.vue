@@ -39,6 +39,11 @@
               <input class="field-input" v-model="settings.ai_model" placeholder="claude-sonnet-4-6 / gpt-4o" />
               <div class="field-hint">填写模型的完整名称，例如 claude-sonnet-4-6、gpt-4o、gemini-2.0-flash 等</div>
             </div>
+            <div class="field-row">
+              <label class="field-label">最大输出 tokens</label>
+              <input class="field-input" v-model="settings.ai_max_tokens" placeholder="32000" />
+              <div class="field-hint">AI 每次审计最多生成的 token 数。默认 32000；Claude Sonnet 4.6 支持到 64000。输出被截断时可调高此值。</div>
+            </div>
             <div class="action-row">
               <button class="btn btn-test" @click="testAI" :disabled="testing.ai">{{ testing.ai ? '检测中...' : '🔌 测试接口连通性' }}</button>
             </div>

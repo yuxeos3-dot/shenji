@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -426,8 +427,8 @@ func BuildV6AuditPrompt(domain string, sitePages []SitePageForPrompt, crawlPages
           "scope": "首页",
           "evidence_label": "homepage <head> 源码",
           "evidence_code": "<head>\n  <title>示例站</title>\n  <!-- 无description -->\n</head>",
-          "current_status": "首页缺少meta description标签。Google会从页面正文中自动生成摘要，通常效果不佳，影响点击率。",
-          "fix_suggestion": "在<head>中添加：\n<meta name=\"description\" content=\"【站点名】提供最新电影、电视剧在线观看，海量高清资源免费播放。\">\n• 长度控制在120-160字符\n• 包含核心关键词\n• 每个页面唯一"
+          "current_status": "首页缺少 meta description。",
+          "fix_suggestion": "在 <head> 中添加：\n<meta name=\"description\" content=\"【站点名】提供最新电影、电视剧在线观看，海量高清资源免费播放。\">\n\n要点：\n• 长度 120–160 字符；移动端 SERP 会截到 ~120 字\n• 前 70 字必须包含核心关键词（首页=品牌词+业务词；列表页=分类词+长尾）\n• 每个页面唯一，禁止模板化套用\n• 结尾建议加行动号召（如「立即观看」「免费注册」）\n• 避免硬编码域名出现在 description 文案里（显得不专业）\n• 配合 Open Graph og:description 同步更新\n\n验收：在 Google Search Console → 网页体验 → 覆盖率 中看不到「meta description 缺失」提示；用 https://www.mysitedisplay.com/ 预览 SERP 显示符合预期。"
         }
       ]
     }
@@ -435,17 +436,24 @@ func BuildV6AuditPrompt(domain string, sitePages []SitePageForPrompt, crawlPages
 }
 
 **严格要求：**
-1. severity只能是：致命、严重、中等、低
-2. id全局连续，从1开始
-3. evidence_code必须是从上方源码中提取的真实片段，不允许编造
-4. fix_suggestion必须包含可执行的HTML代码或具体操作步骤
-5. **总问题数不少于40个**
-6. **必须覆盖24大类+6附加类，每类至少1个问题**
-7. **必须有独立的"深度白帽SEO优化建议"章节（附加类F）**，包含运营可执行的具体建议
-8. 按章节分组，章节标题格式："一、TDK与基础Meta"、"二、H标签结构"...
-9. 最后一章必须是"深度白帽SEO优化建议"
-10. 先输出fatal和serious问题，再输出medium和low
-11. 章节顺序按优先级排列，最重要的问题在最前面
+1. severity 只能是：致命、严重、中等、低
+2. id 全局连续，从 1 开始
+3. evidence_code 必须是从上方源码中提取的真实片段，不允许编造
+4. **字段长度规范（严格遵守，保证问题一个都不漏）：**
+   - title：≤ 20 字，一句话点名问题，不加语气词
+   - scope：≤ 15 字，如"首页 head"、"分类页"、"全站"
+   - evidence_label：≤ 20 字
+   - evidence_code：只贴最关键的 3-10 行源码，不要整段 head/body；多行用 \n
+   - current_status：**≤ 40 字**，直接说"缺什么/错什么/量化数值"，不解释原理不推断后果
+   - summary：≤ 80 字，不要展开
+   - fix_suggestion：**可详细 200-400 字**，必须含：① 可复制的 HTML/配置代码 ② 3-5 条关键参数（字数/位置/频次） ③ 验收方式（用什么工具验证）
+5. **发现多少报多少，一个都不许漏**。质量优先，不要凑数编造问题。
+6. 必须覆盖 24 大类 + 6 附加类，完全合规的大类可以跳过
+7. 必须有独立的"深度白帽 SEO 优化建议"章节（附加类 F）
+8. 按章节分组，标题格式："一、TDK与基础Meta"、"二、H标签结构"……
+9. 最后一章为"深度白帽 SEO 优化建议"
+10. 先输出 fatal 和 serious，再 medium 和 low
+11. **Token 优先级**：输出接近 30000 tokens 时，优先保留所有 fatal/serious 完整输出；low 级别可压缩 fix_suggestion 到 100 字内，但问题本身不能省略
 `, domain, time.Now().Format("2006-01-02"))
 
 	return prompt
@@ -472,12 +480,22 @@ func CallAI(prompt string) (*AnalysisResult, string, error) {
 		model = "claude-sonnet-4-6"
 	}
 
+	// Resolve max_tokens with runtime override: settings > env > default.
+	// Claude Sonnet 4.6 supports up to 64k output tokens; we default to 32k
+	// which is plenty for a full V6 report but still bounded.
+	maxTok := 32000
+	if v := db.GetSetting("ai_max_tokens"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 128000 {
+			maxTok = n
+		}
+	}
+
 	reqBody := map[string]interface{}{
 		"model": model,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
-		"max_tokens":  16000,
+		"max_tokens":  maxTok,
 		"temperature": 0.2,
 	}
 
@@ -537,21 +555,24 @@ func CallAI(prompt string) (*AnalysisResult, string, error) {
 
 	finishReason := apiResp.Choices[0].FinishReason
 	rawContent := apiResp.Choices[0].Message.Content
+	truncated := finishReason == "length"
 
-	// If output was truncated due to token limit, return error so user knows to retry
-	if finishReason == "length" {
-		return &AnalysisResult{RawResponse: rawContent}, model,
-			fmt.Errorf("AI输出被截断（token超限），当前max_tokens=%d不足，请联系管理员提升token上限或减少监控页面数量", 16000)
-	}
-
+	// Extract + repair. Repair is rewrite-aware: if the tail is a half-written
+	// element we rewind to the last clean issue before closing brackets.
 	content := extractJSON(rawContent)
-
-	// Try to repair truncated JSON by closing unclosed brackets
 	content = repairJSON(content)
 
-	// Try to parse as V6Report
+	// Try to parse as V6Report. We now accept "partial" success: as long as
+	// we got at least one chapter with at least one issue we return what we
+	// have, tagged with a truncation notice in Summary. This prevents the
+	// entire audit from being discarded just because the tail got clipped.
 	var v6 V6Report
 	if err := json.Unmarshal([]byte(content), &v6); err == nil && len(v6.Chapters) > 0 {
+		// Prune any trailing chapter whose issues array is empty — that's
+		// almost always the one that got truncated and contains no useful data.
+		for len(v6.Chapters) > 0 && len(v6.Chapters[len(v6.Chapters)-1].Issues) == 0 {
+			v6.Chapters = v6.Chapters[:len(v6.Chapters)-1]
+		}
 		// Recalculate totals if zero
 		if v6.TotalIssues == 0 {
 			for _, ch := range v6.Chapters {
@@ -570,11 +591,20 @@ func CallAI(prompt string) (*AnalysisResult, string, error) {
 				}
 			}
 		}
+		summary := v6.Summary
+		if truncated {
+			v6.Summary = "【注意：AI 输出因 token 上限被截断，尾部章节可能不完整】\n" + v6.Summary
+			summary = v6.Summary
+		}
 		// Re-serialize clean JSON
 		cleanJSON, _ := json.Marshal(v6)
+		suggestions := fmt.Sprintf("共发现%d个问题（致命:%d 严重:%d 中等:%d 低:%d）", v6.TotalIssues, v6.Fatal, v6.Serious, v6.Medium, v6.Low)
+		if truncated {
+			suggestions = "⚠️ 输出被截断，以下为可用部分。" + suggestions
+		}
 		result := &AnalysisResult{
-			Summary:        v6.Summary,
-			Suggestions:    fmt.Sprintf("共发现%d个问题（致命:%d 严重:%d 中等:%d 低:%d）", v6.TotalIssues, v6.Fatal, v6.Serious, v6.Medium, v6.Low),
+			Summary:        summary,
+			Suggestions:    suggestions,
 			SEOIssues:      json.RawMessage("[]"),
 			CodeIssues:     json.RawMessage("[]"),
 			SecurityIssues: json.RawMessage("[]"),
@@ -583,6 +613,14 @@ func CallAI(prompt string) (*AnalysisResult, string, error) {
 			RawResponse:    rawContent,
 		}
 		return result, model, nil
+	}
+
+	// If parse failed but the response was definitely truncated, return a
+	// targeted error referring to token limit instead of the generic "invalid
+	// JSON" one.
+	if truncated {
+		return &AnalysisResult{RawResponse: rawContent}, model,
+			fmt.Errorf("AI输出被截断（finish_reason=length），且修复后仍无法解析。建议在系统设置里提高 ai_max_tokens（当前 %d），或减少监控页面数量", maxTok)
 	}
 
 	// Fallback — JSON parse failed. Return the raw response so the caller can
@@ -653,20 +691,32 @@ func extractJSON(s string) string {
 	return s
 }
 
-// repairJSON tries to close unclosed JSON by counting brackets
+// repairJSON repairs JSON that was cut off by the token limit. The key trick:
+// when truncation happens mid-string, just closing brackets is wrong because
+// the current object / array element is half-written garbage. Instead we walk
+// backwards from the tail, find the last point at which the structure was
+// *cleanly* between array elements (i.e. after a `}` or `]` at array depth
+// inside `chapters.issues`), discard the partial element, and only then close
+// the remaining open containers.
 func repairJSON(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) == 0 {
 		return s
 	}
 
-	// Count unclosed braces and brackets
+	// 1) Walk forward tracking structure state, recording a "rewind point" each
+	//    time we finish an element at array depth (i.e. just after `,` or just
+	//    before the closing `]` that follows a complete element). If the tail
+	//    turns out to be inside a string, we'll rewind to the last safe point.
+	rewindTo := -1 // byte offset of last `}` that was followed by `,` at array depth
 	braces := 0
 	brackets := 0
 	inString := false
 	escaped := false
 
-	for _, c := range s {
+	bytes := []byte(s)
+	for i := 0; i < len(bytes); i++ {
+		c := bytes[i]
 		if escaped {
 			escaped = false
 			continue
@@ -687,6 +737,10 @@ func repairJSON(s string) string {
 			braces++
 		case '}':
 			braces--
+			// Record this position if we're inside at least one array.
+			if brackets > 0 {
+				rewindTo = i + 1 // position *after* the closing brace
+			}
 		case '[':
 			brackets++
 		case ']':
@@ -694,7 +748,53 @@ func repairJSON(s string) string {
 		}
 	}
 
-	// Close unclosed structures
+	// 2) If we're still inside a string at EOF, the tail is definitely truncated
+	//    mid-value. Rewind to the last clean `}` inside an array (i.e. a fully
+	//    written element) and discard everything after it.
+	if inString && rewindTo > 0 {
+		s = s[:rewindTo]
+		// Recount the structure state of the rewound prefix.
+		braces, brackets, inString = 0, 0, false
+		escaped = false
+		for i := 0; i < len(s); i++ {
+			c := s[i]
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' && inString {
+				escaped = true
+				continue
+			}
+			if c == '"' {
+				inString = !inString
+				continue
+			}
+			if inString {
+				continue
+			}
+			switch c {
+			case '{':
+				braces++
+			case '}':
+				braces--
+			case '[':
+				brackets++
+			case ']':
+				brackets--
+			}
+		}
+	}
+
+	// 3) Trim any trailing `,` we may have been left with after rewinding or
+	//    after the AI stopping between array elements.
+	s = strings.TrimRight(s, " \t\r\n,")
+
+	// 4) Close remaining structure. Close arrays and objects in the order they
+	//    were opened (arrays generally live *inside* objects, so we alternate
+	//    by looking at the last unmatched opener if we wanted to be precise,
+	//    but a best-effort close-arrays-first-then-objects works for the known
+	//    V6Report shape).
 	for brackets > 0 {
 		s += "]"
 		brackets--
