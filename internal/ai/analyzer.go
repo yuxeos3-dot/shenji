@@ -513,6 +513,7 @@ func CallAI(prompt string) (*AnalysisResult, string, error) {
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
 
@@ -521,10 +522,17 @@ func CallAI(prompt string) (*AnalysisResult, string, error) {
 	}
 
 	if len(apiResp.Choices) == 0 {
-		return nil, model, fmt.Errorf("AI未返回结果")
+		return nil, model, fmt.Errorf("AI未返回结果，响应体: %s", string(body)[:min(500, len(body))])
 	}
 
+	finishReason := apiResp.Choices[0].FinishReason
 	content := apiResp.Choices[0].Message.Content
+
+	// If output was truncated due to token limit, return error so user knows to retry
+	if finishReason == "length" {
+		return nil, model, fmt.Errorf("AI输出被截断（token超限），当前max_tokens=%d不足，请联系管理员提升token上限或减少监控页面数量", 16000)
+	}
+
 	content = extractJSON(content)
 
 	// Try to repair truncated JSON by closing unclosed brackets
@@ -565,20 +573,12 @@ func CallAI(prompt string) (*AnalysisResult, string, error) {
 		return result, model, nil
 	}
 
-	// Fallback — store raw but mark as unparsed
-	summary := "AI返回了响应但JSON解析失败，请重新巡检"
-	if len(content) > 100 {
-		summary = "报告生成中，数据处理异常，请重新巡检"
+	// Fallback — JSON parse failed, return error with preview
+	preview := content
+	if len(preview) > 200 {
+		preview = preview[:200]
 	}
-	result := &AnalysisResult{
-		Summary:        summary,
-		SEOIssues:      json.RawMessage("[]"),
-		CodeIssues:     json.RawMessage("[]"),
-		SecurityIssues: json.RawMessage("[]"),
-		PerfIssues:     json.RawMessage("[]"),
-		V6Report:       "",
-	}
-	return result, model, nil
+	return nil, model, fmt.Errorf("AI返回内容无法解析为报告格式，内容预览: %s", preview)
 }
 
 func min(a, b int) int {
