@@ -21,7 +21,11 @@
         </div>
       </div>
 
-      <div class="cap-text">
+      <div class="cap-toggle" @click="capExpanded=!capExpanded">
+        <span>📋 检查覆盖范围（28大类 200+ 检查点）</span>
+        <span class="cap-toggle-icon">{{ capExpanded ? '▲ 收起' : '▼ 展开查看' }}</span>
+      </div>
+      <div v-show="capExpanded" class="cap-text">
         每次巡检自动触发以下全部检查，覆盖 28 大类 200+ 检查点：<br><br>
 
         <strong>SEO 基础</strong>：TDK 查询（Title/Description/Keywords 长度规范、关键词覆盖、跨页面重复）、H 标签查询（H1 唯一性/隐藏检测/H2-H6 层级跳跃）、图片 SEO 查询（alt 完整性与描述性、首屏禁 lazy-load、width/height 防 CLS）、链接与内链查询（孤立页面、锚文本描述性、内链数量）、结构化数据查询（VideoObject/Article/BreadcrumbList/AggregateRating 字段完整性）、Canonical 查询（自引用/重复内容处理）、Open Graph 查询（og:title/og:description/og:image 完整性）。<br><br>
@@ -149,6 +153,7 @@ const sites = ref([])
 const loading = ref(false)
 const showDialog = ref(false)
 const editId = ref(null)
+const capExpanded = ref(false)
 const form = ref({ domain: '', name: '', gsc_site_url: '', ga_property_id: '', yandex_host_id: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' })
 
 const activeSites = computed(() => sites.value.filter(s => s.status === 'active').length)
@@ -204,6 +209,9 @@ onMounted(loadSites)
 .cap-icon { font-size:36px; flex-shrink:0; }
 .cap-title { font-size:17px; font-weight:800; color:var(--ink); letter-spacing:-.3px; margin-bottom:4px; }
 .cap-subtitle { font-size:13px; color:var(--ink-soft); line-height:1.7; max-width:900px; }
+.cap-toggle { display:flex; justify-content:space-between; align-items:center; cursor:pointer; padding:8px 12px; border-radius:var(--r-sm); background:rgba(255,255,255,.6); border:1px solid var(--peach); margin-bottom:10px; font-size:13px; font-weight:700; color:var(--sun-deep); user-select:none; }
+.cap-toggle:hover { background:#fff; }
+.cap-toggle-icon { font-size:12px; color:var(--ink-soft); }
 .cap-section-title { font-size:14px; font-weight:800; color:var(--sun-deep); margin:0 0 12px; }
 .cap-text { font-size:13.5px; color:var(--ink-mid); line-height:1.85; margin-bottom:18px; }
 .cap-text strong { color:var(--ink); font-weight:700; }
