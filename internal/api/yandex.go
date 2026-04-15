@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"seo-system/internal/db"
 
 	"github.com/gin-gonic/gin"
 )
+
+const yandexAPI = "https://api.webmaster.yandex.net/v4"
 
 func GetYandexAuthURL(c *gin.Context) {
 	clientID := db.GetSetting("yandex_client_id")
@@ -63,6 +67,99 @@ func YandexCallback(c *gin.Context) {
 	c.Redirect(http.StatusFound, "/?oauth=yandex&status=success")
 }
 
+// yandexFetch wraps Yandex Webmaster API calls (like yf() in gsc-dashboard.html)
+func yandexFetch(token, path string) (json.RawMessage, error) {
+	apiURL := yandexAPI + path
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "OAuth "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	return body, nil
+}
+
+// getYandexUserID mirrors loadYandexUser() in gsc-dashboard.html:
+// First tries Yandex login API, then Webmaster /user/ API
+func getYandexUserID(token string) (string, error) {
+	// Step 1: Try login info API
+	req, _ := http.NewRequest("GET", "https://login.yandex.ru/info?format=json", nil)
+	req.Header.Set("Authorization", "OAuth "+token)
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err == nil && resp.StatusCode == 200 {
+		defer resp.Body.Close()
+		var info struct {
+			ID  string `json:"id"`
+			UID string `json:"uid"`
+		}
+		json.NewDecoder(resp.Body).Decode(&info)
+		loginID := info.ID
+		if loginID == "" {
+			loginID = info.UID
+		}
+		if loginID != "" {
+			// Step 2: Try Webmaster /user/ to get real user_id
+			data, err := yandexFetch(token, "/user/")
+			if err == nil {
+				var wu struct {
+					UserID int64 `json:"user_id"`
+				}
+				json.Unmarshal(data, &wu)
+				if wu.UserID > 0 {
+					return fmt.Sprintf("%d", wu.UserID), nil
+				}
+			}
+			return loginID, nil
+		}
+	} else if resp != nil {
+		resp.Body.Close()
+	}
+
+	// Step 3: Direct Webmaster user API
+	data, err := yandexFetch(token, "/user/")
+	if err != nil {
+		return "", fmt.Errorf("无法获取Yandex用户ID: %w", err)
+	}
+	var u struct {
+		UserID int64 `json:"user_id"`
+	}
+	json.Unmarshal(data, &u)
+	if u.UserID == 0 {
+		return "", fmt.Errorf("Yandex用户ID为空")
+	}
+	return fmt.Sprintf("%d", u.UserID), nil
+}
+
+func getYandexAccessToken() (string, error) {
+	var accessToken string
+	err := db.DB.QueryRow(
+		"SELECT access_token FROM oauth_tokens WHERE service = 'yandex' ORDER BY id DESC LIMIT 1",
+	).Scan(&accessToken)
+	if err != nil {
+		return "", fmt.Errorf("Yandex未授权")
+	}
+	return accessToken, nil
+}
+
+// SyncYandexData mirrors fetchYandexSiteData() in gsc-dashboard.html:
+// Uses search-queries/all/history for trend data (TOTAL_CLICKS, TOTAL_SHOWS, AVG_SHOW_POSITION)
+// Uses search-queries/popular for top keywords
 func SyncYandexData(c *gin.Context) {
 	siteID := c.Param("id")
 
@@ -79,116 +176,139 @@ func SyncYandexData(c *gin.Context) {
 		return
 	}
 
-	// Get user ID first
 	userID, err := getYandexUserID(token)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "获取Yandex用户ID失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
 
-	// Fetch indexing data
-	indexCount := fetchYandexIndexCount(token, userID, yandexHostID)
+	days := 30
+	ed := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	sd := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
+	encodedHostID := url.PathEscape(yandexHostID)
 
-	// Fetch search queries
-	keywordsJSON := fetchYandexKeywords(token, userID, yandexHostID)
+	// Fetch search-queries/all/history — trend data with indicators
+	// Mirrors: yf('/user/'+yUserId+'/hosts/'+hostId+'/search-queries/all/history?...')
+	historyPath := fmt.Sprintf("/user/%s/hosts/%s/search-queries/all/history?date_from=%s&date_to=%s&query_indicator=TOTAL_CLICKS&query_indicator=TOTAL_SHOWS&query_indicator=AVG_SHOW_POSITION&query_indicator=AVG_CLICK_POSITION",
+		userID, encodedHostID, sd, ed)
 
-	// Fetch diagnostics
-	errorsJSON := fetchYandexDiagnostics(token, userID, yandexHostID)
+	// Fetch search-queries/popular — top keywords
+	// Mirrors: yf('/user/'+yUserId+'/hosts/'+hostId+'/search-queries/popular?...')
+	popularPath := fmt.Sprintf("/user/%s/hosts/%s/search-queries/popular?date_from=%s&date_to=%s&order_by=TOTAL_CLICKS&limit=20&query_indicator=TOTAL_CLICKS&query_indicator=TOTAL_SHOWS&query_indicator=AVG_SHOW_POSITION&query_indicator=AVG_CLICK_POSITION",
+		userID, encodedHostID, sd, ed)
+
+	histData, histErr := yandexFetch(token, historyPath)
+	popData, _ := yandexFetch(token, popularPath)
+
+	// Parse history data — mirrors gsc-dashboard.html logic:
+	// const ind=hist.indicators||{};
+	// const clicks_arr=ind.TOTAL_CLICKS||[];
+	// const shows_arr=ind.TOTAL_SHOWS||[];
+	// totalClicks=clicks_arr.reduce((s,d)=>s+(d.value||0),0);
+	var totalClicks, totalImpressions int
+	var avgPosition float64
+
+	if histErr == nil {
+		var hist struct {
+			Indicators map[string][]struct {
+				Date  string `json:"date"`
+				Value int    `json:"value"`
+			} `json:"indicators"`
+		}
+		json.Unmarshal(histData, &hist)
+
+		clicksArr := hist.Indicators["TOTAL_CLICKS"]
+		showsArr := hist.Indicators["TOTAL_SHOWS"]
+		posArr := hist.Indicators["AVG_SHOW_POSITION"]
+
+		for _, d := range clicksArr {
+			totalClicks += d.Value
+		}
+		for _, d := range showsArr {
+			totalImpressions += d.Value
+		}
+		if len(posArr) > 0 {
+			sum := 0
+			for _, d := range posArr {
+				sum += d.Value
+			}
+			avgPosition = float64(sum) / float64(len(posArr))
+		}
+	}
+
+	// Parse popular queries for keywords JSON
+	keywordsJSON := "[]"
+	if popData != nil {
+		// Store the raw popular queries data
+		var pop struct {
+			Queries []json.RawMessage `json:"queries"`
+		}
+		if err := json.Unmarshal(popData, &pop); err == nil && pop.Queries != nil {
+			kw, _ := json.Marshal(pop.Queries)
+			keywordsJSON = string(kw)
+		}
+	}
+
+	// Store errors from diagnostics
+	errorsJSON := "[]"
+	diagPath := fmt.Sprintf("/user/%s/hosts/%s/diagnostics", userID, encodedHostID)
+	diagData, diagErr := yandexFetch(token, diagPath)
+	if diagErr == nil {
+		errorsJSON = string(diagData)
+	}
+
+	// Fetch indexing count
+	indexCount := 0
+	indexPath := fmt.Sprintf("/user/%s/hosts/%s/indexing/history", userID, encodedHostID)
+	indexData, indexErr := yandexFetch(token, indexPath)
+	if indexErr == nil {
+		var idxResp struct {
+			Indicators map[string][]struct {
+				Value int `json:"value"`
+			} `json:"indicators"`
+		}
+		json.Unmarshal(indexData, &idxResp)
+		if docs, ok := idxResp.Indicators["SEARCHABLE"]; ok && len(docs) > 0 {
+			indexCount = docs[len(docs)-1].Value
+		}
+	}
 
 	date := time.Now().Format("2006-01-02")
 	db.DB.Exec(
-		"INSERT OR REPLACE INTO yandex_data (site_id, date, index_count, keywords_json, errors_json) VALUES (?, ?, ?, ?, ?)",
-		siteID, date, indexCount, keywordsJSON, errorsJSON,
+		"INSERT OR REPLACE INTO yandex_data (site_id, date, clicks, impressions, index_count, keywords_json, errors_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		siteID, date, totalClicks, totalImpressions, indexCount, keywordsJSON, errorsJSON,
 	)
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "Yandex数据同步成功"})
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": gin.H{
+			"message":     "Yandex数据同步成功",
+			"clicks":      totalClicks,
+			"impressions": totalImpressions,
+			"index_count": indexCount,
+			"position":    avgPosition,
+		},
+	})
 }
 
-func getYandexAccessToken() (string, error) {
-	var accessToken string
-	var expiresAt time.Time
-	err := db.DB.QueryRow(
-		"SELECT access_token, expires_at FROM oauth_tokens WHERE service = 'yandex' ORDER BY id DESC LIMIT 1",
-	).Scan(&accessToken, &expiresAt)
-	if err != nil {
-		return "", fmt.Errorf("Yandex未授权")
+// matchYandexToGSC mirrors the matching logic from gsc-dashboard.html
+func matchYandexToGSC(yandexHost, gscURL string) bool {
+	yd := strings.TrimPrefix(yandexHost, "https://")
+	yd = strings.TrimPrefix(yd, "http://")
+	yd = strings.TrimRight(yd, "/")
+	yd = strings.ToLower(yd)
+	// Remove port if any
+	if idx := strings.LastIndex(yd, ":"); idx > 0 {
+		yd = yd[:idx]
 	}
-	return accessToken, nil
-}
 
-func getYandexUserID(token string) (string, error) {
-	req, _ := http.NewRequest("GET", "https://api.webmaster.yandex.net/v4/user", nil)
-	req.Header.Set("Authorization", "OAuth "+token)
+	gd := strings.TrimPrefix(gscURL, "sc-domain:")
+	gd = strings.TrimPrefix(gd, "https://")
+	gd = strings.TrimPrefix(gd, "http://")
+	gd = strings.TrimRight(gd, "/")
+	gd = strings.ToLower(gd)
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		UserID int64 `json:"user_id"`
-	}
-	json.NewDecoder(resp.Body).Decode(&result)
-	return fmt.Sprintf("%d", result.UserID), nil
-}
-
-func fetchYandexIndexCount(token, userID, hostID string) int {
-	url := fmt.Sprintf("https://api.webmaster.yandex.net/v4/user/%s/hosts/%s/indexing/history", userID, hostID)
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("Authorization", "OAuth "+token)
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Indicators map[string][]struct {
-			Value int `json:"value"`
-		} `json:"indicators"`
-	}
-	json.NewDecoder(resp.Body).Decode(&result)
-
-	if docs, ok := result.Indicators["SEARCHABLE"]; ok && len(docs) > 0 {
-		return docs[len(docs)-1].Value
-	}
-	return 0
-}
-
-func fetchYandexKeywords(token, userID, hostID string) string {
-	url := fmt.Sprintf("https://api.webmaster.yandex.net/v4/user/%s/hosts/%s/query-analytics/list?limit=20&order_by=CLICKS", userID, hostID)
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("Authorization", "OAuth "+token)
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "[]"
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	return string(body)
-}
-
-func fetchYandexDiagnostics(token, userID, hostID string) string {
-	url := fmt.Sprintf("https://api.webmaster.yandex.net/v4/user/%s/hosts/%s/diagnostics", userID, hostID)
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("Authorization", "OAuth "+token)
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "[]"
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	return string(body)
+	return yd == gd || strings.HasSuffix(yd, "."+gd) || strings.HasSuffix(gd, "."+yd) || strings.Contains(yd, gd) || strings.Contains(gd, yd)
 }
 
 func GetYandexData(c *gin.Context) {
@@ -211,7 +331,7 @@ func GetYandexData(c *gin.Context) {
 		rows.Scan(&date, &clicks, &impressions, &indexCount, &keywordsJSON, &errorsJSON)
 		data = append(data, gin.H{
 			"date": date, "clicks": clicks, "impressions": impressions,
-			"index_count": indexCount,
+			"index_count":   indexCount,
 			"keywords_json": json.RawMessage(keywordsJSON),
 			"errors_json":   json.RawMessage(errorsJSON),
 		})

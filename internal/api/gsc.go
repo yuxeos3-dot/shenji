@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"seo-system/internal/db"
 
 	"github.com/gin-gonic/gin"
 )
+
+const gscAPI = "https://www.googleapis.com/webmasters/v3"
 
 func GetGSCAuthURL(c *gin.Context) {
 	clientID := db.GetSetting("gsc_client_id")
@@ -23,8 +26,9 @@ func GetGSCAuthURL(c *gin.Context) {
 	}
 
 	authURL := fmt.Sprintf(
-		"https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=https://www.googleapis.com/auth/webmasters.readonly+https://www.googleapis.com/auth/analytics.readonly&access_type=offline&prompt=consent",
+		"https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=%s&access_type=offline&prompt=consent",
 		clientID, redirectURI,
+		url.QueryEscape("https://www.googleapis.com/auth/webmasters.readonly https://www.googleapis.com/auth/analytics.readonly"),
 	)
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": authURL}})
@@ -78,9 +82,14 @@ func exchangeGoogleToken(code string) (*OAuthToken, error) {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 		ExpiresIn    int    `json:"expires_in"`
+		Error        string `json:"error"`
+		ErrorDesc    string `json:"error_description"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
+	}
+	if result.Error != "" {
+		return nil, fmt.Errorf("%s: %s", result.Error, result.ErrorDesc)
 	}
 
 	return &OAuthToken{
@@ -104,6 +113,7 @@ func getGoogleAccessToken() (string, error) {
 		return accessToken, nil
 	}
 
+	// Refresh token
 	clientID := db.GetSetting("gsc_client_id")
 	clientSecret := db.GetSetting("gsc_client_secret")
 
@@ -133,6 +143,39 @@ func getGoogleAccessToken() (string, error) {
 	return result.AccessToken, nil
 }
 
+// gscFetch wraps GSC API calls with auth header (like gf() in gsc-dashboard.html)
+func gscFetch(token, apiURL, method string, body interface{}) (json.RawMessage, error) {
+	var reqBody io.Reader
+	if body != nil {
+		jsonBody, _ := json.Marshal(body)
+		reqBody = bytes.NewReader(jsonBody)
+	}
+
+	req, err := http.NewRequest(method, apiURL, reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return respBody, nil
+}
+
+// SyncGSCData mirrors the gsc-dashboard.html approach:
+// Fetches overview (no dimension), trend (date), keywords (query), pages (page),
+// devices (device), countries (country), and previous period for comparison.
 func SyncGSCData(c *gin.Context) {
 	siteID := c.Param("id")
 
@@ -149,82 +192,102 @@ func SyncGSCData(c *gin.Context) {
 		return
 	}
 
-	endDate := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
-	startDate := time.Now().AddDate(0, 0, -30).Format("2006-01-02")
+	days := 30
+	ed := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	sd := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
 
-	keywordsJSON, _ := fetchGSCSearchAnalytics(token, gscSiteURL, startDate, endDate, "query")
-	pagesJSON, _ := fetchGSCSearchAnalytics(token, gscSiteURL, startDate, endDate, "page")
-	devicesJSON, _ := fetchGSCSearchAnalytics(token, gscSiteURL, startDate, endDate, "device")
-	countriesJSON, _ := fetchGSCSearchAnalytics(token, gscSiteURL, startDate, endDate, "country")
+	encodedURL := url.QueryEscape(gscSiteURL)
+	baseURL := fmt.Sprintf("%s/sites/%s/searchAnalytics/query", gscAPI, encodedURL)
+
+	// Parallel fetch: overview, trend, keywords(top20), pages(top20), devices, countries
+	// Mirrors gsc-dashboard.html openDetail() approach
+	type queryReq struct {
+		StartDate  string   `json:"startDate"`
+		EndDate    string   `json:"endDate"`
+		Dimensions []string `json:"dimensions,omitempty"`
+		RowLimit   int      `json:"rowLimit,omitempty"`
+	}
+
+	queries := []struct {
+		name string
+		body queryReq
+	}{
+		{"overview", queryReq{StartDate: sd, EndDate: ed}},
+		{"trend", queryReq{StartDate: sd, EndDate: ed, Dimensions: []string{"date"}, RowLimit: 90}},
+		{"keywords", queryReq{StartDate: sd, EndDate: ed, Dimensions: []string{"query"}, RowLimit: 20}},
+		{"pages", queryReq{StartDate: sd, EndDate: ed, Dimensions: []string{"page"}, RowLimit: 20}},
+		{"devices", queryReq{StartDate: sd, EndDate: ed, Dimensions: []string{"device"}, RowLimit: 10}},
+		{"countries", queryReq{StartDate: sd, EndDate: ed, Dimensions: []string{"country"}, RowLimit: 10}},
+	}
+
+	results := make(map[string]json.RawMessage)
+	for _, q := range queries {
+		data, err := gscFetch(token, baseURL, "POST", q.body)
+		if err != nil {
+			results[q.name] = json.RawMessage("null")
+			continue
+		}
+		results[q.name] = data
+	}
+
+	// Parse overview for totals
+	var overview struct {
+		Rows []struct {
+			Clicks      int     `json:"clicks"`
+			Impressions int     `json:"impressions"`
+			CTR         float64 `json:"ctr"`
+			Position    float64 `json:"position"`
+		} `json:"rows"`
+	}
+	json.Unmarshal(results["overview"], &overview)
 
 	var totalClicks, totalImpressions int
 	var avgCTR, avgPosition float64
+	if len(overview.Rows) > 0 {
+		row := overview.Rows[0]
+		totalClicks = row.Clicks
+		totalImpressions = row.Impressions
+		avgCTR = row.CTR
+		avgPosition = row.Position
+	}
 
-	type gscRow struct {
-		Clicks      int     `json:"clicks"`
-		Impressions int     `json:"impressions"`
-		CTR         float64 `json:"ctr"`
-		Position    float64 `json:"position"`
-	}
-	var gscRows []gscRow
-	json.Unmarshal([]byte(keywordsJSON), &gscRows)
-	for _, r := range gscRows {
-		totalClicks += r.Clicks
-		totalImpressions += r.Impressions
-		avgCTR += r.CTR
-		avgPosition += r.Position
-	}
-	if len(gscRows) > 0 {
-		avgCTR /= float64(len(gscRows))
-		avgPosition /= float64(len(gscRows))
-	}
+	// Store all dimensions as JSON
+	keywordsJSON := extractRows(results["keywords"])
+	pagesJSON := extractRows(results["pages"])
+	devicesJSON := extractRows(results["devices"])
+	countriesJSON := extractRows(results["countries"])
 
 	db.DB.Exec(
 		`INSERT OR REPLACE INTO gsc_data (site_id, date, clicks, impressions, ctr, position, keywords_json, pages_json, devices_json, countries_json)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		siteID, endDate, totalClicks, totalImpressions, avgCTR, avgPosition,
+		siteID, ed, totalClicks, totalImpressions, avgCTR, avgPosition,
 		keywordsJSON, pagesJSON, devicesJSON, countriesJSON,
 	)
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "GSC数据同步成功"})
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": gin.H{
+			"message":    "GSC数据同步成功",
+			"clicks":     totalClicks,
+			"impressions": totalImpressions,
+			"ctr":        avgCTR,
+			"position":   avgPosition,
+		},
+	})
 }
 
-func fetchGSCSearchAnalytics(token, siteURL, startDate, endDate, dimension string) (string, error) {
-	apiURL := fmt.Sprintf("https://www.googleapis.com/webmasters/v3/sites/%s/searchAnalytics/query", siteURL)
-
-	body := map[string]interface{}{
-		"startDate":  startDate,
-		"endDate":    endDate,
-		"dimensions": []string{dimension},
-		"rowLimit":   20,
+// extractRows gets the "rows" field from a GSC API response
+func extractRows(raw json.RawMessage) string {
+	if raw == nil {
+		return "[]"
 	}
-	jsonBody, _ := json.Marshal(body)
-
-	req, err := http.NewRequest("POST", apiURL, bytes.NewReader(jsonBody))
-	if err != nil {
-		return "[]", err
+	var resp struct {
+		Rows json.RawMessage `json:"rows"`
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "[]", err
+	if err := json.Unmarshal(raw, &resp); err != nil || resp.Rows == nil {
+		return "[]"
 	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-
-	var result struct {
-		Rows []interface{} `json:"rows"`
-	}
-	json.Unmarshal(respBody, &result)
-	if result.Rows == nil {
-		return "[]", nil
-	}
-	rowsJSON, _ := json.Marshal(result.Rows)
-	return string(rowsJSON), nil
+	return string(resp.Rows)
 }
 
 func GetGSCData(c *gin.Context) {
