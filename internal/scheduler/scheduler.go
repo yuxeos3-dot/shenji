@@ -21,24 +21,26 @@ var c *cron.Cron
 func Start() {
 	c = cron.New()
 
-	// Check if auto audit is enabled
+	// Global cron-based auto audit
 	enabled := db.GetSetting("auto_audit_enabled")
 	if enabled == "true" {
 		cronExpr := db.GetSetting("auto_audit_cron")
 		if cronExpr == "" {
 			cronExpr = "0 9 * * *"
 		}
-
-		_, err := c.AddFunc(cronExpr, runScheduledAudit)
+		_, err := c.AddFunc(cronExpr, runGlobalScheduledAudit)
 		if err != nil {
-			log.Printf("Failed to schedule auto audit: %v", err)
+			log.Printf("全局巡检调度设置失败: %v", err)
 		} else {
-			log.Printf("Auto audit scheduled: %s", cronExpr)
+			log.Printf("全局巡检调度已启动: %s", cronExpr)
 		}
 	}
 
+	// Per-site interval check: every hour at :00
+	c.AddFunc("0 * * * *", runPerSiteIntervalCheck)
+
 	c.Start()
-	log.Println("Scheduler started")
+	log.Println("调度器已启动")
 }
 
 func Stop() {
@@ -47,14 +49,138 @@ func Stop() {
 	}
 }
 
-func runScheduledAudit() {
-	log.Println("Running scheduled audit for all active sites...")
+// runPerSiteIntervalCheck checks each site with independent schedule settings
+func runPerSiteIntervalCheck() {
+	rows, err := db.DB.Query(`
+		SELECT id, domain, name, url_category, url_detail, url_news_list, url_news_detail, url_search, url_static,
+		       audit_schedule_enabled, audit_interval_hours, audit_daily_hour
+		FROM sites WHERE status = 'active'
+	`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	now := time.Now()
+	currentHour := now.Hour()
+
+	type siteInfo struct {
+		ID                   int64
+		Name                 string
+		Config               crawler.SiteConfig
+		ScheduleEnabled      string
+		IntervalHours        int
+		DailyHour            int
+	}
+
+	var sitesToCheck []siteInfo
+	for rows.Next() {
+		var s siteInfo
+		var domain, urlCat, urlDet, urlNL, urlND, urlSearch, urlStatic string
+		var schedEnabled string
+		var intervalHours, dailyHour int
+		if err := rows.Scan(&s.ID, &domain, &s.Name, &urlCat, &urlDet, &urlNL, &urlND, &urlSearch, &urlStatic,
+			&schedEnabled, &intervalHours, &dailyHour); err != nil {
+			continue
+		}
+		s.Config = crawler.SiteConfig{
+			Domain: domain, URLCategory: urlCat, URLDetail: urlDet,
+			URLNewsList: urlNL, URLNewsDetail: urlND, URLSearch: urlSearch, URLStatic: urlStatic,
+		}
+		s.ScheduleEnabled = schedEnabled
+		s.IntervalHours = intervalHours
+		s.DailyHour = dailyHour
+		sitesToCheck = append(sitesToCheck, s)
+	}
+
+	var sitesToRun []siteInfo
+	for _, s := range sitesToCheck {
+		if s.ScheduleEnabled != "true" {
+			continue
+		}
+
+		// Daily hour mode
+		if s.DailyHour >= 0 && s.IntervalHours == 0 {
+			if currentHour == s.DailyHour {
+				// Check not already run today
+				var lastTime *string
+				db.DB.QueryRow(
+					"SELECT created_at FROM audit_tasks WHERE site_id=? ORDER BY id DESC LIMIT 1", s.ID,
+				).Scan(&lastTime)
+				if lastTime != nil {
+					t, err := time.Parse("2006-01-02T15:04:05Z", *lastTime)
+					if err != nil {
+						t, _ = time.Parse("2006-01-02 15:04:05", *lastTime)
+					}
+					if now.Sub(t) < 23*time.Hour {
+						continue // already ran within 23h
+					}
+				}
+				sitesToRun = append(sitesToRun, s)
+			}
+			continue
+		}
+
+		// Interval mode
+		if s.IntervalHours > 0 {
+			var lastTime *string
+			db.DB.QueryRow(
+				"SELECT created_at FROM audit_tasks WHERE site_id=? ORDER BY id DESC LIMIT 1", s.ID,
+			).Scan(&lastTime)
+			shouldRun := false
+			if lastTime == nil {
+				shouldRun = true
+			} else {
+				t, err := time.Parse("2006-01-02T15:04:05Z", *lastTime)
+				if err != nil {
+					t, _ = time.Parse("2006-01-02 15:04:05", *lastTime)
+				}
+				if now.Sub(t) >= time.Duration(s.IntervalHours)*time.Hour {
+					shouldRun = true
+				}
+			}
+			if shouldRun {
+				sitesToRun = append(sitesToRun, s)
+			}
+		}
+	}
+
+	if len(sitesToRun) == 0 {
+		return
+	}
+
+	maxConcurrent := 3
+	if v := db.GetSetting("max_concurrent_audit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxConcurrent = n
+		}
+	}
+
+	sem := make(chan struct{}, maxConcurrent)
+	var wg sync.WaitGroup
+	for _, site := range sitesToRun {
+		wg.Add(1)
+		go func(s siteInfo) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			log.Printf("站点独立巡检触发: %s", s.Name)
+			runSiteAudit(s.ID, s.Name, s.Config)
+		}(site)
+	}
+	wg.Wait()
+}
+
+// runGlobalScheduledAudit runs for all sites without their own schedule
+func runGlobalScheduledAudit() {
+	log.Println("全局定时巡检开始...")
 
 	rows, err := db.DB.Query(
-		"SELECT id, domain, name, url_category, url_detail, url_news_list, url_news_detail, url_search, url_static FROM sites WHERE status = 'active'",
+		`SELECT id, domain, name, url_category, url_detail, url_news_list, url_news_detail, url_search, url_static
+		 FROM sites WHERE status = 'active' AND (audit_schedule_enabled IS NULL OR audit_schedule_enabled != 'true')`,
 	)
 	if err != nil {
-		log.Printf("Failed to query sites: %v", err)
+		log.Printf("查询站点失败: %v", err)
 		return
 	}
 	defer rows.Close()
@@ -73,21 +199,14 @@ func runScheduledAudit() {
 			continue
 		}
 		sites = append(sites, siteInfo{
-			ID:   id,
-			Name: name,
+			ID: id, Name: name,
 			Config: crawler.SiteConfig{
-				Domain:       domain,
-				URLCategory:  urlCat,
-				URLDetail:    urlDet,
-				URLNewsList:  urlNL,
-				URLNewsDetail: urlND,
-				URLSearch:    urlSearch,
-				URLStatic:   urlStatic,
+				Domain: domain, URLCategory: urlCat, URLDetail: urlDet,
+				URLNewsList: urlNL, URLNewsDetail: urlND, URLSearch: urlSearch, URLStatic: urlStatic,
 			},
 		})
 	}
 
-	// Limit concurrent audits
 	maxConcurrent := 3
 	if v := db.GetSetting("max_concurrent_audit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -112,7 +231,7 @@ func runScheduledAudit() {
 func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Scheduled audit for site %d panicked: %v", siteID, r)
+			log.Printf("站点 %d 巡检异常: %v", siteID, r)
 		}
 	}()
 
@@ -120,15 +239,13 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		"INSERT INTO audit_tasks (site_id, triggered_by, status) VALUES (?, 0, 'running')", siteID,
 	)
 	if err != nil {
-		log.Printf("Failed to create audit task for site %d: %v", siteID, err)
+		log.Printf("创建巡检任务失败 站点%d: %v", siteID, err)
 		return
 	}
 	taskID, _ := result.LastInsertId()
 
-	// Crawl
 	pages := crawler.CrawlAllPages(config)
 
-	// Save pages
 	for _, p := range pages {
 		db.DB.Exec(
 			"INSERT INTO audit_pages (task_id, page_type, url, status_code, ttfb_ms, html, html_size, error_msg) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -136,17 +253,15 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		)
 	}
 
-	// Build prompt and call AI
 	prompt := ai.BuildAnalysisPrompt(config.Domain, pages, nil, nil, nil)
 	analysisResult, model, err := ai.CallAI(prompt)
 	if err != nil {
 		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
 			err.Error(), time.Now(), taskID)
-		telegram.SendNotification("定时巡检失败", siteName+": "+err.Error())
+		telegram.SendNotification("巡检失败", siteName+": "+err.Error())
 		return
 	}
 
-	// Save results
 	seoJSON, _ := json.Marshal(analysisResult.SEOIssues)
 	codeJSON, _ := json.Marshal(analysisResult.CodeIssues)
 	secJSON, _ := json.Marshal(analysisResult.SecurityIssues)
@@ -160,6 +275,5 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	)
 
 	db.DB.Exec("UPDATE audit_tasks SET status='done', progress=100, finished_at=? WHERE id=?", time.Now(), taskID)
-
-	telegram.SendNotification("定时巡检完成", siteName+": "+analysisResult.Summary)
+	telegram.SendNotification("巡检完成", siteName+": "+analysisResult.Summary)
 }

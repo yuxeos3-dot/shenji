@@ -30,7 +30,7 @@
         <tbody>
           <tr v-for="a in audits" :key="a.id">
             <td style="font-weight:800;color:var(--sun)">#{{ a.id }}</td>
-            <td><span class="badge" :class="a.status==='done'?'badge-ok':a.status==='running'?'badge-warn':'badge-err'">{{ a.status }}</span></td>
+            <td><span class="badge" :class="a.status==='done'?'badge-ok':a.status==='running'?'badge-warn':'badge-err'">{{ a.status==='done'?'已完成':a.status==='running'?'进行中':a.status==='pending'?'等待中':'失败' }}</span></td>
             <td><div class="progress-bar"><div class="progress-fill" :style="{width:a.progress+'%'}"></div></div><span class="progress-text">{{ a.progress }}%</span></td>
             <td style="font-size:12px;color:var(--ink-soft)">{{ a.created_at }}</td>
             <td style="font-size:12px;color:var(--ink-soft)">{{ a.finished_at || '—' }}</td>
@@ -39,6 +39,62 @@
           <tr v-if="!audits.length"><td colspan="6" style="text-align:center;color:var(--ink-hint);padding:30px">暂无审计记录</td></tr>
         </tbody>
       </table>
+    </div>
+    <div class="panel" style="margin-top:18px">
+      <div class="panel-header"><h2>⏰ 站点独立巡检计划</h2></div>
+      <div class="schedule-desc">为此站点设置独立的巡检频率，设置后将覆盖全局调度，仅对本站点生效。</div>
+
+      <div class="sched-field">
+        <label class="sched-label">启用独立巡检计划</label>
+        <label class="toggle-label" :class="schedEnabled?'toggle-on':'toggle-off'" @click="schedEnabled=!schedEnabled">
+          <span class="toggle-switch"></span>
+          <span class="toggle-text">{{ schedEnabled ? '已启用' : '未启用（跟随全局）' }}</span>
+        </label>
+      </div>
+
+      <template v-if="schedEnabled">
+        <div class="sched-field">
+          <label class="sched-label">巡检模式</label>
+          <div class="sched-mode-row">
+            <div :class="['sched-mode-card', schedMode==='interval'&&'sched-mode-active']" @click="schedMode='interval'">
+              <div class="smc-icon">⏱</div>
+              <div class="smc-name">按间隔</div>
+              <div class="smc-desc">每隔 N 小时巡查一次</div>
+            </div>
+            <div :class="['sched-mode-card', schedMode==='daily'&&'sched-mode-active']" @click="schedMode='daily'">
+              <div class="smc-icon">🕘</div>
+              <div class="smc-name">按时间</div>
+              <div class="smc-desc">每天固定时间点巡查</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sched-field" v-if="schedMode==='interval'">
+          <label class="sched-label">巡检间隔</label>
+          <div class="num-row">
+            <button class="num-btn" @click="intervalHours=Math.max(1,intervalHours-1)">－</button>
+            <input class="num-input" type="number" v-model.number="intervalHours" min="1" max="168" />
+            <button class="num-btn" @click="intervalHours=Math.min(168,intervalHours+1)">＋</button>
+            <span class="num-unit">小时巡查一次</span>
+          </div>
+        </div>
+
+        <div class="sched-field" v-if="schedMode==='daily'">
+          <label class="sched-label">每天巡检时间</label>
+          <div class="hour-grid">
+            <span
+              v-for="h in 24" :key="h-1"
+              :class="['hour-chip', dailyHour===(h-1)&&'hour-active']"
+              @click="dailyHour=h-1"
+            >{{ String(h-1).padStart(2,'0') }}时</span>
+          </div>
+          <div class="sched-hint">当前选择：每天 {{ String(dailyHour).padStart(2,'0') }}:00 自动巡检</div>
+        </div>
+      </template>
+
+      <div class="sched-actions">
+        <button class="btn btn-primary" @click="saveSchedule" :disabled="savingSched">{{ savingSched ? '保存中...' : '💾 保存巡检计划' }}</button>
+      </div>
     </div>
   </div>
 </template>
@@ -54,12 +110,44 @@ const site = ref({})
 const audits = ref([])
 const auditing = ref(false)
 
+// Per-site schedule
+const schedEnabled = ref(false)
+const schedMode = ref('daily')
+const intervalHours = ref(24)
+const dailyHour = ref(9)
+const savingSched = ref(false)
+
 async function loadData() {
   try {
     const [siteRes, auditsRes] = await Promise.all([api.getSite(route.params.id), api.listAudits(route.params.id)])
     site.value = siteRes.data
     audits.value = auditsRes.data
+    // Load schedule settings
+    const s = siteRes.data
+    schedEnabled.value = s.audit_schedule_enabled === 'true'
+    if (s.audit_interval_hours > 0) {
+      schedMode.value = 'interval'
+      intervalHours.value = s.audit_interval_hours
+    } else {
+      schedMode.value = 'daily'
+      dailyHour.value = s.audit_daily_hour >= 0 ? s.audit_daily_hour : 9
+    }
   } catch {}
+}
+
+async function saveSchedule() {
+  savingSched.value = true
+  try {
+    const payload = {
+      ...site.value,
+      audit_schedule_enabled: schedEnabled.value ? 'true' : 'false',
+      audit_interval_hours: schedMode.value === 'interval' ? intervalHours.value : 0,
+      audit_daily_hour: schedMode.value === 'daily' ? dailyHour.value : -1,
+    }
+    await api.updateSite(route.params.id, payload)
+    ElMessage.success('巡检计划已保存')
+  } catch {}
+  finally { savingSched.value = false }
 }
 
 async function triggerAudit() {
@@ -110,4 +198,43 @@ watch(() => route.params.id, () => { if (route.params.id) loadData() })
 .progress-bar { display:inline-block; width:80px; height:6px; background:var(--border-light); border-radius:3px; overflow:hidden; vertical-align:middle; margin-right:6px; }
 .progress-fill { height:100%; background:linear-gradient(135deg,var(--sun),var(--coral)); border-radius:3px; transition:width .3s; }
 .progress-text { font-size:11px; font-weight:700; color:var(--ink-soft); }
+
+/* ── 站点独立巡检计划 ── */
+.schedule-desc { font-size:13px; color:var(--ink-soft); line-height:1.6; margin-bottom:18px; padding:12px 14px; background:var(--warn-bg); border:1px solid var(--warn-border); border-radius:var(--r-sm); }
+.sched-field { display:flex; flex-direction:column; gap:8px; margin-bottom:18px; }
+.sched-label { font-size:13px; font-weight:600; color:var(--ink-mid); }
+.sched-hint { font-size:12px; color:var(--ink-hint); }
+
+.sched-mode-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.sched-mode-card { border:2px solid var(--border-light); border-radius:var(--r-sm); padding:14px 16px; cursor:pointer; text-align:center; transition:all .18s; background:var(--surface-2); }
+.sched-mode-card:hover { border-color:var(--peach); background:var(--sun-light); }
+.sched-mode-active { border-color:var(--sun) !important; background:var(--sun-light) !important; box-shadow:0 0 0 3px rgba(249,115,22,.1); }
+.smc-icon { font-size:22px; margin-bottom:5px; }
+.smc-name { font-weight:700; font-size:14px; color:var(--ink); margin-bottom:3px; }
+.smc-desc { font-size:12px; color:var(--ink-soft); }
+
+.num-row { display:flex; align-items:center; gap:10px; }
+.num-btn { width:34px; height:34px; border-radius:8px; border:1.5px solid var(--border); background:var(--surface); color:var(--ink); font-size:18px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all .15s; flex-shrink:0; }
+.num-btn:hover { background:var(--sun-light); border-color:var(--sun); color:var(--sun); }
+.num-input { width:72px; padding:8px 10px; border:1.5px solid var(--border); border-radius:8px; font-size:14px; font-weight:700; text-align:center; font-family:inherit; outline:none; }
+.num-input:focus { border-color:var(--sun); box-shadow:0 0 0 3px rgba(249,115,22,.12); }
+.num-unit { font-size:13px; color:var(--ink-soft); white-space:nowrap; }
+
+.hour-grid { display:flex; flex-wrap:wrap; gap:6px; }
+.hour-chip { padding:5px 10px; border-radius:7px; border:1.5px solid var(--border-light); background:var(--surface-2); font-size:12px; font-weight:600; color:var(--ink-soft); cursor:pointer; transition:all .15s; font-family:'JetBrains Mono',monospace; }
+.hour-chip:hover { background:var(--sun-light); border-color:var(--peach); color:var(--sun); }
+.hour-active { background:var(--sun) !important; color:#fff !important; border-color:var(--sun) !important; box-shadow:0 2px 8px rgba(249,115,22,.3); }
+
+.sched-actions { padding-top:6px; display:flex; gap:10px; }
+
+.toggle-label { display:inline-flex; align-items:center; gap:9px; cursor:pointer; user-select:none; }
+.toggle-switch { width:42px; height:24px; border-radius:12px; position:relative; flex-shrink:0; transition:background .2s; }
+.toggle-on .toggle-switch { background:linear-gradient(135deg,#16A34A,#22C55E); box-shadow:0 2px 8px rgba(22,163,74,.3); }
+.toggle-off .toggle-switch { background:#D1C4BA; }
+.toggle-switch::after { content:''; position:absolute; top:3px; width:18px; height:18px; border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.2); transition:left .2s; }
+.toggle-on .toggle-switch::after { left:21px; }
+.toggle-off .toggle-switch::after { left:3px; }
+.toggle-text { font-weight:700; font-size:13px; }
+.toggle-on .toggle-text { color:var(--ok); }
+.toggle-off .toggle-text { color:var(--ink-soft); }
 </style>

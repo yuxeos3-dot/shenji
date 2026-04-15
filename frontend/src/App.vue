@@ -3,7 +3,7 @@
 </template>
 
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
   --sun:          #FF8C00;
@@ -49,7 +49,7 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  font-family: 'Plus Jakarta Sans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
   font-size: 14px;
   background: var(--bg);
   color: var(--ink);
@@ -69,7 +69,7 @@ a:hover { color: var(--sun-deep); }
 .el-button--danger { background: linear-gradient(135deg, #DC2626, #EF4444) !important; border-color: transparent !important; }
 .el-button--success { background: linear-gradient(135deg, #16A34A, #22C55E) !important; border-color: transparent !important; }
 .el-button--warning { background: linear-gradient(135deg, #D97706, #F59E0B) !important; border-color: transparent !important; color: #fff !important; }
-.el-button { font-family: 'Plus Jakarta Sans', sans-serif !important; font-weight: 700 !important; border-radius: var(--r-sm) !important; }
+.el-button { font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif !important; font-weight: 700 !important; border-radius: var(--r-sm) !important; }
 .el-input__wrapper { border-radius: var(--r-sm) !important; }
 .el-input__wrapper:focus-within, .el-input__wrapper.is-focus { box-shadow: 0 0 0 1px var(--sun) !important; }
 .el-card { border-radius: var(--r) !important; border: 1.5px solid var(--border-light) !important; box-shadow: var(--s1) !important; }

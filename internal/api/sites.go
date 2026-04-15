@@ -9,17 +9,20 @@ import (
 )
 
 type CreateSiteRequest struct {
-	Domain       string `json:"domain" binding:"required"`
-	Name         string `json:"name" binding:"required"`
-	GscSiteURL   string `json:"gsc_site_url"`
-	GaPropertyID string `json:"ga_property_id"`
-	YandexHostID string `json:"yandex_host_id"`
-	URLCategory  string `json:"url_category"`
-	URLDetail    string `json:"url_detail"`
-	URLNewsList  string `json:"url_news_list"`
-	URLNewsDetail string `json:"url_news_detail"`
-	URLSearch    string `json:"url_search"`
-	URLStatic    string `json:"url_static"`
+	Domain                string `json:"domain" binding:"required"`
+	Name                  string `json:"name" binding:"required"`
+	GscSiteURL            string `json:"gsc_site_url"`
+	GaPropertyID          string `json:"ga_property_id"`
+	YandexHostID          string `json:"yandex_host_id"`
+	URLCategory           string `json:"url_category"`
+	URLDetail             string `json:"url_detail"`
+	URLNewsList           string `json:"url_news_list"`
+	URLNewsDetail         string `json:"url_news_detail"`
+	URLSearch             string `json:"url_search"`
+	URLStatic             string `json:"url_static"`
+	AuditScheduleEnabled  string `json:"audit_schedule_enabled"`
+	AuditIntervalHours    int    `json:"audit_interval_hours"`
+	AuditDailyHour        int    `json:"audit_daily_hour"`
 }
 
 func ListSites(c *gin.Context) {
@@ -70,13 +73,22 @@ func CreateSite(c *gin.Context) {
 		return
 	}
 
+	if req.AuditScheduleEnabled == "" {
+		req.AuditScheduleEnabled = "false"
+	}
+	if req.AuditDailyHour == 0 {
+		req.AuditDailyHour = -1
+	}
+
 	userID := c.GetInt64("user_id")
 	result, err := db.DB.Exec(
 		`INSERT INTO sites (domain, name, gsc_site_url, ga_property_id, yandex_host_id,
-		 url_category, url_detail, url_news_list, url_news_detail, url_search, url_static, created_by)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 url_category, url_detail, url_news_list, url_news_detail, url_search, url_static,
+		 audit_schedule_enabled, audit_interval_hours, audit_daily_hour, created_by)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		req.Domain, req.Name, req.GscSiteURL, req.GaPropertyID, req.YandexHostID,
-		req.URLCategory, req.URLDetail, req.URLNewsList, req.URLNewsDetail, req.URLSearch, req.URLStatic, userID,
+		req.URLCategory, req.URLDetail, req.URLNewsList, req.URLNewsDetail, req.URLSearch, req.URLStatic,
+		req.AuditScheduleEnabled, req.AuditIntervalHours, req.AuditDailyHour, userID,
 	)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "创建失败，域名可能已存在"})
@@ -90,28 +102,34 @@ func CreateSite(c *gin.Context) {
 func GetSite(c *gin.Context) {
 	id := c.Param("id")
 	var site struct {
-		ID            int64  `json:"id"`
-		Domain        string `json:"domain"`
-		Name          string `json:"name"`
-		GscSiteURL    string `json:"gsc_site_url"`
-		GaPropertyID  string `json:"ga_property_id"`
-		YandexHostID  string `json:"yandex_host_id"`
-		URLCategory   string `json:"url_category"`
-		URLDetail     string `json:"url_detail"`
-		URLNewsList   string `json:"url_news_list"`
-		URLNewsDetail string `json:"url_news_detail"`
-		URLSearch     string `json:"url_search"`
-		URLStatic     string `json:"url_static"`
-		Status        string `json:"status"`
-		CreatedAt     string `json:"created_at"`
+		ID                   int64  `json:"id"`
+		Domain               string `json:"domain"`
+		Name                 string `json:"name"`
+		GscSiteURL           string `json:"gsc_site_url"`
+		GaPropertyID         string `json:"ga_property_id"`
+		YandexHostID         string `json:"yandex_host_id"`
+		URLCategory          string `json:"url_category"`
+		URLDetail            string `json:"url_detail"`
+		URLNewsList          string `json:"url_news_list"`
+		URLNewsDetail        string `json:"url_news_detail"`
+		URLSearch            string `json:"url_search"`
+		URLStatic            string `json:"url_static"`
+		Status               string `json:"status"`
+		AuditScheduleEnabled string `json:"audit_schedule_enabled"`
+		AuditIntervalHours   int    `json:"audit_interval_hours"`
+		AuditDailyHour       int    `json:"audit_daily_hour"`
+		CreatedAt            string `json:"created_at"`
 	}
 
 	err := db.DB.QueryRow(`SELECT id, domain, name, gsc_site_url, ga_property_id, yandex_host_id,
 		url_category, url_detail, url_news_list, url_news_detail, url_search, url_static,
-		status, created_at FROM sites WHERE id = ?`, id).Scan(
+		status, COALESCE(audit_schedule_enabled,'false'), COALESCE(audit_interval_hours,0), COALESCE(audit_daily_hour,-1),
+		created_at FROM sites WHERE id = ?`, id).Scan(
 		&site.ID, &site.Domain, &site.Name, &site.GscSiteURL, &site.GaPropertyID, &site.YandexHostID,
 		&site.URLCategory, &site.URLDetail, &site.URLNewsList, &site.URLNewsDetail,
-		&site.URLSearch, &site.URLStatic, &site.Status, &site.CreatedAt,
+		&site.URLSearch, &site.URLStatic, &site.Status,
+		&site.AuditScheduleEnabled, &site.AuditIntervalHours, &site.AuditDailyHour,
+		&site.CreatedAt,
 	)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "站点不存在"})
@@ -128,12 +146,18 @@ func UpdateSite(c *gin.Context) {
 		return
 	}
 
+	if req.AuditScheduleEnabled == "" {
+		req.AuditScheduleEnabled = "false"
+	}
+
 	_, err := db.DB.Exec(
 		`UPDATE sites SET domain=?, name=?, gsc_site_url=?, ga_property_id=?, yandex_host_id=?,
-		 url_category=?, url_detail=?, url_news_list=?, url_news_detail=?, url_search=?, url_static=?
+		 url_category=?, url_detail=?, url_news_list=?, url_news_detail=?, url_search=?, url_static=?,
+		 audit_schedule_enabled=?, audit_interval_hours=?, audit_daily_hour=?
 		 WHERE id=?`,
 		req.Domain, req.Name, req.GscSiteURL, req.GaPropertyID, req.YandexHostID,
-		req.URLCategory, req.URLDetail, req.URLNewsList, req.URLNewsDetail, req.URLSearch, req.URLStatic, id,
+		req.URLCategory, req.URLDetail, req.URLNewsList, req.URLNewsDetail, req.URLSearch, req.URLStatic,
+		req.AuditScheduleEnabled, req.AuditIntervalHours, req.AuditDailyHour, id,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "更新失败"})

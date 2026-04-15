@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS sites (
     url_search      TEXT DEFAULT '',
     url_static      TEXT DEFAULT '',
     status          TEXT DEFAULT 'active',
+    audit_schedule_enabled TEXT DEFAULT 'false',
+    audit_interval_hours   INTEGER DEFAULT 0,
+    audit_daily_hour       INTEGER DEFAULT -1,
     created_by      INTEGER REFERENCES users(id),
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -183,6 +186,16 @@ func Init() {
 	seedDefaultSettings()
 
 	log.Println("Database initialized successfully")
+
+	// Migrate existing databases - add per-site schedule columns if not exist
+	migrations := []string{
+		"ALTER TABLE sites ADD COLUMN audit_schedule_enabled TEXT DEFAULT 'false'",
+		"ALTER TABLE sites ADD COLUMN audit_interval_hours INTEGER DEFAULT 0",
+		"ALTER TABLE sites ADD COLUMN audit_daily_hour INTEGER DEFAULT -1",
+	}
+	for _, m := range migrations {
+		db.DB.Exec(m) // ignore errors (column already exists)
+	}
 }
 
 func seedDefaultAdmin() {
@@ -211,12 +224,13 @@ func seedDefaultAdmin() {
 
 func seedDefaultSettings() {
 	defaults := map[string]string{
-		"site_title":           "SEO巡站管理系统",
-		"auto_audit_enabled":   "false",
-		"auto_audit_cron":      "0 9 * * *",
-		"max_concurrent_audit": "3",
-		"ai_api_url":           "https://ai.router.team/v1",
-		"ai_model":             "claude-sonnet-4-6",
+		"site_title":                   "SEO巡站管理系统",
+		"auto_audit_enabled":           "false",
+		"auto_audit_cron":              "0 9 * * *",
+		"auto_audit_interval_hours":    "0",
+		"max_concurrent_audit":         "3",
+		"ai_api_url":                   "https://ai.router.team/v1",
+		"ai_model":                     "claude-sonnet-4-6",
 	}
 
 	for k, v := range defaults {
