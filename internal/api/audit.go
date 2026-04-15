@@ -223,7 +223,7 @@ func DeleteAudit(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "删除成功"})
 }
 
-
+func ListAudits(c *gin.Context) {
 	siteID := c.Param("id")
 	rows, err := db.DB.Query(
 		"SELECT id, site_id, triggered_by, status, progress, error_msg, created_at, finished_at FROM audit_tasks WHERE site_id = ? ORDER BY id DESC",
