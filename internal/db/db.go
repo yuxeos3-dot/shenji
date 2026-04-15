@@ -146,6 +146,32 @@ CREATE TABLE IF NOT EXISTS site_pages (
     created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 死链检测结果表
+CREATE TABLE IF NOT EXISTS dead_link_results (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id     INTEGER NOT NULL,
+    url         TEXT NOT NULL,
+    source_page TEXT DEFAULT '',
+    status_code INTEGER DEFAULT 0,
+    ttfb_ms     INTEGER DEFAULT 0,
+    checked_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 外链管理表
+CREATE TABLE IF NOT EXISTS external_links (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id     INTEGER NOT NULL,
+    url         TEXT NOT NULL,
+    anchor_text TEXT DEFAULT '',
+    source_url  TEXT DEFAULT '',
+    rel_type    TEXT DEFAULT 'dofollow',
+    category    TEXT DEFAULT '',
+    note        TEXT DEFAULT '',
+    status_code INTEGER DEFAULT 0,
+    checked_at  DATETIME,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 每日汇报表
 CREATE TABLE IF NOT EXISTS daily_reports (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

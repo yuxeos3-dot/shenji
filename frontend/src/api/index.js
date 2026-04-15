@@ -62,6 +62,21 @@ export default {
   getAuditPages: (taskId) => api.get(`/v1/audits/${taskId}/pages`),
   downloadAuditReport: (taskId) => `/api/v1/audits/${taskId}/report/download`,
 
+  // Dead Link Check
+  getDeadLinks: (siteId) => api.get(`/v1/sites/${siteId}/deadlinks`),
+  getDeadLinkProgress: (siteId) => api.get(`/v1/sites/${siteId}/deadlinks/progress`),
+  startDeadLinkCheck: (siteId) => api.post(`/v1/sites/${siteId}/deadlinks/check`),
+
+  // Content Rewrite
+  rewriteContent: (data) => api.post('/v1/rewrite', data),
+
+  // External Links
+  getExternalLinks: (siteId) => api.get(`/v1/sites/${siteId}/extlinks`),
+  createExternalLink: (data) => api.post('/v1/extlinks', data),
+  updateExternalLink: (id, data) => api.put(`/v1/extlinks/${id}`, data),
+  deleteExternalLink: (id) => api.delete(`/v1/extlinks/${id}`),
+  checkExternalLink: (id) => api.post(`/v1/extlinks/${id}/check`),
+
   // Site Pages
   listSitePages: (siteId) => api.get(`/v1/sites/${siteId}/pages`),
   createSitePage: (siteId, data) => api.post(`/v1/sites/${siteId}/pages`, data),

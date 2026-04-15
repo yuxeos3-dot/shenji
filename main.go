@@ -75,6 +75,21 @@ func main() {
 		v1.POST("/sites/:id/pages/:page_id/fetch", api.FetchSitePage)
 		v1.GET("/sites/:id/pages/:page_id/source", api.GetSitePageSource)
 
+		// Dead Link Check
+		v1.GET("/sites/:id/deadlinks", api.GetDeadLinks)
+		v1.GET("/sites/:id/deadlinks/progress", api.GetDeadLinkProgress)
+		v1.POST("/sites/:id/deadlinks/check", api.StartDeadLinkCheck)
+
+		// Content Rewrite (AI)
+		v1.POST("/rewrite", api.RewriteContent)
+
+		// External Links
+		v1.GET("/sites/:id/extlinks", api.GetExternalLinks)
+		v1.POST("/extlinks", api.CreateExternalLink)
+		v1.PUT("/extlinks/:id", api.UpdateExternalLink)
+		v1.DELETE("/extlinks/:id", api.DeleteExternalLink)
+		v1.POST("/extlinks/:id/check", api.CheckExternalLink)
+
 		// GSC
 		v1.GET("/oauth/gsc", api.GetGSCAuthURL)
 		v1.GET("/oauth/gsc/callback", api.GSCCallback)

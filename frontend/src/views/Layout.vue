@@ -7,6 +7,9 @@
         <li><router-link to="/data-management" :class="{active: $route.path==='/data-management'}"><span class="nav-icon">📡</span>数据管理</router-link></li>
         <li><router-link to="/sites" :class="{active: $route.path.startsWith('/sites')}"><span class="nav-icon">🌐</span>站点管理</router-link></li>
         <li><router-link to="/geo-management" :class="{active: $route.path==='/geo-management'}"><span class="nav-icon">🌍</span>Geo管理</router-link></li>
+        <li><router-link to="/dead-links" :class="{active: $route.path==='/dead-links'}"><span class="nav-icon">💀</span>死链检查</router-link></li>
+        <li><router-link to="/content-rewrite" :class="{active: $route.path==='/content-rewrite'}"><span class="nav-icon">✍️</span>内容二创</router-link></li>
+        <li><router-link to="/external-links" :class="{active: $route.path==='/external-links'}"><span class="nav-icon">🔗</span>外链管理</router-link></li>
         <li><router-link to="/reports" :class="{active: $route.path.startsWith('/reports')}"><span class="nav-icon">📋</span>每日汇报</router-link></li>
         <li v-if="userStore.isAdmin()"><router-link to="/users" :class="{active: $route.path==='/users'}"><span class="nav-icon">👥</span>用户管理</router-link></li>
         <li v-if="userStore.isAdmin()"><router-link to="/settings" :class="{active: $route.path==='/settings'}"><span class="nav-icon">⚙️</span>系统设置</router-link></li>
@@ -63,6 +66,9 @@ const pageTitles = {
   '/data-management': '数据管理',
   '/sites': '站点管理',
   '/geo-management': 'Geo管理',
+  '/dead-links': '死链检查',
+  '/content-rewrite': '内容二创',
+  '/external-links': '外链管理',
   '/reports': '每日汇报',
   '/reports/write': '写汇报',
   '/users': '用户管理',
