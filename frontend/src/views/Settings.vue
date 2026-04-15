@@ -31,10 +31,8 @@
             </div>
             <div class="field-row">
               <label class="field-label">接口密钥（API Key）</label>
-              <div class="input-with-eye">
-                <input class="field-input" v-model="settings.ai_api_key" :type="showKey.ai ? 'text' : 'password'" placeholder="sk-..." />
-                <button class="eye-btn" @click="showKey.ai=!showKey.ai">{{ showKey.ai ? '🙈' : '👁' }}</button>
-              </div>
+              <input class="field-input" v-model="settings.ai_api_key" type="password" placeholder="••••••" autocomplete="new-password" />
+              <div class="field-hint">密钥已加密保存，填写新值可覆盖原密钥</div>
             </div>
             <div class="field-row">
               <label class="field-label">模型名称</label>
@@ -67,10 +65,7 @@
             </div>
             <div class="field-row">
               <label class="field-label">客户端密钥（Client Secret）</label>
-              <div class="input-with-eye">
-                <input class="field-input" v-model="settings.gsc_client_secret" :type="showKey.gsc ? 'text' : 'password'" placeholder="GOCSPX-..." />
-                <button class="eye-btn" @click="showKey.gsc=!showKey.gsc">{{ showKey.gsc ? '🙈' : '👁' }}</button>
-              </div>
+              <input class="field-input" v-model="settings.gsc_client_secret" type="password" placeholder="••••••" autocomplete="new-password" />
             </div>
             <div class="field-row">
               <label class="field-label">回调地址（Redirect URI）</label>
@@ -95,10 +90,7 @@
             </div>
             <div class="field-row">
               <label class="field-label">应用密钥（Client Secret）</label>
-              <div class="input-with-eye">
-                <input class="field-input" v-model="settings.yandex_client_secret" :type="showKey.yandex ? 'text' : 'password'" placeholder="Yandex 应用密钥" />
-                <button class="eye-btn" @click="showKey.yandex=!showKey.yandex">{{ showKey.yandex ? '🙈' : '👁' }}</button>
-              </div>
+              <input class="field-input" v-model="settings.yandex_client_secret" type="password" placeholder="••••••" autocomplete="new-password" />
             </div>
             <div class="action-row">
               <button class="btn btn-yandex" @click="authYandex">🔗 授权 Yandex Webmaster</button>
@@ -119,10 +111,7 @@
             <div class="section-desc">审计完成、发现问题时自动向 Telegram 发送消息</div>
             <div class="field-row">
               <label class="field-label">机器人令牌（Bot Token）</label>
-              <div class="input-with-eye">
-                <input class="field-input" v-model="settings.telegram_bot_token" :type="showKey.tg ? 'text' : 'password'" placeholder="1234567890:AAABBB..." />
-                <button class="eye-btn" @click="showKey.tg=!showKey.tg">{{ showKey.tg ? '🙈' : '👁' }}</button>
-              </div>
+              <input class="field-input" v-model="settings.telegram_bot_token" type="password" placeholder="••••••" autocomplete="new-password" />
               <div class="field-hint">在 Telegram 中找 @BotFather 创建机器人后获取</div>
             </div>
             <div class="field-row">
