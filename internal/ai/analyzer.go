@@ -88,6 +88,150 @@ type SitePageForPrompt struct {
 	LastFetchedAt string
 }
 
+// ─── Strategy (white-hat SEO) Prompt Builder ─────────────────────────────────
+
+// BuildStrategyPrompt builds a prompt focused ONLY on the white-hat SEO
+// strategy chapter. This runs as a second AI call so it's guaranteed to be
+// generated even if the technical audit call gets cut off.
+func BuildStrategyPrompt(domain string, sitePages []SitePageForPrompt, crawlPages []crawler.PageResult,
+	gsc *GSCDataForPrompt, ga *GADataForPrompt, yandex *YandexDataForPrompt) string {
+
+	now := time.Now().Format("2006-01-02 15:04:05")
+	prompt := fmt.Sprintf(`你是一位资深 SEO 运营策略师。基于下方站点的真实 HTML 源码和数据，输出一份**深度白帽 SEO 优化路线图**。
+
+## 站点
+- 域名：%s
+- 分析时间：%s
+
+## 任务（只做这一件事，不做技术问题审计）
+
+输出 10 条独立的 SEO 策略建议，作为 10 个 issue，组成一章"深度白帽 SEO 优化建议"。
+每条建议必须可落地、可执行、可衡量。
+
+## 10 条建议的固定题目（严格按此顺序输出，不得合并不得省略）
+
+1. **关键词策略布局** — 基于现有 TDK 和 GSC 关键词，给出：
+   - 3 个主攻关键词（当前位置 + 目标位置 + 预期流量）
+   - 8 个长尾词方向（拼写示例 + 搜索量估算 + 对应落地页类型）
+   - 关键词在 title/H1/首段/内链锚文本中的分布建议（给出具体模板）
+   - 关键词与同类头部站点差距分析
+
+2. **内链建设方案** — 识别权重最高的 3 个页面，给出：
+   - 内链传递路径图（A → B → C 结构，至少 3 条路径）
+   - 每个枢纽页应增加的内链数量和锚文本示例（至少 15 条）
+   - 如何打通孤立页面（≥ 3 个具体做法）
+   - 面包屑、相关推荐、底部导航的优化方案
+
+3. **内容优化清单** — 针对首页 / 列表页 / 详情页三种类型，各给出：
+   - 目标正文字数（最低值 + 推荐值）
+   - 段落结构（开头 / 中间 / 结尾怎么写，给模板）
+   - 多媒体配比（图片数 / 视频数 / 表格数）
+   - 至少 8 个可在 24 小时内手改的具体文案位置
+   - E-E-A-T 信号如何在内容中体现
+
+4. **3 个月技术修复优先级** — 给出月度路线图：
+   - 第 1 个月：致命+严重级修复清单（按"影响大×成本低"排序，前 10 项）
+   - 第 2 个月：中等级 + 结构化数据 + Core Web Vitals
+   - 第 3 个月：内容扩展 + 外链建设 + 国际化
+   - 每项给出预估工时、负责角色（开发/运营/内容）
+
+5. **运营可立即执行动作** — 无需开发介入、运营自己就能做的 15 条具体动作，每条必须含：
+   - 操作位置（哪个页面 / 后台哪个菜单）
+   - 操作内容（改成什么，给示例）
+   - 预期效果（多久见效 / 指标怎么变）
+
+6. **与行业头部站点的关键差距** — 对比同类头部站点，指出：
+   - 5 个最关键的 SEO 基础设施缺口（Schema 类型 / Sitemap 分类 / hreflang / AMP / CDN 等）
+   - 每个缺口的补救方案（具体配置代码）
+   - 补上后预期带来的流量提升幅度（基于 GSC 数据估算）
+
+7. **结构化数据扩展路线** — 基于站点类型推荐：
+   - 应部署的 5+ 种 Schema 类型（Article / VideoObject / BreadcrumbList / FAQPage / Organization / Event 等）
+   - 每种 Schema 的 JSON-LD 模板（直接可用）
+   - 验证方式（rich results test / schema.org validator）
+   - 预期 rich snippet 展示效果
+
+8. **Sitemap 与索引策略** — 给出：
+   - Sitemap 分片方案（按类型 / 时间 / 语言分）
+   - sitemap_index.xml 的组织结构
+   - 更新频率建议（lastmod / changefreq）
+   - 在 GSC 中提交和监控索引的 SOP
+   - 如何识别和处理 "已发现但未编入索引" 的问题
+
+9. **外链与品牌建设** — 白帽外链策略：
+   - 3 类可获取的白帽外链类型（行业目录 / 客座博文 / 资源页链接等）
+   - 每类的获取方法和沟通话术模板
+   - 品牌词曝光提升方案（UGC / 论坛 / 社媒）
+   - 如何监控外链质量和 referral 流量
+
+10. **数据驱动的持续优化 SOP** — 建立长效机制：
+    - 每周必看的 5 个 GSC/GA 指标（点击、展示、CTR、位置、跳出率）
+    - 每月应做的 3 项定期审计（Core Web Vitals / 索引覆盖 / 关键词排名）
+    - 季度性的内容策略复盘流程
+    - 如何设置告警（排名下滑 / 收录骤降 / 流量异常）
+
+## GSC / GA 数据参考
+
+`, domain, now)
+
+	if gsc != nil {
+		prompt += fmt.Sprintf("GSC: 点击=%d 展示=%d CTR=%.2f%% 排名=%.1f\nTop关键词: %s\nTop页面: %s\n\n",
+			gsc.Clicks, gsc.Impressions, gsc.CTR*100, gsc.Position, gsc.Keywords, gsc.Pages)
+	}
+	if ga != nil {
+		prompt += fmt.Sprintf("GA: 会话=%d 用户=%d 浏览=%d 渠道=%s\n\n",
+			ga.Sessions, ga.Users, ga.Pageviews, ga.Channels)
+	}
+	if yandex != nil {
+		prompt += fmt.Sprintf("Yandex: 收录=%d 错误=%s\n\n", yandex.IndexCount, yandex.Errors)
+	}
+
+	// Feed a compact version of page sources so the strategist has context.
+	prompt += "## 页面源码样本（仅供参考，不用深扒每个细节）\n\n"
+	for _, p := range sitePages {
+		html := p.HTML
+		if len(html) > 5000 {
+			html = html[:5000] + "\n... [截断]"
+		}
+		prompt += fmt.Sprintf("### %s\nURL: %s\n```html\n%s\n```\n\n", p.Name, p.URL, html)
+	}
+	for _, p := range crawlPages {
+		if p.HTML == "" {
+			continue
+		}
+		html := p.HTML
+		if len(html) > 4000 {
+			html = html[:4000] + "\n... [截断]"
+		}
+		prompt += fmt.Sprintf("### 类型: %s\nURL: %s\n```html\n%s\n```\n\n", p.PageType, p.URL, html)
+	}
+
+	prompt += `## 输出格式
+
+**只返回 JSON，不要 markdown 代码块标记。**
+
+{
+  "title": "深度白帽 SEO 优化建议",
+  "issues": [
+    {
+      "id": 1,
+      "severity": "严重",
+      "module": "关键词策略",
+      "title": "关键词策略布局",
+      "scope": "全站",
+      "evidence_label": "当前 TDK + GSC 头部关键词",
+      "evidence_code": "（贴出当前 title / H1 / top 关键词，3-8 行）",
+      "current_status": "（≤ 50 字，量化当前问题）",
+      "fix_suggestion": "（400-700 字详细方案，必须含：关键词清单表、分布位置、预期流量）"
+    },
+    ... 其余 9 条同样结构 ...
+  ]
+}
+
+**必须输出 10 个 issue，id 从 1 到 10，顺序严格按上方 1-10 的题目。severity 可以是 严重 或 中等。fix_suggestion 必须具体可执行，给代码/话术/清单，不要讲空话。一条都不许省略或合并。**`
+	return prompt
+}
+
 // ─── V6 Prompt Builder ────────────────────────────────────────────────────────
 
 func BuildV6AuditPrompt(domain string, sitePages []SitePageForPrompt, crawlPages []crawler.PageResult,
@@ -324,14 +468,45 @@ func BuildV6AuditPrompt(domain string, sitePages []SitePageForPrompt, crawlPages
 - 大型JS库整体引入未按需加载
 - 第三方iframe（广告/视频）阻塞主线程
 
-### 附加类F 深度白帽SEO优化建议（必须独立成章输出）
-基于以上所有发现，以运营视角输出可落地的SEO优化路线图，作为单独一章：
-1. **关键词策略**：基于现有TDK和H标签，给出目标关键词布局调整方案和3-5个长尾词方向
-2. **内链建设方案**：识别权重高的页面，给出内链传递路径建议和锚文本优化方案
-3. **内容优化清单**：首页/列表页/详情页各自的内容充实具体建议（目标字数/段落结构/多媒体配比）
-4. **3个月技术修复计划**：按"影响权重×修复难度"优先级排序，给出第1个月/第2个月/第3个月应完成的修复项
-5. **运营可立即执行的动作**：无需开发介入，运营人员自己就能做的10条优化项（修改Title/Description/alt/内链锚文本等）
-6. **与行业最佳实践的差距**：对比同类头部站点应具备的SEO基础设施，指出3个最关键缺口
+（注：白帽 SEO 优化策略章节由另一次独立的 AI 调用生成并合并，本次只需专注技术问题）
+
+---
+
+## ⚠️ 完整性自检清单（输出前必须逐项过一遍）
+
+在你开始写 JSON 前，先在脑子里过一遍下面 29 个检查类，每一类**必须**至少有一次判定结果（有问题就列成 issue，完全合规就在本类最后补一个 severity=低、title="本类无明显问题" 的占位 issue——不要整类跳过不提）：
+
+- [ ] 1. TDK 与基础 Meta
+- [ ] 2. H 标签结构
+- [ ] 3. 图片 SEO
+- [ ] 4. 链接与内链
+- [ ] 5. 结构化数据 Schema
+- [ ] 6. robots.txt & Sitemap
+- [ ] 7. 性能与 Core Web Vitals HTML 信号
+- [ ] 8. URL 结构
+- [ ] 9. 安全响应头
+- [ ] 10. 内容质量
+- [ ] 11. 移动端适配
+- [ ] 12. JavaScript SEO
+- [ ] 13. 重定向规范化
+- [ ] 14. 爬虫陷阱
+- [ ] 15. E-E-A-T 信号
+- [ ] 16. 资源压缩与缓存
+- [ ] 17. 国际化 hreflang
+- [ ] 18. RSS Feed 质量
+- [ ] 19. 内链分析
+- [ ] 20. 分页 SEO
+- [ ] 21. 视频/媒体 SEO
+- [ ] 22. 404 与软 404
+- [ ] 23. 重复内容
+- [ ] 24. HTTPS 与安全
+- [ ] 附加 A. 隐藏文本 / 黑帽手法
+- [ ] 附加 B. 关键词堆砌
+- [ ] 附加 C. 代码质量
+- [ ] 附加 D. 安全漏洞风险
+- [ ] 附加 E. 页面加载速度优化
+
+**任何一类没有出现在最终输出里视为违规**。
 
 ---
 
@@ -448,12 +623,11 @@ func BuildV6AuditPrompt(domain string, sitePages []SitePageForPrompt, crawlPages
    - summary：≤ 80 字，不要展开
    - fix_suggestion：**可详细 200-400 字**，必须含：① 可复制的 HTML/配置代码 ② 3-5 条关键参数（字数/位置/频次） ③ 验收方式（用什么工具验证）
 5. **发现多少报多少，一个都不许漏**。质量优先，不要凑数编造问题。
-6. 必须覆盖 24 大类 + 6 附加类，完全合规的大类可以跳过
-7. 必须有独立的"深度白帽 SEO 优化建议"章节（附加类 F）
-8. 按章节分组，标题格式："一、TDK与基础Meta"、"二、H标签结构"……
-9. 最后一章为"深度白帽 SEO 优化建议"
-10. 先输出 fatal 和 serious，再 medium 和 low
-11. **Token 优先级**：输出接近 30000 tokens 时，优先保留所有 fatal/serious 完整输出；low 级别可压缩 fix_suggestion 到 100 字内，但问题本身不能省略
+6. 必须覆盖 24 大类技术检查点，完全合规的大类可以跳过
+7. 按章节分组，标题格式："一、TDK与基础Meta"、"二、H标签结构"……
+8. 先输出 fatal 和 serious，再 medium 和 low
+9. **本次不需要输出"深度白帽 SEO 优化建议"章节**（会由另一次独立调用生成并合并）
+10. **Token 优先级**：输出接近 30000 tokens 时，优先保留所有 fatal/serious 完整输出；low 级别可压缩 fix_suggestion 到 100 字内，但问题本身不能省略
 `, domain, time.Now().Format("2006-01-02"))
 
 	return prompt
@@ -804,6 +978,115 @@ func repairJSON(s string) string {
 		braces--
 	}
 	return s
+}
+
+// CallAIStrategy runs a separate, smaller AI call that produces only the
+// "深度白帽 SEO 优化建议" chapter. Returns a parsed V6Chapter so it can be
+// appended to the technical report. Best-effort: on any failure returns
+// (nil, err) and the caller should keep the technical report without it.
+func CallAIStrategy(prompt string) (*V6Chapter, string, error) {
+	apiURL := db.GetSetting("ai_api_url")
+	apiKey := db.GetSetting("ai_api_key")
+	model := db.GetSetting("ai_model")
+	if apiURL == "" {
+		apiURL = "https://ai.router.team/v1"
+	}
+	if model == "" {
+		model = "claude-sonnet-4-6"
+	}
+
+	// Smaller bound for strategy: 6 issues × ~1000 chars ≈ well under 16k tokens
+	reqBody := map[string]interface{}{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+		"max_tokens":  16000,
+		"temperature": 0.3,
+	}
+	jsonBody, _ := json.Marshal(reqBody)
+	req, _ := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	client := &http.Client{Timeout: 240 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, model, fmt.Errorf("策略 AI 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
+	if err != nil {
+		return nil, model, err
+	}
+	if resp.StatusCode != 200 {
+		return nil, model, fmt.Errorf("策略 AI 错误 HTTP %d", resp.StatusCode)
+	}
+	var apiResp struct {
+		Choices []struct {
+			Message      struct{ Content string `json:"content"` } `json:"message"`
+			FinishReason string                                    `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, model, err
+	}
+	if len(apiResp.Choices) == 0 {
+		return nil, model, fmt.Errorf("策略 AI 无返回")
+	}
+	content := extractJSON(apiResp.Choices[0].Message.Content)
+	content = repairJSON(content)
+
+	var chapter V6Chapter
+	if err := json.Unmarshal([]byte(content), &chapter); err == nil && len(chapter.Issues) > 0 {
+		if chapter.Title == "" {
+			chapter.Title = "深度白帽 SEO 优化建议"
+		}
+		return &chapter, model, nil
+	}
+	return nil, model, fmt.Errorf("策略 AI 返回格式异常")
+}
+
+// MergeStrategyChapter appends/replaces the strategy chapter inside a
+// v6 JSON blob. Returns the new JSON string; if anything fails returns
+// the original unchanged.
+func MergeStrategyChapter(v6JSON string, strategy *V6Chapter) string {
+	if strategy == nil || v6JSON == "" {
+		return v6JSON
+	}
+	var r V6Report
+	if err := json.Unmarshal([]byte(v6JSON), &r); err != nil {
+		return v6JSON
+	}
+	// Remove any existing strategy chapter (match by title containing "白帽" or "策略")
+	out := r.Chapters[:0]
+	for _, ch := range r.Chapters {
+		if strings.Contains(ch.Title, "白帽") || strings.Contains(ch.Title, "优化建议") {
+			continue
+		}
+		out = append(out, ch)
+	}
+	r.Chapters = append(out, *strategy)
+
+	// Recompute stats (include strategy issues in totals).
+	r.TotalIssues, r.Fatal, r.Serious, r.Medium, r.Low = 0, 0, 0, 0, 0
+	for _, ch := range r.Chapters {
+		r.TotalIssues += len(ch.Issues)
+		for _, iss := range ch.Issues {
+			switch iss.Severity {
+			case "致命":
+				r.Fatal++
+			case "严重":
+				r.Serious++
+			case "中等":
+				r.Medium++
+			case "低":
+				r.Low++
+			}
+		}
+	}
+	out2, _ := json.Marshal(r)
+	return string(out2)
 }
 
 func TestAIConnection() error {

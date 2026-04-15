@@ -375,6 +375,16 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		telegram.SendNotification("巡检失败", siteName+": "+err.Error())
 		return
 	}
+	updateProgress(80)
+
+	// Step 4b: strategy chapter (independent call, failure not fatal)
+	stratPrompt := ai.BuildStrategyPrompt(config.Domain, sitePages, pages, gscData, gaData, yandexData)
+	if strategyCh, _, sErr := ai.CallAIStrategy(stratPrompt); sErr == nil && strategyCh != nil {
+		analysisResult.V6Report = ai.MergeStrategyChapter(analysisResult.V6Report, strategyCh)
+		log.Printf("[audit %d] scheduler 策略章节已合并（%d 条）", taskID, len(strategyCh.Issues))
+	} else {
+		log.Printf("[audit %d] scheduler 策略章节失败（忽略）: %v", taskID, sErr)
+	}
 	updateProgress(85)
 
 	// Step 5: save results (including v6_report) atomically

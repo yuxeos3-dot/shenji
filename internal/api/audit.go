@@ -212,6 +212,20 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 		telegram.SendNotification("审计失败", siteName+" 审计失败: "+err.Error())
 		return
 	}
+	updateProgress(80)
+
+	// Step 4b: Independently generate the white-hat SEO strategy chapter.
+	// This always runs (even if technical audit was partially truncated), and
+	// its output is merged into v6_report. Failure here does NOT fail the
+	// audit — we just log and continue.
+	log.Printf("[audit %d] 调用策略 AI 生成深度白帽 SEO 建议章节...", taskID)
+	stratPrompt := ai.BuildStrategyPrompt(site.Domain, sitePages, crawlPages, gscData, gaData, yandexData)
+	if strategyCh, _, sErr := ai.CallAIStrategy(stratPrompt); sErr == nil && strategyCh != nil {
+		analysisResult.V6Report = ai.MergeStrategyChapter(analysisResult.V6Report, strategyCh)
+		log.Printf("[audit %d] 策略章节已合并（%d 条建议）", taskID, len(strategyCh.Issues))
+	} else {
+		log.Printf("[audit %d] 策略章节生成失败（已忽略，不影响技术审计）: %v", taskID, sErr)
+	}
 	updateProgress(85)
 
 	// Step 5: Save results in a transaction (INSERT + UPDATE must be atomic).
