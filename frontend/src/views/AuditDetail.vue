@@ -30,7 +30,7 @@
         </div>
         <button v-if="task.status==='done'" class="btn btn-download" @click="downloadReport" :disabled="downloading">
           📥 下载 Word 报告
-        </a>
+        </button>
       </div>
 
       <!-- 报告概览 -->

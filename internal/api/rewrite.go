@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"seo-system/internal/db"
@@ -136,7 +137,24 @@ func callRewriteAI(prompt string) (interface{}, error) {
 		return nil, fmt.Errorf("AI响应解析失败")
 	}
 
-	content := extractJSON(apiResp.Choices[0].Message.Content)
+	raw := apiResp.Choices[0].Message.Content
+	// Strip markdown code blocks
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "```") {
+		lines := strings.Split(raw, "\n")
+		if len(lines) >= 2 {
+			inner := strings.Join(lines[1:], "\n")
+			if idx := strings.LastIndex(inner, "```"); idx >= 0 {
+				inner = inner[:idx]
+			}
+			raw = strings.TrimSpace(inner)
+		}
+	}
+	// Find JSON array or object
+	content := raw
+	if start := strings.IndexAny(raw, "[{"); start >= 0 {
+		content = raw[start:]
+	}
 	var result interface{}
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
 		return nil, fmt.Errorf("JSON解析失败: %v", err)
