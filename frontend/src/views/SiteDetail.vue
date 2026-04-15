@@ -105,7 +105,10 @@
             <td><div class="progress-bar"><div class="progress-fill" :style="{width:a.progress+'%'}"></div></div><span class="progress-text">{{ a.progress }}%</span></td>
             <td style="font-size:12px;color:var(--ink-soft)">{{ a.created_at }}</td>
             <td style="font-size:12px;color:var(--ink-soft)">{{ a.finished_at || '—' }}</td>
-            <td><button class="btn btn-xs" @click="$router.push(`/sites/${$route.params.id}/audit/${a.id}`)">查看详情</button></td>
+            <td style="display:flex;gap:6px;align-items:center">
+              <button class="btn btn-xs" @click="$router.push(`/sites/${$route.params.id}/audit/${a.id}`)">查看详情</button>
+              <a v-if="a.status==='done'" :href="`/api/v1/audits/${a.id}/report/download`" target="_blank" class="btn btn-xs btn-dl">📥 下载报告</a>
+            </td>
           </tr>
           <tr v-if="!audits.length"><td colspan="6" style="text-align:center;color:var(--ink-hint);padding:30px">暂无审计记录</td></tr>
         </tbody>
@@ -341,6 +344,8 @@ async function triggerAudit() {
 .btn-primary:disabled { opacity:.6; cursor:not-allowed; transform:none; }
 .btn-xs { padding:4px 12px; font-size:12px; border-radius:6px; }
 .btn-xs:hover { background:var(--sun-glow); border-color:var(--sun); color:var(--sun-deep); }
+.btn-dl { background:#EFF6FF !important; border-color:#BFDBFE !important; color:#1D4ED8 !important; text-decoration:none; }
+.btn-dl:hover { background:#2563EB !important; color:#fff !important; border-color:#2563EB !important; }
 
 .table { width:100%; border-collapse:collapse; }
 .table th { padding:10px 14px; text-align:left; font-size:11px; font-weight:800; color:var(--ink-mid); text-transform:uppercase; letter-spacing:.08em; border-bottom:2px solid var(--border); background:var(--surface-3); }
