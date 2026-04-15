@@ -108,6 +108,7 @@
             <td style="display:flex;gap:6px;align-items:center">
               <button class="btn btn-xs" @click="$router.push(`/sites/${$route.params.id}/audit/${a.id}`)">查看详情</button>
               <a v-if="a.status==='done'" :href="`/api/v1/audits/${a.id}/report/download`" target="_blank" class="btn btn-xs btn-dl">📥 下载报告</a>
+              <button class="btn btn-xs btn-del-audit" @click="deleteAudit(a)" :disabled="a.status==='running'">🗑️</button>
             </td>
           </tr>
           <tr v-if="!audits.length"><td colspan="6" style="text-align:center;color:var(--ink-hint);padding:30px">暂无审计记录</td></tr>
@@ -176,7 +177,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 
 const route = useRoute()
@@ -233,6 +234,15 @@ const pollTimer = ref(null)
 onMounted(loadData)
 onUnmounted(() => { if (pollTimer.value) clearTimeout(pollTimer.value) })
 watch(() => route.params.id, () => { if (route.params.id) { if (pollTimer.value) clearTimeout(pollTimer.value); loadData() } })
+
+async function deleteAudit(a) {
+  try {
+    await ElMessageBox.confirm(`确定要删除审计记录 #${a.id} 吗？删除后不可恢复。`, '确认删除', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' })
+    await api.deleteAudit(a.id)
+    ElMessage.success('审计记录已删除')
+    loadData()
+  } catch {}
+}
 
 async function fetchAllPages() {
   if (!sitePages.value.length) { ElMessage.warning('暂无页面，请先添加'); return }
@@ -342,7 +352,9 @@ async function triggerAudit() {
 .btn-primary { background:linear-gradient(135deg,var(--sun) 0%,var(--coral) 100%); color:#fff; border-color:transparent; box-shadow:var(--s-amber); }
 .btn-primary:hover { background:linear-gradient(135deg,var(--sun-deep) 0%,var(--sun) 100%); color:#fff; box-shadow:0 8px 24px rgba(249,115,22,.48); }
 .btn-primary:disabled { opacity:.6; cursor:not-allowed; transform:none; }
-.btn-xs { padding:4px 12px; font-size:12px; border-radius:6px; }
+.btn-del-audit { color:var(--err) !important; border-color:#FFCDD2 !important; background:#FFF5F5 !important; }
+.btn-del-audit:hover { background:var(--err) !important; color:#fff !important; border-color:var(--err) !important; }
+.btn-del-audit:disabled { opacity:.4; cursor:not-allowed; }
 .btn-xs:hover { background:var(--sun-glow); border-color:var(--sun); color:var(--sun-deep); }
 .btn-dl { background:#EFF6FF !important; border-color:#BFDBFE !important; color:#1D4ED8 !important; text-decoration:none; }
 .btn-dl:hover { background:#2563EB !important; color:#fff !important; border-color:#2563EB !important; }

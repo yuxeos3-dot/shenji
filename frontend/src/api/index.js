@@ -57,6 +57,7 @@ export default {
   // Audit
   triggerAudit: (siteId) => api.post(`/v1/sites/${siteId}/audit`),
   listAudits: (siteId) => api.get(`/v1/sites/${siteId}/audits`),
+  deleteAudit: (taskId) => api.delete(`/v1/audits/${taskId}`),
   getAudit: (taskId) => api.get(`/v1/audits/${taskId}`),
   getAuditPages: (taskId) => api.get(`/v1/audits/${taskId}/pages`),
   downloadAuditReport: (taskId) => `/api/v1/audits/${taskId}/report/download`,

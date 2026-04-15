@@ -63,6 +63,7 @@ func main() {
 		v1.POST("/sites/:id/audit", api.TriggerAudit)
 		v1.GET("/sites/:id/audits", api.ListAudits)
 		v1.GET("/audits/:task_id", api.GetAudit)
+		v1.DELETE("/audits/:task_id", api.DeleteAudit)
 		v1.GET("/audits/:task_id/pages", api.GetAuditPages)
 		v1.GET("/audits/:task_id/pages/:type", api.GetAuditPageByType)
 		v1.GET("/audits/:task_id/report/download", api.DownloadAuditReport)

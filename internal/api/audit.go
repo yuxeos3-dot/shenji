@@ -208,7 +208,22 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 	telegram.SendNotification("审计完成", siteName+" 审计完成: "+analysisResult.Summary)
 }
 
-func ListAudits(c *gin.Context) {
+func DeleteAudit(c *gin.Context) {
+	taskID := c.Param("task_id")
+	// Don't allow deleting running tasks
+	var status string
+	db.DB.QueryRow("SELECT status FROM audit_tasks WHERE id = ?", taskID).Scan(&status)
+	if status == "running" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "进行中的任务不能删除"})
+		return
+	}
+	db.DB.Exec("DELETE FROM audit_results WHERE task_id = ?", taskID)
+	db.DB.Exec("DELETE FROM audit_pages WHERE task_id = ?", taskID)
+	db.DB.Exec("DELETE FROM audit_tasks WHERE id = ?", taskID)
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "删除成功"})
+}
+
+
 	siteID := c.Param("id")
 	rows, err := db.DB.Query(
 		"SELECT id, site_id, triggered_by, status, progress, error_msg, created_at, finished_at FROM audit_tasks WHERE site_id = ? ORDER BY id DESC",
