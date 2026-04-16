@@ -120,6 +120,7 @@ export default {
   geoListTitles: (libId) => api.get(`/v1/geo/title-libs/${libId}/titles`),
   geoAddTitles: (libId, data) => api.post(`/v1/geo/title-libs/${libId}/titles`, data),
   geoImportTitles: (libId, data) => api.post(`/v1/geo/title-libs/${libId}/import`, data),
+  geoImportFromGSC: (libId, data) => api.post(`/v1/geo/title-libs/${libId}/import-gsc`, data),
   geoDeleteTitle: (id) => api.delete(`/v1/geo/titles/${id}`),
   geoListPrompts: () => api.get('/v1/geo/prompts'),
   geoCreatePrompt: (data) => api.post('/v1/geo/prompts', data),

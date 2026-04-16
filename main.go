@@ -136,6 +136,7 @@ func main() {
 			geo.GET("/title-libs/:id/titles", api.GeoListTitles)
 			geo.POST("/title-libs/:id/titles", api.GeoAddTitles)
 			geo.POST("/title-libs/:id/import", api.GeoImportTitles)
+			geo.POST("/title-libs/:id/import-gsc", api.GeoImportFromGSC)
 			geo.DELETE("/titles/:id", api.GeoDeleteTitle)
 
 			geo.GET("/prompts", api.GeoListPrompts)

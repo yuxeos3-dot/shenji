@@ -220,6 +220,61 @@ func GeoDeleteTitle(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "data": "删除成功"})
 }
 
+// GeoImportFromGSC imports top keywords from GSC data into a keyword library.
+func GeoImportFromGSC(c *gin.Context) {
+	libID := c.Param("id")
+	var req struct {
+		SiteID int64 `json:"site_id" binding:"required"`
+		Limit  int   `json:"limit"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"code": -1, "error": "site_id 必填"})
+		return
+	}
+	if req.Limit <= 0 || req.Limit > 500 {
+		req.Limit = 100
+	}
+
+	// Get latest GSC data for this site
+	var kwJSON string
+	err := db.DB.QueryRow("SELECT keywords_json FROM gsc_data WHERE site_id = ? ORDER BY date DESC LIMIT 1", req.SiteID).Scan(&kwJSON)
+	if err != nil || kwJSON == "" || kwJSON == "[]" {
+		c.JSON(400, gin.H{"code": -1, "error": "该站点无 GSC 关键词数据，请先同步 GSC"})
+		return
+	}
+
+	type gscKW struct {
+		Query       string  `json:"query"`
+		Clicks      int     `json:"clicks"`
+		Impressions int     `json:"impressions"`
+		Position    float64 `json:"position"`
+	}
+	var keywords []gscKW
+	if err := json.Unmarshal([]byte(kwJSON), &keywords); err != nil {
+		c.JSON(500, gin.H{"code": -1, "error": "GSC 关键词数据解析失败"})
+		return
+	}
+
+	count := 0
+	for i, kw := range keywords {
+		if i >= req.Limit || kw.Query == "" {
+			break
+		}
+		// Skip duplicates
+		var exists int
+		db.DB.QueryRow("SELECT COUNT(*) FROM geo_titles WHERE lib_id=? AND title=?", libID, kw.Query).Scan(&exists)
+		if exists > 0 {
+			continue
+		}
+		if _, err := db.DB.Exec("INSERT INTO geo_titles (lib_id, title, keyword) VALUES (?, ?, ?)",
+			libID, kw.Query, kw.Query); err == nil {
+			count++
+		}
+	}
+	db.DB.Exec("UPDATE geo_title_libs SET title_count = (SELECT COUNT(*) FROM geo_titles WHERE lib_id = ?) WHERE id = ?", libID, libID)
+	c.JSON(200, gin.H{"code": 0, "data": gin.H{"imported": count, "source_total": len(keywords)}})
+}
+
 // ─── Prompts ─────────────────────────────────────────────────────────────────
 
 func GeoListPrompts(c *gin.Context) {
