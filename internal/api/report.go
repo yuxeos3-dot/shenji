@@ -63,41 +63,7 @@ func DownloadAuditReport(c *gin.Context) {
 		return
 	}
 
-<<<<<<< HEAD
-	// Write temp files
-	tmpDir := "/tmp/seo-reports"
-	os.MkdirAll(tmpDir, 0755)
-
-	jsonPath := filepath.Join(tmpDir, fmt.Sprintf("report_%s.json", taskID))
-	docxPath := filepath.Join(tmpDir, fmt.Sprintf("%s_SEO审计报告_%s.docx", domain, time.Now().Format("20060102")))
-
-	if err := os.WriteFile(jsonPath, []byte(v6Report), 0644); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "写入临时文件失败"})
-		return
-	}
-	defer os.Remove(jsonPath)
-	defer os.Remove(docxPath)
-
-	// Write gen_report.py if not exists
-	scriptPath := "/tmp/gen_report.py"
-	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-		if err := os.WriteFile(scriptPath, []byte(genReportScript), 0644); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "写入生成脚本失败"})
-			return
-		}
-	}
-
-	// Install python-docx only once (skip if already installed)
-	if err := exec.Command("python3", "-c", "import docx").Run(); err != nil {
-		exec.Command("pip3", "install", "python-docx", "--break-system-packages", "-q").Run()
-	}
-
-	// Generate docx
-	cmd := exec.Command("python3", scriptPath, jsonPath, docxPath, domain)
-	out, err := cmd.CombinedOutput()
-=======
 	docx, err := report.BuildDocx(&data, domain)
->>>>>>> 8543e622ba5aebfb08d6ab5cdfcc71e30d89c895
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": fmt.Sprintf("生成报告失败: %v", err)})
 		return
