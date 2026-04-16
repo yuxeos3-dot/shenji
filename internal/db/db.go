@@ -493,6 +493,7 @@ func seedDefaultSettings() {
 		"max_concurrent_audit":         "3",
 		"ai_api_url":                   "https://ai.router.team/v1",
 		"ai_model":                     "claude-sonnet-4-6",
+		"ip_whitelist":                 "",
 	}
 
 	for k, v := range defaults {

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"seo-system/internal/db"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -96,36 +98,50 @@ func AdminRequired() gin.HandlerFunc {
 	}
 }
 
-// ─── IP Whitelist ────────────────────────────────────────────────────────────
+// ─── IP Whitelist (DB-backed with cache) ─────────────────────────────────────
 
-// allowedIPs caches the parsed IP_WHITELIST env var.
-var allowedIPs []string
+var (
+	cachedIPs     []string
+	ipCacheMu     sync.RWMutex
+	ipCacheExpiry time.Time
+)
 
-func init() {
-	if raw := os.Getenv("IP_WHITELIST"); raw != "" {
-		for _, ip := range strings.Split(raw, ",") {
-			ip = strings.TrimSpace(ip)
-			if ip != "" {
-				allowedIPs = append(allowedIPs, ip)
-			}
-		}
-		if len(allowedIPs) > 0 {
-			log.Printf("IP whitelist enabled: %v", allowedIPs)
+const ipCacheTTL = 30 * time.Second
+
+// refreshIPCache reads ip_whitelist from DB and caches the parsed IPs.
+func refreshIPCache() []string {
+	ipCacheMu.Lock()
+	defer ipCacheMu.Unlock()
+
+	if time.Now().Before(ipCacheExpiry) {
+		return cachedIPs
+	}
+
+	raw := db.GetSetting("ip_whitelist")
+	var ips []string
+	for _, line := range strings.Split(raw, "\n") {
+		ip := strings.TrimSpace(line)
+		if ip != "" {
+			ips = append(ips, ip)
 		}
 	}
+	cachedIPs = ips
+	ipCacheExpiry = time.Now().Add(ipCacheTTL)
+	return ips
 }
 
 // IPWhitelist blocks requests from IPs not in the whitelist.
-// If IP_WHITELIST env is empty, all IPs are allowed (dev mode).
+// If ip_whitelist setting is empty, all IPs are allowed.
 func IPWhitelist() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if len(allowedIPs) == 0 {
+		ips := getIPWhitelist()
+		if len(ips) == 0 {
 			c.Next()
 			return
 		}
 
 		clientIP := c.ClientIP()
-		for _, ip := range allowedIPs {
+		for _, ip := range ips {
 			if clientIP == ip {
 				c.Next()
 				return
@@ -135,6 +151,17 @@ func IPWhitelist() gin.HandlerFunc {
 		c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "IP 不在白名单中"})
 		c.Abort()
 	}
+}
+
+func getIPWhitelist() []string {
+	ipCacheMu.RLock()
+	if time.Now().Before(ipCacheExpiry) {
+		ips := cachedIPs
+		ipCacheMu.RUnlock()
+		return ips
+	}
+	ipCacheMu.RUnlock()
+	return refreshIPCache()
 }
 
 // Online user tracking — records each authenticated request's user + IP.

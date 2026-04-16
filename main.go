@@ -142,6 +142,7 @@ func main() {
 			settings.PUT("", api.SaveSettings)
 			settings.POST("/test-ai", api.TestAI)
 			settings.POST("/test-telegram", api.TestTelegram)
+			settings.GET("/my-ip", api.GetClientIP)
 		}
 
 		// Audit Logs (admin only)

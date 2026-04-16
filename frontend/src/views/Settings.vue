@@ -145,6 +145,34 @@
         </div>
       </el-tab-pane>
 
+      <!-- ── 安全设置 ── -->
+      <el-tab-pane label="🔒 安全设置" name="security">
+        <div class="tab-content">
+          <div class="section-card">
+            <div class="section-title">IP 白名单</div>
+            <div class="section-desc">
+              只有白名单中的 IP 才能访问系统。留空则不限制（允许所有 IP）。每行填写一个 IP 地址。
+            </div>
+            <div class="field-row">
+              <label class="field-label">允许访问的 IP 地址</label>
+              <textarea
+                class="field-input ip-textarea"
+                v-model="settings.ip_whitelist"
+                placeholder="每行一个 IP 地址，例如：&#10;192.168.1.100&#10;10.0.0.1&#10;留空则不限制访问"
+                rows="8"
+              ></textarea>
+              <div class="field-hint">
+                当前客户端 IP：<code>{{ clientIP || '获取中...' }}</code>
+                　·　请确保将自己的 IP 加入白名单，否则保存后将无法访问系统
+              </div>
+            </div>
+          </div>
+          <div class="save-bar">
+            <button class="btn btn-primary" @click="save" :disabled="saving">{{ saving ? '保存中...' : '💾 保存配置' }}</button>
+          </div>
+        </div>
+      </el-tab-pane>
+
       <!-- ── 巡检调度 ── -->
       <el-tab-pane label="⏰ 全局调度" name="schedule">
         <div class="tab-content">
@@ -250,6 +278,7 @@ const testing = ref({ ai: false, tg: false })
 const showKey = ref({ ai: false, gsc: false, yandex: false, tg: false })
 const aiSlots = ref([{api_url:'',api_key:'',model:''},{api_url:'',api_key:'',model:''},{api_url:'',api_key:'',model:''}])
 const aiTestResults = ref([])
+const clientIP = ref('')
 
 const scheduleMode = ref('daily')
 const intervalHours = ref(24)
@@ -288,6 +317,11 @@ onMounted(async () => {
     const aiRes = await api.getMyAIConfig()
     const slots = aiRes.data?.slots || []
     for (let i = 0; i < 3; i++) aiSlots.value[i] = slots[i] || {api_url:'',api_key:'',model:''}
+  } catch (e) { console.error(e) }
+  // Load client IP for whitelist hint
+  try {
+    const ipRes = await api.getMyIP()
+    clientIP.value = ipRes.data || ''
   } catch (e) { console.error(e) }
 })
 
@@ -505,4 +539,5 @@ async function authYandex() { try { const res = await api.getYandexAuthURL(); wi
 .ai-test-item { padding:6px 12px; border-radius:6px; margin-bottom:4px; font-size:13px; font-weight:500; }
 .test-ok { background:#F0FDF4; color:#166534; }
 .test-fail { background:#FEF2F2; color:#991B1B; }
+.ip-textarea { resize:vertical; font-family:'JetBrains Mono',monospace; font-size:13px; line-height:1.7; min-height:120px; }
 </style>

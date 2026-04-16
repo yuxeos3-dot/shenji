@@ -72,6 +72,10 @@ func SaveSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "保存成功"})
 }
 
+func GetClientIP(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": c.ClientIP()})
+}
+
 func TestAI(c *gin.Context) {
 	if err := ai.TestAIConnection(); err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "error": err.Error()})

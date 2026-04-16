@@ -136,6 +136,7 @@ const api = {
 
   getSettings: () => instance.get('/v1/settings'),
   saveSettings: (data: Record<string, string>) => instance.put('/v1/settings', data),
+  getMyIP: () => instance.get('/v1/settings/my-ip'),
   testAI: () => instance.post('/v1/settings/test-ai'),
   testTelegram: () => instance.post('/v1/settings/test-telegram'),
 
