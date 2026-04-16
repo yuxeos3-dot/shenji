@@ -15,7 +15,6 @@
         <li v-if="userStore.isAdmin()"><router-link to="/settings" :class="{active: $route.path==='/settings'}"><span class="nav-icon">⚙️</span>系统设置</router-link></li>
       </ul>
       <div class="sidebar-footer">
-        <a href="#" @click.prevent="showAIConfig=true">🤖 我的 AI 设置</a>
         <a href="#" @click.prevent="showPasswordDialog=true">🔑 修改密码</a>
         <a href="#" @click.prevent="handleLogout">🚪 退出登录</a>
       </div>
@@ -48,25 +47,6 @@
     </template>
   </el-dialog>
 
-  <!-- AI Config Dialog -->
-  <el-dialog v-model="showAIConfig" title="🤖 我的 AI 设置" width="620px">
-    <div style="font-size:13px;color:#78350F;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:10px 14px;margin-bottom:16px">
-      每个用户使用自己的 API Key，最多配 3 组。第一组不可用时自动切换到第二组。
-    </div>
-    <div v-for="(slot, idx) in aiSlots" :key="idx" style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:12px;background:#f9fafb">
-      <div style="font-weight:700;font-size:13px;color:#4338CA;margin-bottom:10px">API {{ idx + 1 }}</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">
-        <div><div style="font-size:11px;font-weight:600;color:#6b7280;margin-bottom:4px">接口地址</div><el-input v-model="slot.api_url" placeholder="https://api.openai.com/v1" size="small" /></div>
-        <div><div style="font-size:11px;font-weight:600;color:#6b7280;margin-bottom:4px">模型名称</div><el-input v-model="slot.model" placeholder="claude-sonnet-4-6" size="small" /></div>
-      </div>
-      <div><div style="font-size:11px;font-weight:600;color:#6b7280;margin-bottom:4px">API Key</div><el-input v-model="slot.api_key" placeholder="sk-..." type="password" show-password size="small" /></div>
-    </div>
-    <template #footer>
-      <el-button @click="showAIConfig=false">取消</el-button>
-      <el-button type="warning" @click="testAI" :loading="testingAI">测试连通性</el-button>
-      <el-button type="primary" @click="saveAIConfig" :loading="savingAI">保存</el-button>
-    </template>
-  </el-dialog>
 </template>
 
 <script setup>
@@ -82,40 +62,6 @@ const userStore = useUserStore()
 const showPasswordDialog = ref(false)
 const pwdForm = ref({ old_password: '', new_password: '' })
 
-// AI Config
-const showAIConfig = ref(false)
-const aiSlots = ref([{api_url:'',api_key:'',model:''},{api_url:'',api_key:'',model:''},{api_url:'',api_key:'',model:''}])
-const savingAI = ref(false)
-const testingAI = ref(false)
-
-async function loadAIConfig() {
-  try {
-    const res = await apiClient.getMyAIConfig()
-    const slots = res.data?.slots || []
-    for (let i = 0; i < 3; i++) {
-      aiSlots.value[i] = slots[i] || {api_url:'',api_key:'',model:''}
-    }
-  } catch {}
-}
-async function saveAIConfig() {
-  savingAI.value = true
-  try {
-    await apiClient.saveMyAIConfig({ slots: aiSlots.value })
-    ElMessage.success('AI 配置已保存')
-    showAIConfig.value = false
-  } catch { ElMessage.error('保存失败') }
-  finally { savingAI.value = false }
-}
-async function testAI() {
-  testingAI.value = true
-  try {
-    const res = await apiClient.testMyAI()
-    const results = res.data || []
-    const msgs = results.map(r => `API${r.slot}: ${r.status==='ok'?'✅ 连通':'❌ '+r.error}`).join('\n')
-    ElMessage({ message: msgs.replace(/\n/g, '<br>'), dangerouslyUseHTMLString: true, duration: 5000, type: results.some(r=>r.status==='ok')?'success':'error' })
-  } catch { ElMessage.error('测试失败') }
-  finally { testingAI.value = false }
-}
 
 const pageTitles = {
   '/dashboard': '仪表盘',
@@ -140,7 +86,7 @@ const pageTitle = computed(() => {
   return 'SEO巡站系统'
 })
 
-onMounted(() => { userStore.fetchUser(); loadAIConfig() })
+onMounted(() => { userStore.fetchUser() })
 
 function handleLogout() {
   userStore.logout()
