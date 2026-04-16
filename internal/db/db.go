@@ -371,6 +371,12 @@ func Init() {
 		"ALTER TABLE geo_articles ADD COLUMN content_type TEXT DEFAULT 'geo'",
 		"ALTER TABLE geo_prompts ADD COLUMN content_type TEXT DEFAULT 'geo'",
 		"ALTER TABLE geo_knowledge ADD COLUMN content_type TEXT DEFAULT 'geo'",
+		// Make sure all existing rows have content_type='geo' (not NULL)
+		"UPDATE geo_title_libs SET content_type='geo' WHERE content_type IS NULL OR content_type=''",
+		"UPDATE geo_tasks SET content_type='geo' WHERE content_type IS NULL OR content_type=''",
+		"UPDATE geo_articles SET content_type='geo' WHERE content_type IS NULL OR content_type=''",
+		"UPDATE geo_prompts SET content_type='geo' WHERE content_type IS NULL OR content_type=''",
+		"UPDATE geo_knowledge SET content_type='geo' WHERE content_type IS NULL OR content_type=''",
 		`CREATE INDEX IF NOT EXISTS idx_geo_title_libs_type ON geo_title_libs(content_type)`,
 		`CREATE INDEX IF NOT EXISTS idx_geo_tasks_type ON geo_tasks(content_type)`,
 		"ALTER TABLE geo_title_libs ADD COLUMN site_id INTEGER DEFAULT 0",

@@ -272,7 +272,7 @@ const gscImportLimit = ref(100)
 
 async function loadLibs() { try { titleLibs.value = (await api.geoListTitleLibs({ site_id: siteId.value, content_type: 'extlink' })).data } catch {} }
 async function createLib() { await api.geoCreateTitleLib({ name: libForm.value.name, description: libForm.value.description, site_id: siteId.value, content_type: 'extlink' }); showLibForm.value = false; libForm.value = { name: '', description: '' }; loadLibs(); ElMessage.success('创建成功') }
-async function deleteLib(r) { await ElMessageBox.confirm('删除「' + r.name + '」？'); await api.geoDeleteTitleLib(r.id); loadLibs() }
+async function deleteLib(r) { await ElMessageBox.confirm('删除「' + r.name + '」？'); await api.geoDeleteTitleLib(r.id,'extlink'); loadLibs() }
 async function openTitles(r) { curLib.value = r; titlesPage.value = 1; await loadTitlesPage(); showTitles.value = true }
 async function loadTitlesPage() { const res = await api.geoListTitles(curLib.value.id, { page: titlesPage.value, per_page: 100 }); curTitles.value = res.data.items || []; titlesTotal.value = res.data.total || 0 }
 async function delTitle(r) { await api.geoDeleteTitle(r.id); curTitles.value = curTitles.value.filter(t => t.id !== r.id); loadLibs() }
@@ -289,7 +289,7 @@ const promptForm = ref({ id: 0, name: '', type: 'content', content: '', descript
 async function loadPrompts() { try { prompts.value = (await api.geoListPrompts({ content_type: 'extlink' })).data } catch {} }
 function editPrompt(r) { promptForm.value = { id: r.id || 0, name: r.name || '', type: r.type || 'content', content: r.content || '', description: r.description || '' }; showPromptForm.value = true }
 async function savePrompt() { const f = promptForm.value; if (!f.name || !f.content) { ElMessage.warning('名称和内容必填'); return } if (f.id) { await api.geoUpdatePrompt(f.id, f) } else { await api.geoCreatePrompt({ ...f, content_type: 'extlink' }) } showPromptForm.value = false; loadPrompts(); ElMessage.success('保存成功') }
-async function delPrompt(r) { await ElMessageBox.confirm('删除？'); await api.geoDeletePrompt(r.id); loadPrompts() }
+async function delPrompt(r) { await ElMessageBox.confirm('删除？'); await api.geoDeletePrompt(r.id,'extlink'); loadPrompts() }
 
 // ── 知识库 ──
 const knowledgeList = ref([])
@@ -299,7 +299,7 @@ const kbForm = ref({ id: 0, name: '', content: '' })
 async function loadKnowledge() { try { knowledgeList.value = (await api.geoListKnowledge({ content_type: 'extlink' })).data } catch {} }
 function editKB(r) { kbForm.value = { id: r.id || 0, name: r.name || '', content: r.content || '' }; showKBForm.value = true }
 async function saveKB() { const f = kbForm.value; if (!f.name || !f.content) { ElMessage.warning('必填'); return } if (f.id) { await api.geoUpdateKnowledge(f.id, f) } else { await api.geoCreateKnowledge({ ...f, content_type: 'extlink' }) } showKBForm.value = false; loadKnowledge(); ElMessage.success('保存成功') }
-async function delKB(r) { await ElMessageBox.confirm('删除？'); await api.geoDeleteKnowledge(r.id); loadKnowledge() }
+async function delKB(r) { await ElMessageBox.confirm('删除？'); await api.geoDeleteKnowledge(r.id,'extlink'); loadKnowledge() }
 
 // ── 生成任务 ──
 const tasks = ref([])
@@ -309,7 +309,7 @@ const taskForm = ref({ id: 0, name: '', title_lib_id: null, prompt_id: null, kno
 async function loadTasks() { try { tasks.value = (await api.geoListTasks({ site_id: siteId.value, content_type: 'extlink' })).data } catch {} }
 function editTask(r) { taskForm.value = { id: r.id || 0, name: r.name || '', title_lib_id: r.title_lib_id || null, prompt_id: r.prompt_id || null, knowledge_id: r.knowledge_id || 0, draft_limit: r.draft_limit || 20, need_review: r.need_review ?? 1, is_loop: r.is_loop || 0, auto_keywords: r.auto_keywords ?? 1, auto_description: r.auto_description ?? 1 }; showTaskForm.value = true }
 async function saveTask() { const f = taskForm.value; if (!f.name || !f.title_lib_id || !f.prompt_id) { ElMessage.warning('任务名、关键词库、Prompt必选'); return } if (f.id) { await api.geoUpdateTask(f.id, f) } else { await api.geoCreateTask({ ...f, site_id: siteId.value, content_type: 'extlink' }) } showTaskForm.value = false; loadTasks(); ElMessage.success('保存成功') }
-async function delTask(r) { await ElMessageBox.confirm('删除？'); await api.geoDeleteTask(r.id); loadTasks() }
+async function delTask(r) { await ElMessageBox.confirm('删除？'); await api.geoDeleteTask(r.id,'extlink'); loadTasks() }
 async function startTask(r) { await api.geoStartTask(r.id); loadTasks() }
 async function stopTask(r) { await api.geoStopTask(r.id); loadTasks() }
 async function runTask(r) { r._running = true; try { const res = await api.geoRunTask(r.id); ElMessage.success('已生成: ' + res.data.title + ' (' + res.data.word_count + '字)'); loadTasks(); loadArticles(); loadStats() } catch (e) { ElMessage.error(e?.response?.data?.error || '生成失败') } finally { r._running = false } }
@@ -326,7 +326,7 @@ async function loadArticles() { try { const p = { page: artPage.value, per_page:
 async function viewArt(r) { try { curArticle.value = (await api.geoGetArticle(r.id)).data; showArticle.value = true } catch {} }
 async function reviewArt(r, s) { await api.geoReviewArticle(r.id, { status: s }); ElMessage.success(s === 'approved' ? '已通过' : '已拒绝'); loadArticles(); loadStats() }
 async function publishArt(r) { await api.geoPublishArticle(r.id); ElMessage.success('已发布'); loadArticles(); loadStats() }
-async function delArt(r) { await ElMessageBox.confirm('删除？'); await api.geoDeleteArticle(r.id); loadArticles(); loadStats() }
+async function delArt(r) { await ElMessageBox.confirm('删除？'); await api.geoDeleteArticle(r.id,'extlink'); loadArticles(); loadStats() }
 
 async function loadStats() { try { stats.value = (await api.geoStats({ site_id: siteId.value, content_type: 'extlink' })).data } catch {} }
 

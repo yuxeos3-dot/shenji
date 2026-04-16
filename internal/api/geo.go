@@ -105,6 +105,17 @@ func GeoCreateTitleLib(c *gin.Context) {
 
 func GeoDeleteTitleLib(c *gin.Context) {
 	id := c.Param("id")
+	contentType := c.DefaultQuery("content_type", "geo")
+	// Only delete if content_type matches, prevents cross-type deletion
+	var ct string
+	if err := db.DB.QueryRow("SELECT content_type FROM geo_title_libs WHERE id=?", id).Scan(&ct); err != nil {
+		c.JSON(404, gin.H{"code": -1, "error": "关键词库不存在"})
+		return
+	}
+	if ct != contentType {
+		c.JSON(403, gin.H{"code": -1, "error": "无权删除"})
+		return
+	}
 	db.DB.Exec("DELETE FROM geo_titles WHERE lib_id = ?", id)
 	db.DB.Exec("DELETE FROM geo_title_libs WHERE id = ?", id)
 	c.JSON(200, gin.H{"code": 0, "data": "删除成功"})
@@ -336,7 +347,18 @@ func GeoUpdatePrompt(c *gin.Context) {
 }
 
 func GeoDeletePrompt(c *gin.Context) {
-	db.DB.Exec("DELETE FROM geo_prompts WHERE id = ?", c.Param("id"))
+	id := c.Param("id")
+	contentType := c.DefaultQuery("content_type", "geo")
+	var ct string
+	if err := db.DB.QueryRow("SELECT content_type FROM geo_prompts WHERE id=?", id).Scan(&ct); err != nil {
+		c.JSON(404, gin.H{"code": -1, "error": "Prompt不存在"})
+		return
+	}
+	if ct != contentType {
+		c.JSON(403, gin.H{"code": -1, "error": "无权删除"})
+		return
+	}
+	db.DB.Exec("DELETE FROM geo_prompts WHERE id = ?", id)
 	c.JSON(200, gin.H{"code": 0, "data": "删除成功"})
 }
 
@@ -399,7 +421,18 @@ func GeoUpdateKnowledge(c *gin.Context) {
 }
 
 func GeoDeleteKnowledge(c *gin.Context) {
-	db.DB.Exec("DELETE FROM geo_knowledge WHERE id = ?", c.Param("id"))
+	id := c.Param("id")
+	contentType := c.DefaultQuery("content_type", "geo")
+	var ct string
+	if err := db.DB.QueryRow("SELECT content_type FROM geo_knowledge WHERE id=?", id).Scan(&ct); err != nil {
+		c.JSON(404, gin.H{"code": -1, "error": "知识库不存在"})
+		return
+	}
+	if ct != contentType {
+		c.JSON(403, gin.H{"code": -1, "error": "无权删除"})
+		return
+	}
+	db.DB.Exec("DELETE FROM geo_knowledge WHERE id = ?", id)
 	c.JSON(200, gin.H{"code": 0, "data": "删除成功"})
 }
 
@@ -515,6 +548,16 @@ func GeoUpdateTask(c *gin.Context) {
 
 func GeoDeleteTask(c *gin.Context) {
 	id := c.Param("id")
+	contentType := c.DefaultQuery("content_type", "geo")
+	var ct string
+	if err := db.DB.QueryRow("SELECT content_type FROM geo_tasks WHERE id=?", id).Scan(&ct); err != nil {
+		c.JSON(404, gin.H{"code": -1, "error": "任务不存在"})
+		return
+	}
+	if ct != contentType {
+		c.JSON(403, gin.H{"code": -1, "error": "无权删除"})
+		return
+	}
 	db.DB.Exec("DELETE FROM geo_articles WHERE task_id = ?", id)
 	db.DB.Exec("DELETE FROM geo_tasks WHERE id = ?", id)
 	c.JSON(200, gin.H{"code": 0, "data": "删除成功"})
@@ -752,7 +795,18 @@ func GeoUpdateArticle(c *gin.Context) {
 }
 
 func GeoDeleteArticle(c *gin.Context) {
-	db.DB.Exec("DELETE FROM geo_articles WHERE id = ?", c.Param("id"))
+	id := c.Param("id")
+	contentType := c.DefaultQuery("content_type", "geo")
+	var ct string
+	if err := db.DB.QueryRow("SELECT content_type FROM geo_articles WHERE id=?", id).Scan(&ct); err != nil {
+		c.JSON(404, gin.H{"code": -1, "error": "文章不存在"})
+		return
+	}
+	if ct != contentType {
+		c.JSON(403, gin.H{"code": -1, "error": "无权删除"})
+		return
+	}
+	db.DB.Exec("DELETE FROM geo_articles WHERE id = ?", id)
 	c.JSON(200, gin.H{"code": 0, "data": "删除成功"})
 }
 
