@@ -346,6 +346,12 @@ func Init() {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_geo_articles_task ON geo_articles(task_id, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_geo_articles_review ON geo_articles(review_status)`,
+		"ALTER TABLE geo_title_libs ADD COLUMN site_id INTEGER DEFAULT 0",
+		"ALTER TABLE geo_tasks ADD COLUMN site_id INTEGER DEFAULT 0",
+		"ALTER TABLE geo_articles ADD COLUMN site_id INTEGER DEFAULT 0",
+		`CREATE INDEX IF NOT EXISTS idx_geo_title_libs_site ON geo_title_libs(site_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_geo_tasks_site ON geo_tasks(site_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_geo_articles_site ON geo_articles(site_id)`,
 	}
 	for _, m := range migrations {
 		DB.Exec(m) // ignore errors (column/table already exists)

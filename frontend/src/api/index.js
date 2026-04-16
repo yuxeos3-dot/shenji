@@ -114,8 +114,8 @@ export default {
   testTelegram: () => api.post('/v1/settings/test-telegram'),
 
   // GEO Content Production
-  geoStats: () => api.get('/v1/geo/stats'),
-  geoListTitleLibs: () => api.get('/v1/geo/title-libs'),
+  geoStats: (params) => api.get('/v1/geo/stats', { params }),
+  geoListTitleLibs: (params) => api.get('/v1/geo/title-libs', { params }),
   geoCreateTitleLib: (data) => api.post('/v1/geo/title-libs', data),
   geoDeleteTitleLib: (id) => api.delete(`/v1/geo/title-libs/${id}`),
   geoListTitles: (libId, params) => api.get(`/v1/geo/title-libs/${libId}/titles`, { params }),
@@ -131,7 +131,7 @@ export default {
   geoCreateKnowledge: (data) => api.post('/v1/geo/knowledge', data),
   geoUpdateKnowledge: (id, data) => api.put(`/v1/geo/knowledge/${id}`, data),
   geoDeleteKnowledge: (id) => api.delete(`/v1/geo/knowledge/${id}`),
-  geoListTasks: () => api.get('/v1/geo/tasks'),
+  geoListTasks: (params) => api.get('/v1/geo/tasks', { params }),
   geoCreateTask: (data) => api.post('/v1/geo/tasks', data),
   geoUpdateTask: (id, data) => api.put(`/v1/geo/tasks/${id}`, data),
   geoDeleteTask: (id) => api.delete(`/v1/geo/tasks/${id}`),
