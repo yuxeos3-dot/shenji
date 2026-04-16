@@ -417,10 +417,14 @@ func GeoListTasks(c *gin.Context) {
 		SELECT t.id, t.name, t.title_lib_id, t.prompt_id, t.knowledge_id, t.status,
 		       t.draft_limit, t.need_review, t.is_loop, t.auto_keywords, t.auto_description,
 		       t.created_count, t.last_run_at, t.created_at,
-		       COALESCE(tl.name,''), COALESCE(p.name,'')
+		       COALESCE(tl.name,''), COALESCE(p.name,''),
+		       COALESCE(SUM(CASE WHEN a.status='draft' THEN 1 ELSE 0 END),0),
+		       COALESCE(SUM(CASE WHEN a.status='published' THEN 1 ELSE 0 END),0)
 		FROM geo_tasks t
 		LEFT JOIN geo_title_libs tl ON t.title_lib_id = tl.id
 		LEFT JOIN geo_prompts p ON t.prompt_id = p.id
+		LEFT JOIN geo_articles a ON a.task_id = t.id
+		GROUP BY t.id
 		ORDER BY t.id DESC`)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "查询失败"})
@@ -432,12 +436,13 @@ func GeoListTasks(c *gin.Context) {
 		var id, titleLibID, promptID, knowledgeID, draftLimit, needReview, isLoop, autoKW, autoDesc, createdCount int64
 		var name, status, cat, tlName, pName string
 		var lastRunAt *string
-		rows.Scan(&id, &name, &titleLibID, &promptID, &knowledgeID, &status,
-			&draftLimit, &needReview, &isLoop, &autoKW, &autoDesc,
-			&createdCount, &lastRunAt, &cat, &tlName, &pName)
 		var draftCount, publishedCount int
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE task_id=? AND status='draft'", id).Scan(&draftCount)
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE task_id=? AND status='published'", id).Scan(&publishedCount)
+		if err := rows.Scan(&id, &name, &titleLibID, &promptID, &knowledgeID, &status,
+			&draftLimit, &needReview, &isLoop, &autoKW, &autoDesc,
+			&createdCount, &lastRunAt, &cat, &tlName, &pName,
+			&draftCount, &publishedCount); err != nil {
+			continue
+		}
 		list = append(list, gin.H{
 			"id": id, "name": name, "title_lib_id": titleLibID, "prompt_id": promptID,
 			"knowledge_id": knowledgeID, "status": status, "draft_limit": draftLimit,
@@ -527,9 +532,8 @@ func GeoRunTask(c *gin.Context) {
 	// Load task
 	var name string
 	var titleLibID, promptID, knowledgeID, autoKW, autoDesc, isLoop int64
-	err := db.DB.QueryRow(`SELECT name, title_lib_id, prompt_id, COALESCE(knowledge_id,0), auto_keywords, auto_description, is_loop FROM geo_tasks WHERE id=?`, taskID).
-		Scan(&name, &titleLibID, &promptID, &knowledgeID, &autoKW, &autoDesc, &isLoop)
-	if err != nil {
+	if err := db.DB.QueryRow(`SELECT name, title_lib_id, prompt_id, COALESCE(knowledge_id,0), auto_keywords, auto_description, is_loop FROM geo_tasks WHERE id=?`, taskID).
+		Scan(&name, &titleLibID, &promptID, &knowledgeID, &autoKW, &autoDesc, &isLoop); err != nil {
 		c.JSON(404, gin.H{"code": -1, "error": "任务不存在"})
 		return
 	}
@@ -537,15 +541,15 @@ func GeoRunTask(c *gin.Context) {
 	// Get next unused title
 	var titleRowID int64
 	var titleText, keyword string
-	err = db.DB.QueryRow("SELECT id, title, keyword FROM geo_titles WHERE lib_id=? AND is_used=0 ORDER BY id LIMIT 1", titleLibID).
+	titleErr := db.DB.QueryRow("SELECT id, title, keyword FROM geo_titles WHERE lib_id=? AND is_used=0 ORDER BY id LIMIT 1", titleLibID).
 		Scan(&titleRowID, &titleText, &keyword)
-	if err != nil {
+	if titleErr != nil {
 		if isLoop == 1 {
 			db.DB.Exec("UPDATE geo_titles SET is_used=0, used_at=NULL WHERE lib_id=?", titleLibID)
-			err = db.DB.QueryRow("SELECT id, title, keyword FROM geo_titles WHERE lib_id=? AND is_used=0 ORDER BY id LIMIT 1", titleLibID).
+			titleErr = db.DB.QueryRow("SELECT id, title, keyword FROM geo_titles WHERE lib_id=? AND is_used=0 ORDER BY id LIMIT 1", titleLibID).
 				Scan(&titleRowID, &titleText, &keyword)
 		}
-		if err != nil {
+		if titleErr != nil {
 			c.JSON(400, gin.H{"code": -1, "error": "标题库已用尽（可开启循环模式）"})
 			return
 		}
@@ -696,11 +700,11 @@ func GeoListArticles(c *gin.Context) {
 func GeoGetArticle(c *gin.Context) {
 	id := c.Param("id")
 	var aID, taskID, titleID, wordCount int64
-	var title, content, excerpt, kw, md, cat, status, reviewStatus, reviewerNote, aiModel, slug string
+	var title, content, excerpt, kw, md, category, status, reviewStatus, reviewerNote, aiModel, slug, createdAt string
 	var pubAt *string
 	err := db.DB.QueryRow(`SELECT id, task_id, title_id, title, slug, content, excerpt, keywords, meta_description, category, status, review_status, reviewer_note, ai_model, word_count, created_at, published_at
 		FROM geo_articles WHERE id=?`, id).
-		Scan(&aID, &taskID, &titleID, &title, &slug, &content, &excerpt, &kw, &md, &cat, &status, &reviewStatus, &reviewerNote, &aiModel, &wordCount, &cat, &pubAt)
+		Scan(&aID, &taskID, &titleID, &title, &slug, &content, &excerpt, &kw, &md, &category, &status, &reviewStatus, &reviewerNote, &aiModel, &wordCount, &createdAt, &pubAt)
 	if err != nil {
 		c.JSON(404, gin.H{"code": -1, "error": "文章不存在"})
 		return
@@ -708,9 +712,9 @@ func GeoGetArticle(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "data": gin.H{
 		"id": aID, "task_id": taskID, "title_id": titleID, "title": title, "slug": slug,
 		"content": content, "excerpt": excerpt, "keywords": kw, "meta_description": md,
-		"category": cat, "status": status, "review_status": reviewStatus,
+		"category": category, "status": status, "review_status": reviewStatus,
 		"reviewer_note": reviewerNote, "ai_model": aiModel, "word_count": wordCount,
-		"created_at": cat, "published_at": pubAt,
+		"created_at": createdAt, "published_at": pubAt,
 	}})
 }
 

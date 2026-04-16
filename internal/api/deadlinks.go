@@ -415,6 +415,7 @@ func runDeadLinkCheck(siteID, domain string, job *DeadLinkJob) {
 		}
 		tx, err := db.DB.Begin()
 		if err != nil {
+			log.Printf("[deadlink] batch begin failed: %v", err)
 			return
 		}
 		now := time.Now().Format("2006-01-02T15:04:05Z")
@@ -422,7 +423,9 @@ func runDeadLinkCheck(siteID, domain string, job *DeadLinkJob) {
 			tx.Exec(`INSERT INTO dead_link_results (site_id, url, source_page, status_code, ttfb_ms, checked_at)
 				VALUES (?, ?, 'sitemap', ?, ?, ?)`, siteID, r.url, r.statusCode, r.ttfb, now)
 		}
-		tx.Commit()
+		if err := tx.Commit(); err != nil {
+			log.Printf("[deadlink] batch commit failed: %v", err)
+		}
 		batch = batch[:0]
 	}
 

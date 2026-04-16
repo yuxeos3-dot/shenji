@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"seo-system/internal/crawler"
@@ -12,10 +13,19 @@ import (
 
 func GetExternalLinks(c *gin.Context) {
 	siteID := c.Param("id")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "100"))
+	if page < 1 { page = 1 }
+	if perPage < 1 || perPage > 500 { perPage = 100 }
+	offset := (page - 1) * perPage
+
+	var total int
+	db.DB.QueryRow("SELECT COUNT(*) FROM external_links WHERE site_id = ?", siteID).Scan(&total)
+
 	rows, err := db.DB.Query(`SELECT id, site_id, url, anchor_text, source_url, rel_type, category, note, status_code, checked_at, created_at
-		FROM external_links WHERE site_id = ? ORDER BY id DESC`, siteID)
+		FROM external_links WHERE site_id = ? ORDER BY id DESC LIMIT ? OFFSET ?`, siteID, perPage, offset)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": []gin.H{}})
+		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"items": []gin.H{}, "total": 0}})
 		return
 	}
 	defer rows.Close()
@@ -37,7 +47,7 @@ func GetExternalLinks(c *gin.Context) {
 	if links == nil {
 		links = []gin.H{}
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": links})
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"items": links, "total": total, "page": page, "per_page": perPage}})
 }
 
 type ExternalLinkRequest struct {
