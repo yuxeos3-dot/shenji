@@ -247,4 +247,3 @@ onMounted(async () => { loadStats(); const res=await api.listSites().catch(()=>(
 .panel{background:var(--surface);border-radius:var(--r);box-shadow:var(--s1);border:1.5px solid var(--border-light);padding:16px 20px}
 .text-ellipsis{display:inline-block;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#888}
 </style>
-</template>
