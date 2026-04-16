@@ -259,11 +259,19 @@ function loadAll() { if(!siteId.value)return; loadStats(); loadLibs(); loadPromp
 const syncing = ref(false)
 async function syncGSCForLib() {
   if (!siteId.value) { ElMessage.warning('请先选择站点'); return }
+  if (syncing.value) return
   syncing.value = true
   try {
     await api.syncGSC(siteId.value)
     ElMessage.success('GSC 同步成功，可点击「从GSC导入」导入关键词')
-  } catch (e) { ElMessage.error(e?.response?.data?.error || '同步失败，请检查站点是否配置了GSC URL') }
+  } catch (e) {
+    const msg = e?.response?.data?.error || '同步失败'
+    if (msg.includes('未配置GSC URL')) {
+      ElMessage.error('请先到「站点管理」→ 编辑站点 → 填写 GSC Site URL（如：sc-domain:hl365.com）')
+    } else {
+      ElMessage.error(msg)
+    }
+  }
   finally { syncing.value = false }
 }
 
