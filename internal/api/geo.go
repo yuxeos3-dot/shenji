@@ -28,19 +28,20 @@ func geoCallAI(userID int64, prompt string, maxTokens int) (string, error) {
 
 func GeoStats(c *gin.Context) {
 	siteID := c.Query("site_id")
+	contentType := c.DefaultQuery("content_type", "geo")
 	var totalArticles, drafts, published, reviewed, tasksActive int
 	if siteID != "" {
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE site_id=?", siteID).Scan(&totalArticles)
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE site_id=? AND status='draft'", siteID).Scan(&drafts)
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE site_id=? AND status='published'", siteID).Scan(&published)
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE site_id=? AND review_status='pending'", siteID).Scan(&reviewed)
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_tasks WHERE site_id=? AND status='active'", siteID).Scan(&tasksActive)
+		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE site_id=? AND content_type=?", siteID, contentType).Scan(&totalArticles)
+		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE site_id=? AND status='draft' AND content_type=?", siteID, contentType).Scan(&drafts)
+		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE site_id=? AND status='published' AND content_type=?", siteID, contentType).Scan(&published)
+		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE site_id=? AND review_status='pending' AND content_type=?", siteID, contentType).Scan(&reviewed)
+		db.DB.QueryRow("SELECT COUNT(*) FROM geo_tasks WHERE site_id=? AND status='active' AND content_type=?", siteID, contentType).Scan(&tasksActive)
 	} else {
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles").Scan(&totalArticles)
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE status='draft'").Scan(&drafts)
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE status='published'").Scan(&published)
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE review_status='pending'").Scan(&reviewed)
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_tasks WHERE status='active'").Scan(&tasksActive)
+		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE content_type=?", contentType).Scan(&totalArticles)
+		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE status='draft' AND content_type=?", contentType).Scan(&drafts)
+		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE status='published' AND content_type=?", contentType).Scan(&published)
+		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE review_status='pending' AND content_type=?", contentType).Scan(&reviewed)
+		db.DB.QueryRow("SELECT COUNT(*) FROM geo_tasks WHERE status='active' AND content_type=?", contentType).Scan(&tasksActive)
 	}
 	c.JSON(200, gin.H{"code": 0, "data": gin.H{
 		"total_articles": totalArticles, "drafts": drafts, "published": published,
@@ -52,10 +53,11 @@ func GeoStats(c *gin.Context) {
 
 func GeoListTitleLibs(c *gin.Context) {
 	siteID := c.Query("site_id")
-	q := "SELECT id, name, description, title_count, created_at FROM geo_title_libs"
-	args := []interface{}{}
+	contentType := c.DefaultQuery("content_type", "geo")
+	q := "SELECT id, name, description, title_count, created_at FROM geo_title_libs WHERE content_type = ?"
+	args := []interface{}{contentType}
 	if siteID != "" {
-		q += " WHERE site_id = ?"
+		q += " AND site_id = ?"
 		args = append(args, siteID)
 	}
 	q += " ORDER BY id DESC LIMIT 200"
@@ -83,12 +85,16 @@ func GeoCreateTitleLib(c *gin.Context) {
 		Name        string `json:"name" binding:"required"`
 		Description string `json:"description"`
 		SiteID      int64  `json:"site_id"`
+		ContentType string `json:"content_type"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"code": -1, "error": "name 必填"})
 		return
 	}
-	res, err := db.DB.Exec("INSERT INTO geo_title_libs (name, description, site_id) VALUES (?, ?, ?)", req.Name, req.Description, req.SiteID)
+	if req.ContentType == "" {
+		req.ContentType = "geo"
+	}
+	res, err := db.DB.Exec("INSERT INTO geo_title_libs (name, description, site_id, content_type) VALUES (?, ?, ?, ?)", req.Name, req.Description, req.SiteID, req.ContentType)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "创建失败"})
 		return
@@ -264,7 +270,8 @@ func GeoImportFromGSC(c *gin.Context) {
 // ─── Prompts ─────────────────────────────────────────────────────────────────
 
 func GeoListPrompts(c *gin.Context) {
-	rows, err := db.DB.Query("SELECT id, name, type, content, description, created_at, updated_at FROM geo_prompts ORDER BY id DESC LIMIT 200")
+	contentType := c.DefaultQuery("content_type", "geo")
+	rows, err := db.DB.Query("SELECT id, name, type, content, description, created_at, updated_at FROM geo_prompts WHERE content_type = ? ORDER BY id DESC LIMIT 200", contentType)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "查询失败"})
 		return
@@ -289,6 +296,7 @@ func GeoCreatePrompt(c *gin.Context) {
 		Type        string `json:"type"`
 		Content     string `json:"content" binding:"required"`
 		Description string `json:"description"`
+		ContentType string `json:"content_type"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"code": -1, "error": "name 和 content 必填"})
@@ -297,8 +305,11 @@ func GeoCreatePrompt(c *gin.Context) {
 	if req.Type == "" {
 		req.Type = "content"
 	}
-	res, err := db.DB.Exec("INSERT INTO geo_prompts (name, type, content, description) VALUES (?, ?, ?, ?)",
-		req.Name, req.Type, req.Content, req.Description)
+	if req.ContentType == "" {
+		req.ContentType = "geo"
+	}
+	res, err := db.DB.Exec("INSERT INTO geo_prompts (name, type, content, description, content_type) VALUES (?, ?, ?, ?, ?)",
+		req.Name, req.Type, req.Content, req.Description, req.ContentType)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "创建失败"})
 		return
@@ -332,7 +343,8 @@ func GeoDeletePrompt(c *gin.Context) {
 // ─── Knowledge Bases ─────────────────────────────────────────────────────────
 
 func GeoListKnowledge(c *gin.Context) {
-	rows, err := db.DB.Query("SELECT id, name, char_count, created_at FROM geo_knowledge ORDER BY id DESC LIMIT 200")
+	contentType := c.DefaultQuery("content_type", "geo")
+	rows, err := db.DB.Query("SELECT id, name, char_count, created_at FROM geo_knowledge WHERE content_type = ? ORDER BY id DESC LIMIT 200", contentType)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "查询失败"})
 		return
@@ -353,15 +365,19 @@ func GeoListKnowledge(c *gin.Context) {
 
 func GeoCreateKnowledge(c *gin.Context) {
 	var req struct {
-		Name    string `json:"name" binding:"required"`
-		Content string `json:"content" binding:"required"`
+		Name        string `json:"name" binding:"required"`
+		Content     string `json:"content" binding:"required"`
+		ContentType string `json:"content_type"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"code": -1, "error": "name 和 content 必填"})
 		return
 	}
+	if req.ContentType == "" {
+		req.ContentType = "geo"
+	}
 	cc := utf8.RuneCountInString(req.Content)
-	res, err := db.DB.Exec("INSERT INTO geo_knowledge (name, content, char_count) VALUES (?, ?, ?)", req.Name, req.Content, cc)
+	res, err := db.DB.Exec("INSERT INTO geo_knowledge (name, content, char_count, content_type) VALUES (?, ?, ?, ?)", req.Name, req.Content, cc, req.ContentType)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "创建失败"})
 		return
@@ -391,6 +407,7 @@ func GeoDeleteKnowledge(c *gin.Context) {
 
 func GeoListTasks(c *gin.Context) {
 	siteID := c.Query("site_id")
+	contentType := c.DefaultQuery("content_type", "geo")
 	q := `SELECT t.id, t.name, t.title_lib_id, t.prompt_id, t.knowledge_id, t.status,
 		       t.draft_limit, t.need_review, t.is_loop, t.auto_keywords, t.auto_description,
 		       t.created_count, t.last_run_at, t.created_at,
@@ -400,10 +417,11 @@ func GeoListTasks(c *gin.Context) {
 		FROM geo_tasks t
 		LEFT JOIN geo_title_libs tl ON t.title_lib_id = tl.id
 		LEFT JOIN geo_prompts p ON t.prompt_id = p.id
-		LEFT JOIN geo_articles a ON a.task_id = t.id`
-	args := []interface{}{}
+		LEFT JOIN geo_articles a ON a.task_id = t.id
+		WHERE t.content_type = ?`
+	args := []interface{}{contentType}
 	if siteID != "" {
-		q += " WHERE t.site_id = ?"
+		q += " AND t.site_id = ?"
 		args = append(args, siteID)
 	}
 	q += " GROUP BY t.id ORDER BY t.id DESC LIMIT 200"
@@ -453,6 +471,7 @@ func GeoCreateTask(c *gin.Context) {
 		IsLoop          int    `json:"is_loop"`
 		AutoKeywords    int    `json:"auto_keywords"`
 		AutoDescription int    `json:"auto_description"`
+		ContentType     string `json:"content_type"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"code": -1, "error": "name, title_lib_id, prompt_id 必填"})
@@ -461,9 +480,12 @@ func GeoCreateTask(c *gin.Context) {
 	if req.DraftLimit <= 0 {
 		req.DraftLimit = 20
 	}
-	res, err := db.DB.Exec(`INSERT INTO geo_tasks (name, site_id, title_lib_id, prompt_id, knowledge_id, draft_limit, need_review, is_loop, auto_keywords, auto_description)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.Name, req.SiteID, req.TitleLibID, req.PromptID, req.KnowledgeID, req.DraftLimit, req.NeedReview, req.IsLoop, req.AutoKeywords, req.AutoDescription)
+	if req.ContentType == "" {
+		req.ContentType = "geo"
+	}
+	res, err := db.DB.Exec(`INSERT INTO geo_tasks (name, site_id, title_lib_id, prompt_id, knowledge_id, draft_limit, need_review, is_loop, auto_keywords, auto_description, content_type)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.Name, req.SiteID, req.TitleLibID, req.PromptID, req.KnowledgeID, req.DraftLimit, req.NeedReview, req.IsLoop, req.AutoKeywords, req.AutoDescription, req.ContentType)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "创建失败"})
 		return
@@ -515,9 +537,10 @@ func GeoRunTask(c *gin.Context) {
 
 	// Load task
 	var name string
+	var taskContentType string
 	var siteIDVal, titleLibID, promptID, knowledgeID, autoKW, autoDesc, isLoop int64
-	if err := db.DB.QueryRow(`SELECT name, COALESCE(site_id,0), title_lib_id, prompt_id, COALESCE(knowledge_id,0), auto_keywords, auto_description, is_loop FROM geo_tasks WHERE id=?`, taskID).
-		Scan(&name, &siteIDVal, &titleLibID, &promptID, &knowledgeID, &autoKW, &autoDesc, &isLoop); err != nil {
+	if err := db.DB.QueryRow(`SELECT name, COALESCE(site_id,0), title_lib_id, prompt_id, COALESCE(knowledge_id,0), auto_keywords, auto_description, is_loop, COALESCE(content_type,'geo') FROM geo_tasks WHERE id=?`, taskID).
+		Scan(&name, &siteIDVal, &titleLibID, &promptID, &knowledgeID, &autoKW, &autoDesc, &isLoop, &taskContentType); err != nil {
 		c.JSON(404, gin.H{"code": -1, "error": "任务不存在"})
 		return
 	}
@@ -597,10 +620,10 @@ func GeoRunTask(c *gin.Context) {
 
 	wordCount := utf8.RuneCountInString(content)
 
-	// Save article
-	res, err := db.DB.Exec(`INSERT INTO geo_articles (task_id, site_id, title_id, title, content, excerpt, keywords, meta_description, ai_model, word_count, status, review_status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'pending')`,
-		taskID, siteIDVal, titleRowID, titleText, content, excerpt, keywords, metaDesc, aiModel, wordCount)
+	// Save article (inherit content_type from task)
+	res, err := db.DB.Exec(`INSERT INTO geo_articles (task_id, site_id, title_id, title, content, excerpt, keywords, meta_description, ai_model, word_count, status, review_status, content_type)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'pending', ?)`,
+		taskID, siteIDVal, titleRowID, titleText, content, excerpt, keywords, metaDesc, aiModel, wordCount, taskContentType)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "保存文章失败: " + err.Error()})
 		return
@@ -637,6 +660,12 @@ func GeoListArticles(c *gin.Context) {
 
 	where := "1=1"
 	args := []interface{}{}
+
+	// Always filter by content_type
+	contentType := c.DefaultQuery("content_type", "geo")
+	where += " AND a.content_type = ?"
+	args = append(args, contentType)
+
 	if v := c.Query("site_id"); v != "" {
 		where += " AND a.site_id = ?"
 		args = append(args, v)
