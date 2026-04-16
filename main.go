@@ -124,6 +124,45 @@ func main() {
 			settings.POST("/test-ai", api.TestAI)
 			settings.POST("/test-telegram", api.TestTelegram)
 		}
+
+		// GEO Content Production
+		geo := v1.Group("/geo")
+		{
+			geo.GET("/stats", api.GeoStats)
+
+			geo.GET("/title-libs", api.GeoListTitleLibs)
+			geo.POST("/title-libs", api.GeoCreateTitleLib)
+			geo.DELETE("/title-libs/:id", api.GeoDeleteTitleLib)
+			geo.GET("/title-libs/:id/titles", api.GeoListTitles)
+			geo.POST("/title-libs/:id/titles", api.GeoAddTitles)
+			geo.POST("/title-libs/:id/import", api.GeoImportTitles)
+			geo.DELETE("/titles/:id", api.GeoDeleteTitle)
+
+			geo.GET("/prompts", api.GeoListPrompts)
+			geo.POST("/prompts", api.GeoCreatePrompt)
+			geo.PUT("/prompts/:id", api.GeoUpdatePrompt)
+			geo.DELETE("/prompts/:id", api.GeoDeletePrompt)
+
+			geo.GET("/knowledge", api.GeoListKnowledge)
+			geo.POST("/knowledge", api.GeoCreateKnowledge)
+			geo.PUT("/knowledge/:id", api.GeoUpdateKnowledge)
+			geo.DELETE("/knowledge/:id", api.GeoDeleteKnowledge)
+
+			geo.GET("/tasks", api.GeoListTasks)
+			geo.POST("/tasks", api.GeoCreateTask)
+			geo.PUT("/tasks/:id", api.GeoUpdateTask)
+			geo.DELETE("/tasks/:id", api.GeoDeleteTask)
+			geo.POST("/tasks/:id/start", api.GeoStartTask)
+			geo.POST("/tasks/:id/stop", api.GeoStopTask)
+			geo.POST("/tasks/:id/run", api.GeoRunTask)
+
+			geo.GET("/articles", api.GeoListArticles)
+			geo.GET("/articles/:id", api.GeoGetArticle)
+			geo.PUT("/articles/:id", api.GeoUpdateArticle)
+			geo.DELETE("/articles/:id", api.GeoDeleteArticle)
+			geo.POST("/articles/:id/review", api.GeoReviewArticle)
+			geo.POST("/articles/:id/publish", api.GeoPublishArticle)
+		}
 	}
 
 	port := os.Getenv("PORT")

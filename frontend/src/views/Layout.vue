@@ -7,6 +7,7 @@
         <li><a href="/gsc-dashboard.html" target="_blank" :class="{active: $route.path==='/data-management'}"><span class="nav-icon">📡</span>数据管理</a></li>
         <li><router-link to="/sites" :class="{active: $route.path.startsWith('/sites')}"><span class="nav-icon">🌐</span>站点管理</router-link></li>
         <li><router-link to="/geo-management" :class="{active: $route.path==='/geo-management'}"><span class="nav-icon">🌍</span>Geo管理</router-link></li>
+        <li><router-link to="/geo-content" :class="{active: $route.path==='/geo-content'}"><span class="nav-icon">🤖</span>GEO内容</router-link></li>
         <li><router-link to="/dead-links" :class="{active: $route.path==='/dead-links'}"><span class="nav-icon">💀</span>死链检查</router-link></li>
         <li><router-link to="/content-rewrite" :class="{active: $route.path==='/content-rewrite'}"><span class="nav-icon">✍️</span>内容二创</router-link></li>
         <li><router-link to="/external-links" :class="{active: $route.path==='/external-links'}"><span class="nav-icon">🔗</span>外链管理</router-link></li>

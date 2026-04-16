@@ -14,6 +14,7 @@ const routes = [
       { path: 'sites/:id/audit/:taskId', name: 'AuditDetail', component: () => import('../views/AuditDetail.vue') },
       { path: 'sites/:id/data', name: 'DataCenter', component: () => import('../views/DataCenter.vue') },
       { path: 'geo-management', name: 'GeoManagement', component: () => import('../views/GeoManagement.vue') },
+      { path: 'geo-content', name: 'GeoContent', component: () => import('../views/GeoContent.vue') },
       { path: 'dead-links', name: 'DeadLinks', component: () => import('../views/DeadLinks.vue') },
       { path: 'content-rewrite', name: 'ContentRewrite', component: () => import('../views/ContentRewrite.vue') },
       { path: 'external-links', name: 'ExternalLinks', component: () => import('../views/ExternalLinks.vue') },
