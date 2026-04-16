@@ -192,10 +192,8 @@ async function syncGSC() {
   if (syncing.value) return
   syncing.value = true
   try {
-    const res = await api.syncGSC(siteId.value)
-    const d = res.data
-    const kwMsg = d.keyword_count > 0 ? `，已同步 ${d.keyword_count} 个关键词，可点击「从GSC导入」` : '，但关键词数据为空，请确认站点GSC URL格式正确'
-    ElMessage.success('GSC 同步成功' + kwMsg)
+    await api.syncGSC(siteId.value)
+    ElMessage.success('GSC 同步成功，可点击「从GSC导入」导入关键词')
   } catch(e) {
     const msg = e?.response?.data?.error || '同步失败'
     if (msg.includes('未配置GSC URL')) {

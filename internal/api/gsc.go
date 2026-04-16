@@ -238,14 +238,13 @@ func SyncGSCData(c *gin.Context) {
 	}{
 		{"overview", queryReq{StartDate: sd, EndDate: ed}},
 		{"trend", queryReq{StartDate: sd, EndDate: ed, Dimensions: []string{"date"}, RowLimit: 90}},
-		{"keywords", queryReq{StartDate: sd, EndDate: ed, Dimensions: []string{"query"}, RowLimit: 200}},
-		{"pages", queryReq{StartDate: sd, EndDate: ed, Dimensions: []string{"page"}, RowLimit: 50}},
+		{"keywords", queryReq{StartDate: sd, EndDate: ed, Dimensions: []string{"query"}, RowLimit: 500}},
+		{"pages", queryReq{StartDate: sd, EndDate: ed, Dimensions: []string{"page"}, RowLimit: 20}},
 		{"devices", queryReq{StartDate: sd, EndDate: ed, Dimensions: []string{"device"}, RowLimit: 10}},
 		{"countries", queryReq{StartDate: sd, EndDate: ed, Dimensions: []string{"country"}, RowLimit: 10}},
 	}
 
 	results := make(map[string]json.RawMessage)
-	errs := make(map[string]string)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -257,8 +256,6 @@ func SyncGSCData(c *gin.Context) {
 			mu.Lock()
 			if err != nil {
 				results[name] = json.RawMessage("null")
-				errs[name] = err.Error()
-				log.Printf("[gsc] query %s failed: %v", name, err)
 			} else {
 				results[name] = data
 			}
@@ -266,18 +263,6 @@ func SyncGSCData(c *gin.Context) {
 		}(q.name, q.body)
 	}
 	wg.Wait()
-
-	// If keywords failed, try again with smaller limit as fallback
-	if errs["keywords"] != "" {
-		log.Printf("[gsc] keywords failed, retrying with limit 100...")
-		data, err := gscFetch(token, baseURL, "POST", queryReq{StartDate: sd, EndDate: ed, Dimensions: []string{"query"}, RowLimit: 100})
-		if err == nil {
-			results["keywords"] = data
-			delete(errs, "keywords")
-		} else {
-			log.Printf("[gsc] keywords retry also failed: %v", err)
-		}
-	}
 
 	// Parse overview for totals
 	var overview struct {
@@ -308,14 +293,6 @@ func SyncGSCData(c *gin.Context) {
 	devicesJSON := extractRows(results["devices"])
 	countriesJSON := extractRows(results["countries"])
 
-	// Count keywords for response
-	var kwCount int
-	if keywordsJSON != "" && keywordsJSON != "[]" {
-		var kws []json.RawMessage
-		json.Unmarshal([]byte(keywordsJSON), &kws)
-		kwCount = len(kws)
-	}
-
 	db.DB.Exec(
 		`INSERT OR REPLACE INTO gsc_data (site_id, date, clicks, impressions, ctr, position, keywords_json, pages_json, devices_json, countries_json)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -323,18 +300,16 @@ func SyncGSCData(c *gin.Context) {
 		keywordsJSON, pagesJSON, devicesJSON, countriesJSON,
 	)
 
-	resp := gin.H{
-		"message":       "GSC数据同步成功",
-		"clicks":        totalClicks,
-		"impressions":   totalImpressions,
-		"ctr":           avgCTR,
-		"position":      avgPosition,
-		"keyword_count": kwCount,
-	}
-	if len(errs) > 0 {
-		resp["warnings"] = errs
-	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": resp})
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": gin.H{
+			"message":    "GSC数据同步成功",
+			"clicks":     totalClicks,
+			"impressions": totalImpressions,
+			"ctr":        avgCTR,
+			"position":   avgPosition,
+		},
+	})
 }
 
 // extractRows gets the "rows" field from a GSC API response
