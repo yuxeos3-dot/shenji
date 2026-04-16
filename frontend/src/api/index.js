@@ -109,6 +109,10 @@ export default {
 
   // Settings
   getOnlineUsers: () => api.get('/v1/auth/online'),
+  getMyPermissions: () => api.get('/v1/auth/my-permissions'),
+  getPermissionTree: () => api.get('/v1/users/permission-tree'),
+  getUserPermissions: (id) => api.get(`/v1/users/${id}/permissions`),
+  saveUserPermissions: (id, data) => api.put(`/v1/users/${id}/permissions`, data),
 
   getSettings: () => api.get('/v1/settings'),
   saveSettings: (data) => api.put('/v1/settings', data),

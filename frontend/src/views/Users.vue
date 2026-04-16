@@ -18,6 +18,7 @@
             <td>
               <div class="action-btns">
                 <button class="btn btn-xs" @click="openEdit(u)">编辑</button>
+                <button class="btn btn-xs btn-perm" @click="openPerms(u)" v-if="u.role!=='admin'">权限</button>
                 <button class="btn btn-xs btn-danger-xs" @click="deleteUser(u)">删除</button>
               </div>
             </td>
@@ -42,6 +43,39 @@
       <template #footer>
         <el-button @click="showDialog=false">取消</el-button>
         <el-button type="primary" @click="saveUser">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Permissions Dialog -->
+    <el-dialog v-model="showPerms" :title="'🔐 权限设置 — ' + (permUser?.name||'')" width="650px" top="5vh">
+      <div class="perm-hint">勾选该用户可以访问的功能。管理员拥有所有权限，无需单独设置。</div>
+      <div class="perm-tree">
+        <div v-for="group in permTree" :key="group.code" class="perm-group">
+          <div class="perm-group-head">
+            <el-checkbox
+              :model-value="isGroupChecked(group)"
+              :indeterminate="isGroupIndeterminate(group)"
+              @change="toggleGroup(group, $event)">
+              <span class="perm-group-label">{{ group.label }}</span>
+            </el-checkbox>
+          </div>
+          <div class="perm-children">
+            <el-checkbox
+              v-for="child in group.children"
+              :key="child.code"
+              :model-value="checkedPerms.includes(child.code)"
+              @change="togglePerm(child.code, $event)"
+              class="perm-item">
+              {{ child.label }}
+            </el-checkbox>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showPerms=false">取消</el-button>
+        <el-button type="warning" @click="checkAll">全选</el-button>
+        <el-button @click="checkedPerms=[]">清空</el-button>
+        <el-button type="primary" @click="savePerms" :loading="savingPerms">保存权限</el-button>
       </template>
     </el-dialog>
   </div>
@@ -74,6 +108,62 @@ async function deleteUser(u) {
     await ElMessageBox.confirm(`确认删除用户 ${u.name}?`, '警告', { type: 'warning' })
     await api.deleteUser(u.id); ElMessage.success('删除成功'); loadUsers()
   } catch {}
+}
+
+// ── Permissions ──
+const showPerms = ref(false)
+const permUser = ref(null)
+const permTree = ref([])
+const checkedPerms = ref([])
+const savingPerms = ref(false)
+
+async function openPerms(u) {
+  permUser.value = u
+  checkedPerms.value = []
+  try {
+    const [treeRes, userRes] = await Promise.all([
+      api.getPermissionTree(),
+      api.getUserPermissions(u.id),
+    ])
+    permTree.value = treeRes.data
+    checkedPerms.value = userRes.data || []
+  } catch {}
+  showPerms.value = true
+}
+
+function isGroupChecked(group) {
+  return group.children.every(c => checkedPerms.value.includes(c.code))
+}
+function isGroupIndeterminate(group) {
+  const checked = group.children.filter(c => checkedPerms.value.includes(c.code)).length
+  return checked > 0 && checked < group.children.length
+}
+function toggleGroup(group, val) {
+  const codes = group.children.map(c => c.code)
+  if (val) {
+    const set = new Set([...checkedPerms.value, ...codes])
+    checkedPerms.value = [...set]
+  } else {
+    checkedPerms.value = checkedPerms.value.filter(c => !codes.includes(c))
+  }
+}
+function togglePerm(code, val) {
+  if (val) { checkedPerms.value = [...checkedPerms.value, code] }
+  else { checkedPerms.value = checkedPerms.value.filter(c => c !== code) }
+}
+function checkAll() {
+  const all = []
+  permTree.value.forEach(g => g.children.forEach(c => all.push(c.code)))
+  checkedPerms.value = all
+}
+async function savePerms() {
+  savingPerms.value = true
+  try {
+    await api.saveUserPermissions(permUser.value.id, { permissions: checkedPerms.value })
+    ElMessage.success('权限已保存')
+    showPerms.value = false
+  } catch { ElMessage.error('保存失败') }
+  finally { savingPerms.value = false }
 }
 
 onMounted(loadUsers)
@@ -113,4 +203,13 @@ onMounted(loadUsers)
   transition:border-color .18s, box-shadow .18s; outline:none;
 }
 .form-group input:focus, .form-group select:focus { border-color:var(--sun); box-shadow:0 0 0 3px rgba(249,115,22,.14); }
+.btn-perm { background:#EEF2FF; border-color:#C7D2FE; color:#4338CA; }
+.btn-perm:hover { background:#E0E7FF; border-color:#A5B4FC; }
+.perm-hint { font-size:13px; color:var(--ink-hint); margin-bottom:16px; padding:8px 12px; background:#FFFBEB; border:1px solid #FDE68A; border-radius:8px; }
+.perm-tree { max-height:55vh; overflow-y:auto; }
+.perm-group { margin-bottom:14px; border:1px solid var(--border-light); border-radius:10px; overflow:hidden; }
+.perm-group-head { padding:10px 14px; background:var(--surface-3, #f3f4f6); border-bottom:1px solid var(--border-light); }
+.perm-group-label { font-weight:700; font-size:14px; }
+.perm-children { padding:10px 14px 10px 32px; display:grid; grid-template-columns:1fr 1fr; gap:6px 20px; }
+.perm-item { font-size:13px; }
 </style>

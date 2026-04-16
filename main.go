@@ -42,6 +42,7 @@ func main() {
 		v1.POST("/auth/change-password", api.ChangePassword)
 		v1.GET("/auth/me", api.GetMe)
 		v1.GET("/auth/online", api.GetOnlineUsersAPI)
+		v1.GET("/auth/my-permissions", api.GetMyPermissions)
 
 		// Users (admin only)
 		users := v1.Group("/users")
@@ -51,6 +52,9 @@ func main() {
 			users.POST("", api.CreateUser)
 			users.PUT("/:id", api.UpdateUser)
 			users.DELETE("/:id", api.DeleteUser)
+			users.GET("/:id/permissions", api.GetUserPermissions)
+			users.PUT("/:id/permissions", api.SaveUserPermissions)
+			users.GET("/permission-tree", api.GetPermissionTree)
 		}
 
 		// Sites
