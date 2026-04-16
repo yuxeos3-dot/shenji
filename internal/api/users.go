@@ -86,6 +86,9 @@ func CreateUser(c *gin.Context) {
 	}
 
 	id, _ := result.LastInsertId()
+
+	WriteAuditLog(c, "create_user", "user", fmt.Sprintf("%d", id), req.Email)
+
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"id": id}})
 }
 
@@ -124,6 +127,8 @@ func DeleteUser(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 		return
 	}
+
+	WriteAuditLog(c, "delete_user", "user", id, "")
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "删除成功"})
 }

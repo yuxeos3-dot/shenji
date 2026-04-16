@@ -426,7 +426,10 @@ func GeoUpdateKnowledge(c *gin.Context) {
 		Name    string `json:"name"`
 		Content string `json:"content"`
 	}
-	c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"code": -1, "error": "参数错误"})
+		return
+	}
 	cc := utf8.RuneCountInString(req.Content)
 	db.DB.Exec("UPDATE geo_knowledge SET name=?, content=?, char_count=? WHERE id=?", req.Name, req.Content, cc, id)
 	c.JSON(200, gin.H{"code": 0, "data": "更新成功"})
@@ -552,7 +555,10 @@ func GeoUpdateTask(c *gin.Context) {
 		AutoKeywords    int    `json:"auto_keywords"`
 		AutoDescription int    `json:"auto_description"`
 	}
-	c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"code": -1, "error": "参数错误"})
+		return
+	}
 	db.DB.Exec(`UPDATE geo_tasks SET name=?, title_lib_id=?, prompt_id=?, knowledge_id=?, draft_limit=?, need_review=?, is_loop=?, auto_keywords=?, auto_description=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 		req.Name, req.TitleLibID, req.PromptID, req.KnowledgeID, req.DraftLimit, req.NeedReview, req.IsLoop, req.AutoKeywords, req.AutoDescription, id)
 	c.JSON(200, gin.H{"code": 0, "data": "更新成功"})
@@ -799,7 +805,10 @@ func GeoUpdateArticle(c *gin.Context) {
 		MetaDescription string `json:"meta_description"`
 		Category        string `json:"category"`
 	}
-	c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"code": -1, "error": "参数错误"})
+		return
+	}
 	wc := utf8.RuneCountInString(req.Content)
 	db.DB.Exec(`UPDATE geo_articles SET title=?, content=?, keywords=?, meta_description=?, category=?, word_count=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 		req.Title, req.Content, req.Keywords, req.MetaDescription, req.Category, wc, id)

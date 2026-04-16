@@ -5,6 +5,7 @@
       <ul>
         <li><router-link to="/dashboard" :class="{active: $route.path==='/dashboard'}"><span class="nav-icon">📊</span>仪表盘</router-link></li>
         <li><router-link to="/data-management" :class="{active: $route.path==='/data-management'}"><span class="nav-icon">📡</span>数据管理</router-link></li>
+
         <li><router-link to="/sites" :class="{active: $route.path.startsWith('/sites')}"><span class="nav-icon">🌐</span>站点管理</router-link></li>
         <li><router-link to="/geo-management" :class="{active: $route.path==='/geo-management'}"><span class="nav-icon">🤖</span>GEO管理</router-link></li>
         <li><router-link to="/dead-links" :class="{active: $route.path==='/dead-links'}"><span class="nav-icon">💀</span>死链检查</router-link></li>
@@ -27,7 +28,11 @@
         </div>
       </header>
       <div class="page-body">
-        <router-view />
+        <router-view v-slot="{ Component }">
+          <keep-alive include="DataManagement">
+            <component :is="Component" />
+          </keep-alive>
+        </router-view>
       </div>
     </div>
   </div>
@@ -99,7 +104,7 @@ async function changePassword() {
     ElMessage.success('密码修改成功')
     showPasswordDialog.value = false
     pwdForm.value = { old_password: '', new_password: '' }
-  } catch {}
+  } catch (e) { console.error(e); ElMessage.error('密码修改失败') }
 }
 </script>
 

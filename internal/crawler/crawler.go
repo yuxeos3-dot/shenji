@@ -226,8 +226,8 @@ func validateURL(raw string) error {
 	return nil
 }
 
-// buildHTTPClient returns an SSRF-aware HTTP client with the given timeout.
-func buildHTTPClient(timeout time.Duration) *http.Client {
+// BuildHTTPClient returns an SSRF-aware HTTP client with the given timeout.
+func BuildHTTPClient(timeout time.Duration) *http.Client {
 	base := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	tr := &http.Transport{
 		DialContext:           safeDialContext(base),
@@ -261,7 +261,7 @@ func FetchPage(spec URLSpec, timeout time.Duration) PageResult {
 		return result
 	}
 
-	client := buildHTTPClient(timeout)
+	client := BuildHTTPClient(timeout)
 
 	req, err := http.NewRequest("GET", spec.URL, nil)
 	if err != nil {

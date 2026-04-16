@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -57,7 +58,10 @@ func GACallback(c *gin.Context) {
 		RefreshToken string `json:"refresh_token"`
 		ExpiresIn    int    `json:"expires_in"`
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "解析Token响应失败"})
+		return
+	}
 	db.DB.Exec(
 		"INSERT OR REPLACE INTO oauth_tokens (service, access_token, refresh_token, expires_at) VALUES ('ga', ?, ?, ?)",
 		result.AccessToken, result.RefreshToken, time.Now().Add(time.Duration(result.ExpiresIn)*time.Second),
@@ -93,7 +97,9 @@ func getGAAccessToken() (string, error) {
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int    `json:"expires_in"`
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("GA Token 响应解析失败: %w", err)
+	}
 	if result.AccessToken == "" {
 		return "", fmt.Errorf("GA Token刷新失败，请重新授权")
 	}
@@ -228,7 +234,9 @@ func SyncGAData(c *gin.Context) {
 				MetricValues []struct{ Value string `json:"value"` } `json:"metricValues"`
 			} `json:"rows"`
 		}
-		json.Unmarshal(results["overview"], &ov)
+		if err := json.Unmarshal(results["overview"], &ov); err != nil {
+			log.Printf("[ga] unmarshal overview failed: %v", err)
+		}
 		if len(ov.Rows) > 0 {
 			mv := ov.Rows[0].MetricValues
 			if len(mv) > 0 { fmt.Sscanf(mv[0].Value, "%d", &sessions) }

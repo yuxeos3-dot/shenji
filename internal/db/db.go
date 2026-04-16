@@ -225,7 +225,23 @@ CREATE TABLE IF NOT EXISTS oauth_tokens (
     created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 审计日志表
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    user_email  TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    target_type TEXT DEFAULT '',
+    target_id   TEXT DEFAULT '',
+    detail      TEXT DEFAULT '',
+    ip          TEXT DEFAULT '',
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes for frequently queried columns
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user       ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action     ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created    ON audit_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_tasks_site_id    ON audit_tasks(site_id);
 CREATE INDEX IF NOT EXISTS idx_audit_tasks_status     ON audit_tasks(status);
 CREATE INDEX IF NOT EXISTS idx_audit_tasks_created_at ON audit_tasks(created_at);
@@ -394,6 +410,20 @@ func Init() {
 			created_by INTEGER DEFAULT 0,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS audit_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			user_email TEXT NOT NULL,
+			action TEXT NOT NULL,
+			target_type TEXT DEFAULT '',
+			target_id TEXT DEFAULT '',
+			detail TEXT DEFAULT '',
+			ip TEXT DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)`,
 	}
 	for _, m := range migrations {
 		DB.Exec(m) // ignore errors (column/table already exists)
@@ -463,6 +493,7 @@ func seedDefaultSettings() {
 		"max_concurrent_audit":         "3",
 		"ai_api_url":                   "https://ai.router.team/v1",
 		"ai_model":                     "claude-sonnet-4-6",
+		"ip_whitelist":                 "",
 	}
 
 	for k, v := range defaults {

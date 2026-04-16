@@ -9,7 +9,12 @@ WorkingDirectory=/opt/seo-system
 EnvironmentFile=/opt/seo-system/.env
 ExecStart=/opt/seo-system/seo-system
 Restart=always
-RestartSec=5
+RestartSec=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/seo-system/data
 
 [Install]
 WantedBy=multi-user.target

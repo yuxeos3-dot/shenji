@@ -2,11 +2,19 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '../api'
 
+export interface User {
+  id: number
+  name: string
+  email: string
+  role: string
+  telegram_id?: string
+}
+
 export const useUserStore = defineStore('user', () => {
-  const user = ref(null)
+  const user = ref<User | null>(null)
   const token = ref(localStorage.getItem('token') || '')
 
-  async function login(email, password) {
+  async function login(email: string, password: string) {
     const res = await api.login({ email, password })
     token.value = res.data.token
     user.value = res.data.user
@@ -30,7 +38,7 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem('token')
   }
 
-  const isAdmin = () => user.value?.role === 'admin'
+  const isAdmin = (): boolean => user.value?.role === 'admin'
 
   return { user, token, login, fetchUser, logout, isAdmin }
 })

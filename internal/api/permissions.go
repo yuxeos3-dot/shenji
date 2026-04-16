@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -102,7 +103,9 @@ func GetUserPermissions(c *gin.Context) {
 	db.DB.QueryRow("SELECT COALESCE(permissions,'') FROM users WHERE id=?", userID).Scan(&perms)
 	var list []string
 	if perms != "" {
-		json.Unmarshal([]byte(perms), &list)
+		if err := json.Unmarshal([]byte(perms), &list); err != nil {
+			log.Printf("[permissions] unmarshal user %s permissions failed: %v", userID, err)
+		}
 	}
 	if list == nil {
 		list = []string{}
@@ -125,6 +128,9 @@ func SaveUserPermissions(c *gin.Context) {
 		c.JSON(500, gin.H{"code": -1, "error": "保存失败"})
 		return
 	}
+
+	WriteAuditLog(c, "save_permissions", "user", userID, string(js))
+
 	c.JSON(200, gin.H{"code": 0, "data": "权限已保存"})
 }
 
@@ -142,7 +148,10 @@ func HasPermission(c *gin.Context, perm string) bool {
 		return false
 	}
 	var perms []string
-	json.Unmarshal([]byte(permsJSON), &perms)
+	if err := json.Unmarshal([]byte(permsJSON), &perms); err != nil {
+		log.Printf("[permissions] unmarshal permissions failed for user %d: %v", userID, err)
+		return false
+	}
 	// Check exact match or parent wildcard
 	for _, p := range perms {
 		if p == perm || strings.HasPrefix(perm, p+".") {
@@ -186,7 +195,9 @@ func GetMyPermissions(c *gin.Context) {
 	db.DB.QueryRow("SELECT COALESCE(permissions,'') FROM users WHERE id=?", userID).Scan(&permsJSON)
 	var perms []string
 	if permsJSON != "" {
-		json.Unmarshal([]byte(permsJSON), &perms)
+		if err := json.Unmarshal([]byte(permsJSON), &perms); err != nil {
+			log.Printf("[permissions] unmarshal my-permissions failed: %v", err)
+		}
 	}
 	if perms == nil {
 		perms = []string{}

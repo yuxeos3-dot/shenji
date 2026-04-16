@@ -15,6 +15,9 @@ import (
 // ListSitePages 获取站点的自定义页面列表
 func ListSitePages(c *gin.Context) {
 	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
 	rows, err := db.DB.Query(`
 		SELECT id, site_id, name, url, last_fetched_at, status_code, ttfb_ms, created_at
 		FROM site_pages WHERE site_id = ? ORDER BY created_at ASC
@@ -53,6 +56,9 @@ func ListSitePages(c *gin.Context) {
 // CreateSitePage 添加一个自定义页面
 func CreateSitePage(c *gin.Context) {
 	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
 	var req struct {
 		Name string `json:"name" binding:"required"`
 		URL  string `json:"url" binding:"required"`
@@ -84,6 +90,9 @@ func CreateSitePage(c *gin.Context) {
 func DeleteSitePage(c *gin.Context) {
 	pageID := c.Param("page_id")
 	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
 	_, err := db.DB.Exec("DELETE FROM site_pages WHERE id = ? AND site_id = ?", pageID, siteID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
@@ -96,6 +105,9 @@ func DeleteSitePage(c *gin.Context) {
 func FetchSitePage(c *gin.Context) {
 	pageID := c.Param("page_id")
 	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
 
 	var name, url string
 	err := db.DB.QueryRow("SELECT name, url FROM site_pages WHERE id = ? AND site_id = ?", pageID, siteID).
@@ -134,6 +146,9 @@ func FetchSitePage(c *gin.Context) {
 func GetSitePageSource(c *gin.Context) {
 	pageID := c.Param("page_id")
 	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
 
 	var name, url, lastHTML string
 	var lastFetchedAt *string

@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"seo-system/internal/db"
@@ -49,7 +50,10 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	db.DB.Exec("UPDATE users SET last_login = ? WHERE id = ?", time.Now(), id)
+	if _, err := db.DB.Exec("UPDATE users SET last_login = ? WHERE id = ?", time.Now(), id); err != nil {
+		// Non-critical: log but don't fail the login
+		_ = err
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
@@ -159,11 +163,34 @@ func GetOnlineUsersAPI(c *gin.Context) {
 			userMap[e.UserID] = &userInfo{UserID: e.UserID, Email: e.Email, Role: e.Role, IPs: []string{e.IP}}
 		}
 	}
-	// Get names from DB
+	// Batch-fetch names from DB to avoid N+1 queries
+	userIDs := make([]interface{}, 0, len(userMap))
+	placeholders := make([]string, 0, len(userMap))
+	for id := range userMap {
+		userIDs = append(userIDs, id)
+		placeholders = append(placeholders, "?")
+	}
+	nameMap := make(map[int64]string)
+	if len(userIDs) > 0 {
+		rows, err := db.DB.Query(
+			"SELECT id, name FROM users WHERE id IN ("+strings.Join(placeholders, ",")+`)`,
+			userIDs...,
+		)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var uid int64
+				var n string
+				if rows.Scan(&uid, &n) == nil {
+					nameMap[uid] = n
+				}
+			}
+		}
+	}
+
 	var list []gin.H
 	for _, u := range userMap {
-		var name string
-		db.DB.QueryRow("SELECT name FROM users WHERE id = ?", u.UserID).Scan(&name)
+		name := nameMap[u.UserID]
 		if name == "" {
 			name = u.Email
 		}

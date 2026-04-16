@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"seo-system/internal/db"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -41,7 +43,7 @@ func GenerateToken(userID int64, email, role string) (string, error) {
 		Email:  email,
 		Role:   role,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
@@ -61,7 +63,6 @@ func AuthRequired() gin.HandlerFunc {
 		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 		claims := &Claims{}
 		token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
-			// Enforce HMAC signing method to prevent alg=none / RSA confusion attacks
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, jwt.ErrSignatureInvalid
 			}
@@ -97,6 +98,72 @@ func AdminRequired() gin.HandlerFunc {
 	}
 }
 
+// ─── IP Whitelist (DB-backed with cache) ─────────────────────────────────────
+
+var (
+	cachedIPs     []string
+	ipCacheMu     sync.RWMutex
+	ipCacheExpiry time.Time
+)
+
+const ipCacheTTL = 30 * time.Second
+
+// refreshIPCache reads ip_whitelist from DB and caches the parsed IPs.
+func refreshIPCache() []string {
+	ipCacheMu.Lock()
+	defer ipCacheMu.Unlock()
+
+	if time.Now().Before(ipCacheExpiry) {
+		return cachedIPs
+	}
+
+	raw := db.GetSetting("ip_whitelist")
+	var ips []string
+	for _, line := range strings.Split(raw, "\n") {
+		ip := strings.TrimSpace(line)
+		if ip != "" {
+			ips = append(ips, ip)
+		}
+	}
+	cachedIPs = ips
+	ipCacheExpiry = time.Now().Add(ipCacheTTL)
+	return ips
+}
+
+// IPWhitelist blocks requests from IPs not in the whitelist.
+// If ip_whitelist setting is empty, all IPs are allowed.
+func IPWhitelist() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ips := getIPWhitelist()
+		if len(ips) == 0 {
+			c.Next()
+			return
+		}
+
+		clientIP := c.ClientIP()
+		for _, ip := range ips {
+			if clientIP == ip {
+				c.Next()
+				return
+			}
+		}
+
+		c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "IP 不在白名单中"})
+		c.Abort()
+	}
+}
+
+func getIPWhitelist() []string {
+	ipCacheMu.RLock()
+	if time.Now().Before(ipCacheExpiry) {
+		ips := cachedIPs
+		ipCacheMu.RUnlock()
+		return ips
+	}
+	ipCacheMu.RUnlock()
+	return refreshIPCache()
+}
+
 // Online user tracking — records each authenticated request's user + IP.
 type OnlineEntry struct {
 	UserID   int64
@@ -130,7 +197,82 @@ func GetOnlineUsers() []OnlineEntry {
 	})
 	return result
 }
-// Bounded map; janitor goroutine prunes stale IPs every 10 minutes.
+
+// ─── Per-user rate limiter for heavy endpoints ───────────────────────────────
+
+type userRateLimiter struct {
+	mu       sync.Mutex
+	requests map[int64][]time.Time
+}
+
+var heavyLimiter = &userRateLimiter{
+	requests: make(map[int64][]time.Time),
+}
+
+func init() {
+	go func() {
+		t := time.NewTicker(10 * time.Minute)
+		defer t.Stop()
+		for range t.C {
+			heavyLimiter.cleanup()
+		}
+	}()
+}
+
+func (r *userRateLimiter) cleanup() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cutoff := time.Now().Add(-5 * time.Minute)
+	for uid, ts := range r.requests {
+		fresh := ts[:0]
+		for _, t := range ts {
+			if t.After(cutoff) {
+				fresh = append(fresh, t)
+			}
+		}
+		if len(fresh) == 0 {
+			delete(r.requests, uid)
+		} else {
+			r.requests[uid] = fresh
+		}
+	}
+}
+
+// UserRateLimit limits per-user requests to maxPerMinute within a 1-minute window.
+func UserRateLimit(maxPerMinute int) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.GetInt64("user_id")
+		if userID == 0 {
+			c.Next()
+			return
+		}
+
+		heavyLimiter.mu.Lock()
+		defer heavyLimiter.mu.Unlock()
+
+		now := time.Now()
+		window := now.Add(-1 * time.Minute)
+
+		valid := make([]time.Time, 0, len(heavyLimiter.requests[userID]))
+		for _, t := range heavyLimiter.requests[userID] {
+			if t.After(window) {
+				valid = append(valid, t)
+			}
+		}
+
+		if len(valid) >= maxPerMinute {
+			c.JSON(http.StatusTooManyRequests, gin.H{"code": -1, "error": "操作过于频繁，请稍后再试"})
+			c.Abort()
+			return
+		}
+
+		heavyLimiter.requests[userID] = append(valid, now)
+		c.Next()
+	}
+}
+
+// ─── Per-IP login rate limiter ───────────────────────────────────────────────
+
 type rateLimiter struct {
 	mu       sync.Mutex
 	attempts map[string][]time.Time
@@ -141,7 +283,6 @@ var loginLimiter = &rateLimiter{
 }
 
 func init() {
-	// Periodic cleanup to prevent unbounded growth.
 	go func() {
 		t := time.NewTicker(10 * time.Minute)
 		defer t.Stop()

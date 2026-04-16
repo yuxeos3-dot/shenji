@@ -57,8 +57,14 @@ func SaveMyAIConfig(c *gin.Context) {
 	// If user sends masked key (****), keep the old value
 	old := loadUserAIConfig(userID)
 	for i := range cfg.Slots {
-		if i < len(old.Slots) && (cfg.Slots[i].APIKey == "" || cfg.Slots[i].APIKey == old.Slots[i].APIKey[:4]+"****"+old.Slots[i].APIKey[len(old.Slots[i].APIKey)-4:] || cfg.Slots[i].APIKey == "****") {
-			cfg.Slots[i].APIKey = old.Slots[i].APIKey
+		if i < len(old.Slots) {
+			oldKey := old.Slots[i].APIKey
+			newKey := cfg.Slots[i].APIKey
+			if newKey == "" || newKey == "****" {
+				cfg.Slots[i].APIKey = oldKey
+			} else if len(oldKey) > 8 && newKey == oldKey[:4]+"****"+oldKey[len(oldKey)-4:] {
+				cfg.Slots[i].APIKey = oldKey
+			}
 		}
 	}
 	js, _ := json.Marshal(cfg)
@@ -122,7 +128,9 @@ func loadUserAIConfig(userID int64) UserAIConfig {
 	db.DB.QueryRow("SELECT COALESCE(ai_configs,'') FROM users WHERE id=?", userID).Scan(&raw)
 	var cfg UserAIConfig
 	if raw != "" {
-		json.Unmarshal([]byte(raw), &cfg)
+		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+			log.Printf("[user_ai] unmarshal ai_configs for user %d failed: %v", userID, err)
+		}
 	}
 	return cfg
 }

@@ -67,7 +67,13 @@ func SaveSettings(c *gin.Context) {
 		}
 	}
 
+	WriteAuditLog(c, "save_settings", "settings", "", "批量更新系统设置")
+
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "保存成功"})
+}
+
+func GetClientIP(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": c.ClientIP()})
 }
 
 func TestAI(c *gin.Context) {

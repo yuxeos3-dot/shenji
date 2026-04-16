@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sync"
@@ -272,7 +273,9 @@ func SyncGSCData(c *gin.Context) {
 			Position    float64 `json:"position"`
 		} `json:"rows"`
 	}
-	json.Unmarshal(results["overview"], &overview)
+	if err := json.Unmarshal(results["overview"], &overview); err != nil {
+		log.Printf("[gsc] unmarshal overview failed: %v", err)
+	}
 
 	var totalClicks, totalImpressions int
 	var avgCTR, avgPosition float64

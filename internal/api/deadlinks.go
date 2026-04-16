@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"seo-system/internal/crawler"
 	"seo-system/internal/db"
 
 	"github.com/gin-gonic/gin"
@@ -27,6 +28,9 @@ type DeadLinkJob struct {
 
 func GetDeadLinks(c *gin.Context) {
 	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
 
 	// If a check is running, don't hit DB.
 	if v, ok := deadlinkProgress.Load(siteID); ok {
@@ -105,6 +109,9 @@ func GetDeadLinks(c *gin.Context) {
 // RetryDeadLinks re-checks only the failed/dead links (status >= 400 or <= 0).
 func RetryDeadLinks(c *gin.Context) {
 	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
 
 	if v, ok := deadlinkProgress.Load(siteID); ok {
 		j := v.(*DeadLinkJob)
@@ -204,6 +211,9 @@ func RetryDeadLinks(c *gin.Context) {
 
 func GetDeadLinkProgress(c *gin.Context) {
 	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
 	if v, ok := deadlinkProgress.Load(siteID); ok {
 		job := v.(*DeadLinkJob)
 		job.mu.Lock()
@@ -218,6 +228,9 @@ func GetDeadLinkProgress(c *gin.Context) {
 
 func StartDeadLinkCheck(c *gin.Context) {
 	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
 
 	var domain string
 	db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
@@ -264,7 +277,7 @@ func fetchSitemapURLs(sitemapURL string, depth int) []string {
 	if depth > 3 {
 		return nil
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := crawler.BuildHTTPClient(30 * time.Second)
 	resp, err := client.Get(sitemapURL)
 	if err != nil {
 		log.Printf("[deadlink] fetch failed %s: %v", sitemapURL, err)
