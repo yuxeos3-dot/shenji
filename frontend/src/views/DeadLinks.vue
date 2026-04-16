@@ -9,6 +9,9 @@
       <button class="btn btn-primary btn-sm" @click="startCheck" :disabled="checking || !selectedSiteId">
         {{ checking ? '检测中...' : '🔍 开始死链检测' }}
       </button>
+      <button class="btn btn-sm" style="background:#FEF3C7;border-color:#F59E0B;color:#92400E" @click="retryFailed" :disabled="checking || !selectedSiteId || summary.total_dead===0" v-if="!checking && summary.total_dead>0">
+        🔄 失败重查 ({{ summary.total_dead }} 条)
+      </button>
       <button class="btn btn-sm" @click="loadResults" :disabled="!selectedSiteId" v-if="!checking">
         ↻ 刷新结果
       </button>
@@ -28,22 +31,22 @@
       </div>
 
       <!-- 概览卡片 -->
-      <div class="summary-row" v-if="results.length">
+      <div class="summary-row" v-if="summary.total_all>0">
         <div class="summary-card panel">
           <div class="sc-label">检测链接总数</div>
-          <div class="sc-value num-blue">{{ results.length }}</div>
+          <div class="sc-value num-blue">{{ summary.total_all }}</div>
         </div>
         <div class="summary-card panel">
           <div class="sc-label">死链数量</div>
-          <div class="sc-value" :class="deadLinks.length>0?'num-red':'num-green'">{{ deadLinks.length }}</div>
+          <div class="sc-value" :class="summary.total_dead>0?'num-red':'num-green'">{{ summary.total_dead }}</div>
         </div>
         <div class="summary-card panel">
           <div class="sc-label">重定向链接</div>
-          <div class="sc-value num-orange">{{ redirectLinks.length }}</div>
+          <div class="sc-value num-orange">{{ summary.total_redirect }}</div>
         </div>
         <div class="summary-card panel">
           <div class="sc-label">正常链接</div>
-          <div class="sc-value num-green">{{ okLinks.length }}</div>
+          <div class="sc-value num-green">{{ summary.total_ok }}</div>
         </div>
         <div class="summary-card panel">
           <div class="sc-label">最近检测</div>
@@ -52,11 +55,11 @@
       </div>
 
       <!-- 过滤器 -->
-      <div class="filter-bar panel" v-if="results.length">
-        <button :class="['filter-btn', filter==='all'&&'active']" @click="filter='all'">全部 {{ results.length }}</button>
-        <button :class="['filter-btn', filter==='dead'&&'active', 'filter-dead']" @click="filter='dead'">💀 死链 {{ deadLinks.length }}</button>
-        <button :class="['filter-btn', filter==='redirect'&&'active']" @click="filter='redirect'">↩️ 重定向 {{ redirectLinks.length }}</button>
-        <button :class="['filter-btn', filter==='ok'&&'active']" @click="filter='ok'">✅ 正常 {{ okLinks.length }}</button>
+      <div class="filter-bar panel" v-if="summary.total_all>0">
+        <button :class="['filter-btn', filter==='all'&&'active']" @click="filter='all';page=1;loadResults()">全部 {{ summary.total_all }}</button>
+        <button :class="['filter-btn', filter==='dead'&&'active', 'filter-dead']" @click="filter='dead';page=1;loadResults()">💀 死链 {{ summary.total_dead }}</button>
+        <button :class="['filter-btn', filter==='redirect'&&'active']" @click="filter='redirect';page=1;loadResults()">↩️ 重定向 {{ summary.total_redirect }}</button>
+        <button :class="['filter-btn', filter==='ok'&&'active']" @click="filter='ok';page=1;loadResults()">✅ 正常 {{ summary.total_ok }}</button>
         <el-input v-model="search" placeholder="搜索 URL..." style="width:280px;margin-left:auto" clearable />
       </div>
 
@@ -67,13 +70,13 @@
             <tr>
               <th style="width:48px">状态</th>
               <th>链接 URL</th>
-              <th style="width:120px">来源页面</th>
+              <th style="width:120px">来源</th>
               <th style="width:90px">响应时间</th>
-              <th style="width:120px">检测时间</th>
+              <th style="width:140px">检测时间</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in filteredResults" :key="r.id" :class="rowClass(r.status_code)">
+            <tr v-for="r in results" :key="r.id" :class="rowClass(r.status_code)">
               <td>
                 <span :class="['status-dot', statusClass(r.status_code)]">{{ r.status_code || '?' }}</span>
               </td>
@@ -84,11 +87,14 @@
               <td class="ttfb-cell">{{ r.ttfb_ms ? r.ttfb_ms + 'ms' : '—' }}</td>
               <td class="time-cell">{{ r.checked_at }}</td>
             </tr>
-            <tr v-if="!filteredResults.length">
+            <tr v-if="!results.length">
               <td colspan="5" class="empty-cell">{{ filter==='dead' ? '🎉 没有发现死链！' : '暂无数据' }}</td>
             </tr>
           </tbody>
         </table>
+        <div style="margin-top:12px;text-align:center" v-if="totalCount>perPage">
+          <el-pagination v-model:current-page="page" :page-size="perPage" :total="totalCount" layout="prev,pager,next,total" background @current-change="loadResults" />
+        </div>
       </div>
 
       <div v-else-if="!checking" class="empty-hint panel">
@@ -115,23 +121,11 @@ const search = ref('')
 const totalLinks = ref(0)
 const checkedLinks = ref(0)
 const lastCheckedAt = ref('')
+const page = ref(1)
+const perPage = 100
+const totalCount = ref(0)
+const summary = ref({ total_all: 0, total_dead: 0, total_redirect: 0, total_ok: 0 })
 let pollTimer = null
-
-const deadLinks = computed(() => results.value.filter(r => r.status_code >= 400 || r.status_code === 0))
-const redirectLinks = computed(() => results.value.filter(r => r.status_code >= 300 && r.status_code < 400))
-const okLinks = computed(() => results.value.filter(r => r.status_code >= 200 && r.status_code < 300))
-
-const filteredResults = computed(() => {
-  let list = results.value
-  if (filter.value === 'dead') list = deadLinks.value
-  else if (filter.value === 'redirect') list = redirectLinks.value
-  else if (filter.value === 'ok') list = okLinks.value
-  if (search.value) {
-    const q = search.value.toLowerCase()
-    list = list.filter(r => r.url?.toLowerCase().includes(q) || r.source_page?.toLowerCase().includes(q))
-  }
-  return list
-})
 
 function statusClass(code) {
   if (!code || code === 0) return 'dot-unknown'
@@ -145,17 +139,44 @@ function rowClass(code) {
   return ''
 }
 
-function onSiteChange() { results.value = []; lastCheckedAt.value = ''; loadResults() }
+function onSiteChange() { results.value = []; lastCheckedAt.value = ''; summary.value = { total_all:0, total_dead:0, total_redirect:0, total_ok:0 }; page.value = 1; loadResults() }
 
 async function loadResults() {
   if (!selectedSiteId.value) return
   loading.value = true
   try {
-    const res = await apiClient.getDeadLinks(selectedSiteId.value)
-    results.value = res.data || []
+    const statusMap = { dead: 'dead', redirect: 'redirect', ok: 'ok' }
+    const params = { page: page.value, per_page: perPage }
+    if (statusMap[filter.value]) params.status_filter = statusMap[filter.value]
+    const res = await apiClient.getDeadLinks(selectedSiteId.value, params)
+    const d = res.data
+    if (d.items !== undefined) {
+      results.value = d.items || []
+      totalCount.value = d.total || 0
+      summary.value = { total_all: d.total_all||0, total_dead: d.total_dead||0, total_redirect: d.total_redirect||0, total_ok: d.total_ok||0 }
+    } else {
+      results.value = Array.isArray(d) ? d : []
+      totalCount.value = results.value.length
+    }
     if (results.value.length) lastCheckedAt.value = results.value[0].checked_at
   } catch {}
   loading.value = false
+}
+
+async function retryFailed() {
+  if (!selectedSiteId.value) return
+  checking.value = true
+  totalLinks.value = 0
+  checkedLinks.value = 0
+  try {
+    const res = await apiClient.retryDeadLinks(selectedSiteId.value)
+    totalLinks.value = res.data?.retrying || 0
+    ElMessage.success('正在重查 ' + totalLinks.value + ' 条死链...')
+    pollProgress()
+  } catch (e) {
+    checking.value = false
+    ElMessage.error(e?.response?.data?.error || '重查失败')
+  }
 }
 
 async function startCheck() {

@@ -79,6 +79,7 @@ func main() {
 		v1.GET("/sites/:id/deadlinks", api.GetDeadLinks)
 		v1.GET("/sites/:id/deadlinks/progress", api.GetDeadLinkProgress)
 		v1.POST("/sites/:id/deadlinks/check", api.StartDeadLinkCheck)
+		v1.POST("/sites/:id/deadlinks/retry", api.RetryDeadLinks)
 
 		// Content Rewrite (AI)
 		v1.POST("/rewrite", api.RewriteContent)

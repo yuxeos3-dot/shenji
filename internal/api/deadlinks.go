@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,24 +28,47 @@ type DeadLinkJob struct {
 func GetDeadLinks(c *gin.Context) {
 	siteID := c.Param("id")
 
-	// If a check is running, don't hit DB — return cached progress only.
+	// If a check is running, don't hit DB.
 	if v, ok := deadlinkProgress.Load(siteID); ok {
 		j := v.(*DeadLinkJob)
 		j.mu.Lock()
 		s := j.Status
 		j.mu.Unlock()
 		if s == "running" {
-			c.JSON(200, gin.H{"code": 0, "data": []gin.H{}, "running": true})
+			c.JSON(200, gin.H{"code": 0, "data": gin.H{"items": []gin.H{}, "total": 0}, "running": true})
 			return
 		}
 	}
 
-	rows, err := db.DB.Query(`
-		SELECT id, url, source_page, status_code, ttfb_ms, checked_at
-		FROM dead_link_results WHERE site_id = ? ORDER BY status_code ASC, id DESC
-	`, siteID)
+	// Pagination
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "100"))
+	if page < 1 { page = 1 }
+	if perPage < 1 || perPage > 500 { perPage = 100 }
+	offset := (page - 1) * perPage
+
+	// Filter
+	statusFilter := c.Query("status_filter") // dead / redirect / ok / all
+	where := "site_id = ?"
+	args := []interface{}{siteID}
+	switch statusFilter {
+	case "dead":
+		where += " AND (status_code >= 400 OR status_code <= 0)"
+	case "redirect":
+		where += " AND status_code >= 300 AND status_code < 400"
+	case "ok":
+		where += " AND status_code >= 200 AND status_code < 300"
+	}
+
+	var total int
+	db.DB.QueryRow("SELECT COUNT(*) FROM dead_link_results WHERE "+where, args...).Scan(&total)
+
+	queryArgs := append(args, perPage, offset)
+	rows, err := db.DB.Query(
+		"SELECT id, url, source_page, status_code, ttfb_ms, checked_at FROM dead_link_results WHERE "+where+" ORDER BY status_code ASC, id DESC LIMIT ? OFFSET ?",
+		queryArgs...)
 	if err != nil {
-		c.JSON(200, gin.H{"code": 0, "data": []gin.H{}})
+		c.JSON(200, gin.H{"code": 0, "data": gin.H{"items": []gin.H{}, "total": 0}})
 		return
 	}
 	defer rows.Close()
@@ -64,7 +88,118 @@ func GetDeadLinks(c *gin.Context) {
 	if results == nil {
 		results = []gin.H{}
 	}
-	c.JSON(200, gin.H{"code": 0, "data": results})
+
+	// Also return summary counts so frontend doesn't need a second query.
+	var totalAll, totalDead, totalRedirect, totalOk int
+	db.DB.QueryRow("SELECT COUNT(*) FROM dead_link_results WHERE site_id=?", siteID).Scan(&totalAll)
+	db.DB.QueryRow("SELECT COUNT(*) FROM dead_link_results WHERE site_id=? AND (status_code>=400 OR status_code<=0)", siteID).Scan(&totalDead)
+	db.DB.QueryRow("SELECT COUNT(*) FROM dead_link_results WHERE site_id=? AND status_code>=300 AND status_code<400", siteID).Scan(&totalRedirect)
+	db.DB.QueryRow("SELECT COUNT(*) FROM dead_link_results WHERE site_id=? AND status_code>=200 AND status_code<300", siteID).Scan(&totalOk)
+
+	c.JSON(200, gin.H{"code": 0, "data": gin.H{
+		"items": results, "total": total, "page": page, "per_page": perPage,
+		"total_all": totalAll, "total_dead": totalDead, "total_redirect": totalRedirect, "total_ok": totalOk,
+	}})
+}
+
+// RetryDeadLinks re-checks only the failed/dead links (status >= 400 or <= 0).
+func RetryDeadLinks(c *gin.Context) {
+	siteID := c.Param("id")
+
+	if v, ok := deadlinkProgress.Load(siteID); ok {
+		j := v.(*DeadLinkJob)
+		j.mu.Lock()
+		s := j.Status
+		j.mu.Unlock()
+		if s == "running" {
+			c.JSON(400, gin.H{"code": -1, "error": "检测任务正在进行中"})
+			return
+		}
+	}
+
+	// Get all dead links for this site
+	rows, err := db.DB.Query(
+		"SELECT id, url FROM dead_link_results WHERE site_id=? AND (status_code>=400 OR status_code<=0)",
+		siteID)
+	if err != nil {
+		c.JSON(500, gin.H{"code": -1, "error": "查询失败"})
+		return
+	}
+	defer rows.Close()
+
+	type deadItem struct {
+		id  int64
+		url string
+	}
+	var items []deadItem
+	for rows.Next() {
+		var d deadItem
+		rows.Scan(&d.id, &d.url)
+		items = append(items, d)
+	}
+
+	if len(items) == 0 {
+		c.JSON(200, gin.H{"code": 0, "data": "没有需要重查的死链"})
+		return
+	}
+
+	job := &DeadLinkJob{Status: "running", Phase: "正在重查死链...", Total: len(items)}
+	deadlinkProgress.Store(siteID, job)
+
+	go func() {
+		defer func() {
+			job.mu.Lock()
+			job.Status = "done"
+			job.Phase = "重查完成"
+			job.mu.Unlock()
+		}()
+
+		sem := make(chan struct{}, 20)
+		var wg sync.WaitGroup
+		client := &http.Client{
+			Timeout: 15 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 5 { return http.ErrUseLastResponse }
+				return nil
+			},
+		}
+
+		for _, item := range items {
+			wg.Add(1)
+			go func(d deadItem) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				start := time.Now()
+				sc := 0
+				req, err := http.NewRequest("HEAD", d.url, nil)
+				if err != nil {
+					sc = -1
+				} else {
+					req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SEO-DeadLinkChecker/1.0)")
+					resp, err := client.Do(req)
+					if err != nil {
+						sc = -1
+					} else {
+						sc = resp.StatusCode
+						resp.Body.Close()
+					}
+				}
+				ttfb := time.Since(start).Milliseconds()
+				now := time.Now().Format("2006-01-02T15:04:05Z")
+				db.DB.Exec("UPDATE dead_link_results SET status_code=?, ttfb_ms=?, checked_at=? WHERE id=?",
+					sc, ttfb, now, d.id)
+
+				job.mu.Lock()
+				job.Checked++
+				job.mu.Unlock()
+			}(item)
+		}
+		wg.Wait()
+	}()
+
+	c.JSON(200, gin.H{"code": 0, "data": gin.H{"retrying": len(items)}})
 }
 
 func GetDeadLinkProgress(c *gin.Context) {

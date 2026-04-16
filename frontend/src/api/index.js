@@ -63,7 +63,8 @@ export default {
   downloadAuditReport: (taskId) => `/api/v1/audits/${taskId}/report/download`,
 
   // Dead Link Check
-  getDeadLinks: (siteId) => api.get(`/v1/sites/${siteId}/deadlinks`),
+  getDeadLinks: (siteId, params) => api.get(`/v1/sites/${siteId}/deadlinks`, { params }),
+  retryDeadLinks: (siteId) => api.post(`/v1/sites/${siteId}/deadlinks/retry`),
   getDeadLinkProgress: (siteId) => api.get(`/v1/sites/${siteId}/deadlinks/progress`),
   startDeadLinkCheck: (siteId) => api.post(`/v1/sites/${siteId}/deadlinks/check`),
 
