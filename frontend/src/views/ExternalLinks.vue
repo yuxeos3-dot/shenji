@@ -41,7 +41,7 @@
                 <template #default="{row}">
                   <el-button size="small" @click="openTitles(row)">查看关键词</el-button>
                   <el-button size="small" @click="openImport(row)">导入</el-button>
-                  <el-button size="small" @click="openGSCImport(row)">从GSC导入</el-button>
+                  <el-button size="small" type="success" @click="doGSCImportDirect(row)" :loading="row._gscImporting">从GSC导入</el-button>
                   <el-button size="small" type="danger" text @click="deleteLib(row)">删除</el-button>
                 </template>
               </el-table-column>
@@ -280,6 +280,7 @@ function openImport(r) { curLib.value = r; importText.value = ''; showImport.val
 async function doImport() { importing.value = true; try { const res = await api.geoImportTitles(curLib.value.id, { text: importText.value }); ElMessage.success('导入' + res.data.imported + '条'); showImport.value = false; loadLibs() } finally { importing.value = false } }
 function openGSCImport(r) { curLib.value = r; gscImportLimit.value = 100; showGSCImport.value = true }
 async function doGSCImport() { importing.value = true; try { const res = await api.geoImportFromGSC(curLib.value.id, { site_id: siteId.value, limit: gscImportLimit.value }); ElMessage.success('从GSC导入' + res.data.imported + '条'); showGSCImport.value = false; loadLibs() } catch (e) { ElMessage.error(e?.response?.data?.error || '导入失败') } finally { importing.value = false } }
+async function doGSCImportDirect(r) { r._gscImporting = true; try { const res = await api.geoImportFromGSC(r.id, { site_id: siteId.value, limit: 0 }); ElMessage.success('从GSC导入 ' + res.data.imported + ' 条关键词（来源共' + res.data.source_total + '条，已过滤排名1-99）'); loadLibs() } catch (e) { ElMessage.error(e?.response?.data?.error || '导入失败，请先在数据中心同步GSC') } finally { r._gscImporting = false } }
 
 // ── Prompt ──
 const prompts = ref([])
