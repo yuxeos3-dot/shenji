@@ -113,31 +113,55 @@
 
       <!-- AI 润色 + 预览 -->
       <div class="form-actions">
-        <button class="btn btn-polish" @click="polish" :disabled="polishing">
-          {{ polishing ? '润色中...' : '✨ AI 润色生成日报' }}
+        <button class="btn btn-polish-big" @click="polishAndSubmit" :disabled="polishing || submitting">
+          {{ polishing ? '润色中...' : submitting ? '提交中...' : '🚀 一键润色并提交日报' }}
+        </button>
+        <button class="btn btn-polish-alt" @click="polish" :disabled="polishing || submitting">
+          {{ polishing ? '润色中...' : '✨ 只润色（先预览再提交）' }}
         </button>
       </div>
 
-      <!-- 润色结果预览 + 提交 -->
-      <div v-if="polishedContent" class="polished-panel">
-        <div class="polished-head">
-          <span>✅ 已生成日报（可在下方直接修改）</span>
-          <button class="btn btn-xs" @click="copyPolished">📋 复制</button>
-        </div>
-        <textarea v-model="polishedContent" rows="20" class="polished-text"></textarea>
-        <div style="margin-top:16px; display:flex; gap:10px;">
-          <button class="btn btn-primary" @click="submit" :disabled="submitting">
-            {{ submitting ? '提交中...' : '☀ 提交日报' }}
-          </button>
-          <button class="btn" @click="polishedContent = ''">清空重来</button>
-        </div>
-      </div>
     </div>
+
+    <!-- 润色结果：弹窗展示（非常醒目，不会错过） -->
+    <el-dialog
+      v-model="previewVisible"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      width="760px"
+      align-center
+      destroy-on-close>
+      <template #header>
+        <div class="polish-dialog-head">
+          <span class="polish-dialog-title">✨ 日报已润色生成</span>
+          <span class="polish-dialog-badge">尚未入库</span>
+        </div>
+      </template>
+
+      <div class="polished-alert">
+        ⚠️ 内容已生成但<strong>尚未入库</strong>！请检查下方内容（可直接修改），然后点橙色「☀ 确认提交入库」按钮才会真正保存。
+      </div>
+
+      <div class="polished-head">
+        <span>📋 日报内容（可编辑）</span>
+        <button class="btn btn-xs" @click="copyPolished">📋 复制</button>
+      </div>
+      <textarea v-model="polishedContent" rows="16" class="polished-text"></textarea>
+
+      <template #footer>
+        <div class="polished-actions">
+          <button class="btn" @click="previewVisible = false">取消</button>
+          <button class="btn btn-submit-big" @click="submitFromDialog" :disabled="submitting">
+            {{ submitting ? '提交中...' : '☀ 确认提交入库' }}
+          </button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
@@ -146,6 +170,7 @@ const router = useRouter()
 const today = new Date().toISOString().slice(0, 10)
 const submitting = ref(false)
 const polishing = ref(false)
+const previewVisible = ref(false)
 
 const raw = ref({ done: '', coreData: '', tomorrow: '', issues: '' })
 const agentEntries = ref([ newAgent() ])
@@ -165,40 +190,72 @@ onMounted(async () => {
   } catch {}
 })
 
-async function polish() {
-  // 前端预校验
+function validate() {
   if (!raw.value.done.trim()) {
-    ElMessage.warning('请先填写「今日做的事」'); return
+    ElMessage.warning('请先填写「今日做的事」')
+    return false
   }
   if (!agentEntries.value.length) {
-    ElMessage.warning('Agent 自动化应用为必填项'); return
+    ElMessage.warning('Agent 自动化应用为必填项')
+    return false
   }
   for (let i = 0; i < agentEntries.value.length; i++) {
     const e = agentEntries.value[i]
     const miss = ['scenario','flow','output','hours_saved','skill_name','in_library']
       .filter(k => !String(e[k] || '').trim())
     if (miss.length) {
-      ElMessage.error(`Agent 自动化应用 #${i+1} 有未填字段：${miss.join('、')}`); return
+      ElMessage.error(`Agent 自动化应用 #${i+1} 有未填字段：${miss.join('、')}`)
+      return false
     }
   }
+  return true
+}
 
+async function doPolish() {
+  const res = await api.polishReport({
+    done_raw: raw.value.done,
+    core_data: raw.value.coreData,
+    tomorrow_raw: raw.value.tomorrow,
+    issues: raw.value.issues,
+    agent_entries: agentEntries.value,
+  })
+  return res.data.content
+}
+
+// 只润色，弹窗预览后手动提交
+async function polish() {
+  if (!validate()) return
   polishing.value = true
   try {
-    const res = await api.polishReport({
-      done_raw: raw.value.done,
-      core_data: raw.value.coreData,
-      tomorrow_raw: raw.value.tomorrow,
-      issues: raw.value.issues,
-      agent_entries: agentEntries.value,
-    })
-    polishedContent.value = res.data.content
-    ElMessage.success('日报已生成，请检查后提交')
+    polishedContent.value = await doPolish()
+    previewVisible.value = true
+    await nextTick()
+    ElMessage.success('✅ 日报已生成，请在弹窗中检查并提交入库')
   } catch (e) {
-    const msg = e?.response?.data?.error || 'AI 润色失败'
-    ElMessage.error(msg)
+    ElMessage.error(e?.response?.data?.error || 'AI 润色失败')
   } finally {
     polishing.value = false
   }
+}
+
+async function submitFromDialog() {
+  await submit()
+  previewVisible.value = false
+}
+
+// 一键润色并提交
+async function polishAndSubmit() {
+  if (!validate()) return
+  polishing.value = true
+  try {
+    polishedContent.value = await doPolish()
+  } catch (e) {
+    polishing.value = false
+    ElMessage.error(e?.response?.data?.error || 'AI 润色失败')
+    return
+  }
+  polishing.value = false
+  await submit()
 }
 
 async function submit() {
@@ -211,10 +268,10 @@ async function submit() {
       tasks_todo: [],
       issues: '',
     })
-    ElMessage.success('日报提交成功')
-    router.push('/reports')
-  } catch {
-    ElMessage.error('提交失败')
+    ElMessage.success('✅ 日报已入库，正在跳转到列表...')
+    setTimeout(() => router.push('/reports'), 600)
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.error || '提交失败')
   } finally { submitting.value = false }
 }
 
@@ -265,16 +322,32 @@ async function copyPolished() {
 .btn-primary { background:linear-gradient(135deg,var(--sun),var(--coral)); color:#fff; border-color:transparent; box-shadow:var(--s-amber); }
 .btn-primary:hover { background:linear-gradient(135deg,var(--sun-deep),var(--sun)); color:#fff; box-shadow:0 8px 24px rgba(249,115,22,.48); }
 .btn-primary:disabled { opacity:.6; cursor:not-allowed; }
-.btn-polish { background:linear-gradient(135deg,#6366F1,#8B5CF6); color:#fff; border-color:transparent; padding:11px 28px; font-size:14px; box-shadow:0 4px 12px rgba(99,102,241,.35); }
-.btn-polish:hover { background:linear-gradient(135deg,#4F46E5,#7C3AED); box-shadow:0 8px 20px rgba(99,102,241,.5); }
-.btn-polish:disabled { opacity:.6; cursor:not-allowed; }
+.btn-polish-big { background:linear-gradient(135deg,var(--sun),var(--coral)); color:#fff; border-color:transparent; padding:14px 36px; font-size:15px; font-weight:700; box-shadow:0 6px 18px rgba(249,115,22,.45); margin-right:12px; }
+.btn-polish-big:hover { background:linear-gradient(135deg,var(--sun-deep),var(--sun)); box-shadow:0 10px 28px rgba(249,115,22,.55); transform:translateY(-1px); }
+.btn-polish-big:disabled { opacity:.6; cursor:not-allowed; transform:none; }
+.btn-polish-alt { background:linear-gradient(135deg,#6366F1,#8B5CF6); color:#fff; border-color:transparent; padding:11px 22px; font-size:13.5px; box-shadow:0 4px 12px rgba(99,102,241,.35); }
+.btn-polish-alt:hover { background:linear-gradient(135deg,#4F46E5,#7C3AED); box-shadow:0 8px 20px rgba(99,102,241,.5); }
+.btn-polish-alt:disabled { opacity:.6; cursor:not-allowed; }
+.btn-submit-big { background:linear-gradient(135deg,#F97316,#EA580C); color:#fff; border-color:transparent; padding:14px 40px; font-size:15px; font-weight:800; box-shadow:0 6px 20px rgba(249,115,22,.5); animation:pulse 1.8s infinite; }
+.btn-submit-big:hover { background:linear-gradient(135deg,#EA580C,#C2410C); box-shadow:0 10px 30px rgba(249,115,22,.7); animation:none; transform:translateY(-1px); }
+.btn-submit-big:disabled { opacity:.6; cursor:not-allowed; animation:none; transform:none; }
+@keyframes pulse {
+  0%, 100% { box-shadow:0 6px 20px rgba(249,115,22,.5); }
+  50%      { box-shadow:0 6px 24px rgba(249,115,22,.85), 0 0 0 6px rgba(249,115,22,.18); }
+}
 .btn-xs { padding:4px 12px; font-size:12px; border-radius:6px; }
 .btn-xs:hover { background:var(--sun-glow); border-color:var(--sun); color:var(--sun-deep); }
 .btn-icon { background:none; border:none; cursor:pointer; font-size:12px; color:var(--err); padding:2px 6px; transition:opacity .15s; }
 .btn-icon:hover { opacity:.7; }
 .form-actions { margin-top:22px; text-align:center; }
 
-.polished-panel { margin-top:24px; padding:18px 20px; background:#F0FDF4; border:1.5px solid #10B981; border-radius:12px; }
+.polish-dialog-head { display:flex; align-items:center; gap:12px; }
+.polish-dialog-title { font-size:18px; font-weight:700; color:#065F46; }
+.polish-dialog-badge { background:#FEE2E2; color:#B91C1C; padding:3px 12px; border-radius:14px; font-size:12px; font-weight:700; animation:pulse-badge 1.5s infinite; }
+@keyframes pulse-badge { 0%,100% { opacity:1; } 50% { opacity:.6; } }
+.polished-alert { background:#FEF3C7; border:1.5px solid #F59E0B; border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:13px; color:#78350F; line-height:1.6; }
+.polished-alert strong { color:#B45309; }
 .polished-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-weight:700; color:#065F46; font-size:13.5px; }
 .polished-text { width:100%; padding:14px; border:1.5px solid #86EFAC; border-radius:9px; font-family:'JetBrains Mono','Consolas',monospace; font-size:13px; line-height:1.75; background:#fff; box-sizing:border-box; resize:vertical; }
+.polished-actions { display:flex; gap:10px; align-items:center; justify-content:flex-end; }
 </style>
