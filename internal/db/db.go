@@ -270,6 +270,82 @@ func Init() {
 		)`,
 		"ALTER TABLE audit_results ADD COLUMN v6_report TEXT DEFAULT ''",
 		"ALTER TABLE audit_results ADD COLUMN raw_ai_response TEXT DEFAULT ''",
+
+		// GEO Content Production Module
+		`CREATE TABLE IF NOT EXISTS geo_title_libs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			title_count INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS geo_titles (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			lib_id INTEGER NOT NULL REFERENCES geo_title_libs(id),
+			title TEXT NOT NULL,
+			keyword TEXT DEFAULT '',
+			is_used INTEGER DEFAULT 0,
+			used_at DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_geo_titles_lib ON geo_titles(lib_id, is_used)`,
+		`CREATE TABLE IF NOT EXISTS geo_prompts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			type TEXT DEFAULT 'content',
+			content TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS geo_knowledge (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			content TEXT NOT NULL,
+			char_count INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS geo_tasks (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			title_lib_id INTEGER REFERENCES geo_title_libs(id),
+			prompt_id INTEGER REFERENCES geo_prompts(id),
+			knowledge_id INTEGER,
+			status TEXT DEFAULT 'paused',
+			draft_limit INTEGER DEFAULT 20,
+			publish_interval INTEGER DEFAULT 86400,
+			need_review INTEGER DEFAULT 1,
+			is_loop INTEGER DEFAULT 0,
+			auto_keywords INTEGER DEFAULT 1,
+			auto_description INTEGER DEFAULT 1,
+			cron_expr TEXT DEFAULT '',
+			created_count INTEGER DEFAULT 0,
+			last_run_at DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS geo_articles (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			task_id INTEGER REFERENCES geo_tasks(id),
+			title_id INTEGER REFERENCES geo_titles(id),
+			title TEXT NOT NULL,
+			slug TEXT DEFAULT '',
+			content TEXT NOT NULL,
+			excerpt TEXT DEFAULT '',
+			keywords TEXT DEFAULT '',
+			meta_description TEXT DEFAULT '',
+			category TEXT DEFAULT '',
+			status TEXT DEFAULT 'draft',
+			review_status TEXT DEFAULT 'pending',
+			reviewer_note TEXT DEFAULT '',
+			ai_model TEXT DEFAULT '',
+			word_count INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			published_at DATETIME
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_geo_articles_task ON geo_articles(task_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_geo_articles_review ON geo_articles(review_status)`,
 	}
 	for _, m := range migrations {
 		DB.Exec(m) // ignore errors (column/table already exists)
