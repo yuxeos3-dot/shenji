@@ -129,6 +129,10 @@ func main() {
 		v1.GET("/reports/export", api.ExportReports)  // must be before /:date
 		v1.GET("/reports/:date", api.GetReportByDate)
 
+		// Bing Webmaster
+		v1.POST("/sites/:id/bing/sync", api.SyncBingData)
+		v1.GET("/sites/:id/bing", api.GetBingData)
+
 		// Settings (admin only)
 		settings := v1.Group("/settings")
 		settings.Use(middleware.AdminRequired())

@@ -1,0 +1,238 @@
+package api
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"sync"
+	"time"
+
+	"seo-system/internal/db"
+
+	"github.com/gin-gonic/gin"
+)
+
+const bingAPI = "https://ssl.bing.com/webmaster/api.svc/json"
+
+func bingFetch(apiKey, endpoint string, params map[string]string) (json.RawMessage, error) {
+	u, err := url.Parse(bingAPI + "/" + endpoint)
+	if err != nil {
+		return nil, err
+	}
+	q := u.Query()
+	q.Set("apikey", apiKey)
+	for k, v := range params {
+		q.Set(k, v)
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		var errResp struct {
+			Error struct {
+				Code    int    `json:"Code"`
+				Message string `json:"Message"`
+			} `json:"Error"`
+		}
+		json.Unmarshal(body, &errResp)
+		if errResp.Error.Message != "" {
+			return nil, fmt.Errorf("Bing API错误: %s", errResp.Error.Message)
+		}
+		return nil, fmt.Errorf("Bing API HTTP %d", resp.StatusCode)
+	}
+	return body, nil
+}
+
+func SyncBingData(c *gin.Context) {
+	siteID := c.Param("id")
+
+	var bingSiteURL string
+	err := db.DB.QueryRow("SELECT bing_site_url FROM sites WHERE id = ?", siteID).Scan(&bingSiteURL)
+	if err != nil || bingSiteURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点未配置 Bing Site URL"})
+		return
+	}
+
+	apiKey := db.GetSetting("bing_api_key")
+	if apiKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "Bing Webmaster API Key未配置，请在系统设置中添加"})
+		return
+	}
+
+	// Date range: last 30 days
+	ed := time.Now().AddDate(0, 0, -1)
+	sd := time.Now().AddDate(0, 0, -30)
+	startDate := sd.Format("2006-01-02T00:00:00")
+	endDate := ed.Format("2006-01-02T00:00:00")
+
+	type fetchDef struct {
+		name     string
+		endpoint string
+		params   map[string]string
+	}
+
+	queries := []fetchDef{
+		// Query stats (keywords)
+		{"queries", "GetQueryStats", map[string]string{
+			"siteUrl":   bingSiteURL,
+			"startDate": startDate,
+			"endDate":   endDate,
+		}},
+		// Page stats
+		{"pages", "GetPageStats", map[string]string{
+			"siteUrl":   bingSiteURL,
+			"startDate": startDate,
+			"endDate":   endDate,
+		}},
+		// Crawl stats
+		{"crawl", "GetCrawlStats", map[string]string{
+			"siteUrl": bingSiteURL,
+		}},
+		// Index stats
+		{"index", "GetIndexStats", map[string]string{
+			"siteUrl": bingSiteURL,
+		}},
+		// Crawl issues / errors
+		{"errors", "GetCrawlIssues", map[string]string{
+			"siteUrl": bingSiteURL,
+		}},
+	}
+
+	results := make(map[string]json.RawMessage)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, q := range queries {
+		wg.Add(1)
+		go func(name, endpoint string, params map[string]string) {
+			defer wg.Done()
+			data, err := bingFetch(apiKey, endpoint, params)
+			mu.Lock()
+			if err != nil {
+				results[name] = json.RawMessage("null")
+			} else {
+				results[name] = data
+			}
+			mu.Unlock()
+		}(q.name, q.endpoint, q.params)
+	}
+	wg.Wait()
+
+	toStr := func(r json.RawMessage) string {
+		if r == nil {
+			return "null"
+		}
+		return string(r)
+	}
+
+	// Parse query stats for totals
+	var totalClicks, totalImpressions int
+	var avgCTR, avgPosition float64
+	if results["queries"] != nil {
+		var qr struct {
+			D struct {
+				Results []struct {
+					Clicks      int     `json:"Clicks"`
+					Impressions int     `json:"Impressions"`
+					CTR         float64 `json:"CTR"`
+					AvgPosition float64 `json:"AvgImpPos"`
+				} `json:"Results"`
+			} `json:"d"`
+		}
+		if json.Unmarshal(results["queries"], &qr) == nil {
+			for _, r := range qr.D.Results {
+				totalClicks += r.Clicks
+				totalImpressions += r.Impressions
+			}
+			if len(qr.D.Results) > 0 {
+				avgCTR = qr.D.Results[0].CTR
+				avgPosition = qr.D.Results[0].AvgPosition
+			}
+		}
+	}
+
+	// Parse index count
+	indexCount := 0
+	if results["index"] != nil {
+		var ir struct {
+			D struct {
+				IndexedPageCount int `json:"IndexedPageCount"`
+			} `json:"d"`
+		}
+		if json.Unmarshal(results["index"], &ir) == nil {
+			indexCount = ir.D.IndexedPageCount
+		}
+	}
+
+	date := time.Now().Format("2006-01-02")
+	db.DB.Exec(`INSERT OR REPLACE INTO bing_data
+		(site_id, date, clicks, impressions, ctr, avg_position, index_count,
+		 queries_json, pages_json, crawl_json, errors_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		siteID, date, totalClicks, totalImpressions, avgCTR, avgPosition, indexCount,
+		toStr(results["queries"]), toStr(results["pages"]),
+		toStr(results["crawl"]), toStr(results["errors"]),
+	)
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
+		"message":     "Bing 数据同步成功",
+		"clicks":      totalClicks,
+		"impressions": totalImpressions,
+		"ctr":         avgCTR,
+		"position":    avgPosition,
+		"index_count": indexCount,
+	}})
+}
+
+func GetBingData(c *gin.Context) {
+	siteID := c.Param("id")
+	rows, err := db.DB.Query(
+		`SELECT date, clicks, impressions, ctr, avg_position, index_count,
+		 queries_json, pages_json, crawl_json, errors_json
+		 FROM bing_data WHERE site_id = ? ORDER BY date DESC LIMIT 30`,
+		siteID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
+		return
+	}
+	defer rows.Close()
+
+	var data []gin.H
+	for rows.Next() {
+		var date, queriesJSON, pagesJSON, crawlJSON, errorsJSON string
+		var clicks, impressions, indexCount int
+		var ctr, avgPosition float64
+		if err := rows.Scan(&date, &clicks, &impressions, &ctr, &avgPosition, &indexCount,
+			&queriesJSON, &pagesJSON, &crawlJSON, &errorsJSON); err != nil {
+			continue
+		}
+		data = append(data, gin.H{
+			"date": date, "clicks": clicks, "impressions": impressions,
+			"ctr": ctr, "avg_position": avgPosition, "index_count": indexCount,
+			"queries_json": json.RawMessage(queriesJSON),
+			"pages_json":   json.RawMessage(pagesJSON),
+			"crawl_json":   json.RawMessage(crawlJSON),
+			"errors_json":  json.RawMessage(errorsJSON),
+		})
+	}
+	if data == nil {
+		data = []gin.H{}
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": data})
+}

@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS sites (
     gsc_site_url    TEXT DEFAULT '',
     ga_property_id  TEXT DEFAULT '',
     yandex_host_id  TEXT DEFAULT '',
+    bing_site_url   TEXT DEFAULT '',
     url_category    TEXT DEFAULT '',
     url_detail      TEXT DEFAULT '',
     url_news_list   TEXT DEFAULT '',
@@ -176,6 +177,24 @@ CREATE TABLE IF NOT EXISTS external_links (
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Bing数据表
+CREATE TABLE IF NOT EXISTS bing_data (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id       INTEGER NOT NULL REFERENCES sites(id),
+    date          TEXT NOT NULL,
+    clicks        INTEGER DEFAULT 0,
+    impressions   INTEGER DEFAULT 0,
+    ctr           REAL DEFAULT 0,
+    avg_position  REAL DEFAULT 0,
+    index_count   INTEGER DEFAULT 0,
+    queries_json  TEXT DEFAULT 'null',
+    pages_json    TEXT DEFAULT 'null',
+    crawl_json    TEXT DEFAULT 'null',
+    errors_json   TEXT DEFAULT 'null',
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(site_id, date)
+);
+
 -- 每日汇报表
 CREATE TABLE IF NOT EXISTS daily_reports (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -268,6 +287,7 @@ func Init() {
 			ttfb_ms INTEGER DEFAULT 0,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
+		"ALTER TABLE sites ADD COLUMN bing_site_url TEXT DEFAULT ''",
 		"ALTER TABLE audit_results ADD COLUMN v6_report TEXT DEFAULT ''",
 		"ALTER TABLE audit_results ADD COLUMN raw_ai_response TEXT DEFAULT ''",
 

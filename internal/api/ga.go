@@ -1,11 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"seo-system/internal/db"
@@ -14,19 +16,17 @@ import (
 )
 
 func GetGAAuthURL(c *gin.Context) {
-	clientID := db.GetSetting("gsc_client_id") // Shared Google OAuth
+	clientID := db.GetSetting("gsc_client_id")
 	redirectURI := strings.Replace(db.GetSetting("gsc_redirect_uri"), "/gsc/", "/ga/", 1)
-
 	if clientID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "Google OAuth未配置"})
 		return
 	}
-
+	scope := "https://www.googleapis.com/auth/analytics.readonly"
 	authURL := fmt.Sprintf(
-		"https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=https://www.googleapis.com/auth/analytics.readonly&access_type=offline&prompt=consent",
-		clientID, redirectURI,
+		"https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=%s&access_type=offline&prompt=consent",
+		clientID, redirectURI, scope,
 	)
-
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": authURL}})
 }
 
@@ -36,7 +36,6 @@ func GACallback(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "缺少授权码"})
 		return
 	}
-
 	clientID := db.GetSetting("gsc_client_id")
 	clientSecret := db.GetSetting("gsc_client_secret")
 	redirectURI := strings.Replace(db.GetSetting("gsc_redirect_uri"), "/gsc/", "/ga/", 1)
@@ -53,81 +52,17 @@ func GACallback(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
-
 	var result struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 		ExpiresIn    int    `json:"expires_in"`
 	}
 	json.NewDecoder(resp.Body).Decode(&result)
-
 	db.DB.Exec(
 		"INSERT OR REPLACE INTO oauth_tokens (service, access_token, refresh_token, expires_at) VALUES ('ga', ?, ?, ?)",
 		result.AccessToken, result.RefreshToken, time.Now().Add(time.Duration(result.ExpiresIn)*time.Second),
 	)
-
 	c.Redirect(http.StatusFound, "/?oauth=ga&status=success")
-}
-
-func SyncGAData(c *gin.Context) {
-	siteID := c.Param("id")
-
-	var gaPropertyID string
-	err := db.DB.QueryRow("SELECT ga_property_id FROM sites WHERE id = ?", siteID).Scan(&gaPropertyID)
-	if err != nil || gaPropertyID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点未配置GA Property ID"})
-		return
-	}
-
-	token, err := getGAAccessToken()
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
-		return
-	}
-
-	// Fetch GA4 report
-	url := fmt.Sprintf("https://analyticsdata.googleapis.com/v1beta/properties/%s:runReport", gaPropertyID)
-
-	body := map[string]interface{}{
-		"dateRanges": []map[string]string{
-			{"startDate": "30daysAgo", "endDate": "today"},
-		},
-		"dimensions": []map[string]string{
-			{"name": "sessionDefaultChannelGroup"},
-		},
-		"metrics": []map[string]string{
-			{"name": "sessions"},
-			{"name": "totalUsers"},
-			{"name": "screenPageViews"},
-			{"name": "bounceRate"},
-			{"name": "averageSessionDuration"},
-		},
-	}
-	jsonBody, _ := json.Marshal(body)
-
-	req, _ := http.NewRequest("POST", url, strings.NewReader(string(jsonBody)))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "GA请求失败"})
-		return
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-
-	date := time.Now().Format("2006-01-02")
-	channelsJSON := string(respBody)
-
-	db.DB.Exec(
-		"INSERT OR REPLACE INTO ga_data (site_id, date, channels_json) VALUES (?, ?, ?)",
-		siteID, date, channelsJSON,
-	)
-
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "GA数据同步成功"})
 }
 
 func getGAAccessToken() (string, error) {
@@ -137,16 +72,13 @@ func getGAAccessToken() (string, error) {
 		"SELECT access_token, refresh_token, expires_at FROM oauth_tokens WHERE service = 'ga' ORDER BY id DESC LIMIT 1",
 	).Scan(&accessToken, &refreshToken, &expiresAt)
 	if err != nil {
-		return "", fmt.Errorf("GA未授权")
+		return "", fmt.Errorf("GA未授权，请先完成 Google Analytics OAuth")
 	}
-
 	if time.Now().Before(expiresAt) {
 		return accessToken, nil
 	}
-
 	clientID := db.GetSetting("gsc_client_id")
 	clientSecret := db.GetSetting("gsc_client_secret")
-
 	resp, err := http.PostForm("https://oauth2.googleapis.com/token", map[string][]string{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
@@ -157,23 +89,191 @@ func getGAAccessToken() (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-
 	var result struct {
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int    `json:"expires_in"`
 	}
 	json.NewDecoder(resp.Body).Decode(&result)
-
-	newExpiry := time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
-	db.DB.Exec("UPDATE oauth_tokens SET access_token = ?, expires_at = ? WHERE service = 'ga'",
-		result.AccessToken, newExpiry)
-
+	if result.AccessToken == "" {
+		return "", fmt.Errorf("GA Token刷新失败，请重新授权")
+	}
+	db.DB.Exec("UPDATE oauth_tokens SET access_token=?, expires_at=? WHERE service='ga'",
+		result.AccessToken, time.Now().Add(time.Duration(result.ExpiresIn)*time.Second))
 	return result.AccessToken, nil
+}
+
+func ga4Fetch(token, propertyID string, body map[string]interface{}) (json.RawMessage, error) {
+	apiURL := fmt.Sprintf("https://analyticsdata.googleapis.com/v1beta/properties/%s:runReport", propertyID)
+	jsonBody, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", apiURL, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("GA4 API HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+	return respBody, nil
+}
+
+func SyncGAData(c *gin.Context) {
+	siteID := c.Param("id")
+	var gaPropertyID string
+	err := db.DB.QueryRow("SELECT ga_property_id FROM sites WHERE id = ?", siteID).Scan(&gaPropertyID)
+	if err != nil || gaPropertyID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点未配置 GA4 Property ID"})
+		return
+	}
+	token, err := getGAAccessToken()
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
+		return
+	}
+
+	dateRange := []map[string]string{{"startDate": "30daysAgo", "endDate": "yesterday"}}
+
+	type queryDef struct {
+		name    string
+		body    map[string]interface{}
+	}
+	queries := []queryDef{
+		// 1. Overview totals
+		{"overview", map[string]interface{}{
+			"dateRanges": dateRange,
+			"metrics": []map[string]string{
+				{"name": "sessions"}, {"name": "totalUsers"}, {"name": "newUsers"},
+				{"name": "screenPageViews"}, {"name": "bounceRate"}, {"name": "averageSessionDuration"},
+				{"name": "engagementRate"},
+			},
+		}},
+		// 2. Channel breakdown
+		{"channels", map[string]interface{}{
+			"dateRanges": dateRange,
+			"dimensions": []map[string]string{{"name": "sessionDefaultChannelGroup"}},
+			"metrics": []map[string]string{
+				{"name": "sessions"}, {"name": "totalUsers"}, {"name": "screenPageViews"},
+			},
+			"limit": 10,
+		}},
+		// 3. Top pages
+		{"pages", map[string]interface{}{
+			"dateRanges": dateRange,
+			"dimensions": []map[string]string{{"name": "pagePath"}},
+			"metrics": []map[string]string{
+				{"name": "screenPageViews"}, {"name": "totalUsers"}, {"name": "averageSessionDuration"},
+				{"name": "bounceRate"},
+			},
+			"orderBys": []map[string]interface{}{
+				{"metric": map[string]string{"metricName": "screenPageViews"}, "desc": true},
+			},
+			"limit": 20,
+		}},
+		// 4. Device breakdown
+		{"devices", map[string]interface{}{
+			"dateRanges": dateRange,
+			"dimensions": []map[string]string{{"name": "deviceCategory"}},
+			"metrics":    []map[string]string{{"name": "sessions"}, {"name": "totalUsers"}},
+		}},
+		// 5. Country breakdown
+		{"countries", map[string]interface{}{
+			"dateRanges": dateRange,
+			"dimensions": []map[string]string{{"name": "country"}},
+			"metrics":    []map[string]string{{"name": "sessions"}, {"name": "totalUsers"}},
+			"orderBys":   []map[string]interface{}{{"metric": map[string]string{"metricName": "sessions"}, "desc": true}},
+			"limit": 10,
+		}},
+		// 6. Daily trend
+		{"trend", map[string]interface{}{
+			"dateRanges": dateRange,
+			"dimensions": []map[string]string{{"name": "date"}},
+			"metrics":    []map[string]string{{"name": "sessions"}, {"name": "totalUsers"}, {"name": "screenPageViews"}},
+			"orderBys":   []map[string]interface{}{{"dimension": map[string]string{"dimensionName": "date"}}},
+		}},
+	}
+
+	// Parallel fetch
+	results := make(map[string]json.RawMessage)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, q := range queries {
+		wg.Add(1)
+		go func(name string, body map[string]interface{}) {
+			defer wg.Done()
+			data, err := ga4Fetch(token, gaPropertyID, body)
+			mu.Lock()
+			if err != nil {
+				results[name] = json.RawMessage("null")
+			} else {
+				results[name] = data
+			}
+			mu.Unlock()
+		}(q.name, q.body)
+	}
+	wg.Wait()
+
+	// Parse overview
+	var sessions, users, newUsers, pageviews int
+	var bounceRate, avgDuration, engagementRate float64
+	if results["overview"] != nil {
+		var ov struct {
+			Rows []struct {
+				MetricValues []struct{ Value string `json:"value"` } `json:"metricValues"`
+			} `json:"rows"`
+		}
+		json.Unmarshal(results["overview"], &ov)
+		if len(ov.Rows) > 0 {
+			mv := ov.Rows[0].MetricValues
+			if len(mv) > 0 { fmt.Sscanf(mv[0].Value, "%d", &sessions) }
+			if len(mv) > 1 { fmt.Sscanf(mv[1].Value, "%d", &users) }
+			if len(mv) > 2 { fmt.Sscanf(mv[2].Value, "%d", &newUsers) }
+			if len(mv) > 3 { fmt.Sscanf(mv[3].Value, "%d", &pageviews) }
+			if len(mv) > 4 { fmt.Sscanf(mv[4].Value, "%f", &bounceRate) }
+			if len(mv) > 5 { fmt.Sscanf(mv[5].Value, "%f", &avgDuration) }
+			if len(mv) > 6 { fmt.Sscanf(mv[6].Value, "%f", &engagementRate) }
+		}
+	}
+
+	toJSON := func(r json.RawMessage) string {
+		if r == nil { return "null" }
+		return string(r)
+	}
+
+	date := time.Now().Format("2006-01-02")
+	db.DB.Exec(`INSERT OR REPLACE INTO ga_data
+		(site_id, date, sessions, users, pageviews, bounce_rate, avg_duration, channels_json, pages_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		siteID, date, sessions, users, pageviews, bounceRate, avgDuration,
+		toJSON(results["channels"]), toJSON(results["pages"]),
+	)
+
+	// Store extra GA data in settings-like blob
+	extraJSON, _ := json.Marshal(map[string]interface{}{
+		"new_users":       newUsers,
+		"engagement_rate": engagementRate,
+		"devices":         json.RawMessage(toJSON(results["devices"])),
+		"countries":       json.RawMessage(toJSON(results["countries"])),
+		"trend":           json.RawMessage(toJSON(results["trend"])),
+	})
+	db.DB.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+		fmt.Sprintf("ga_extra_%s", siteID), string(extraJSON))
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
+		"message": "GA4 数据同步成功",
+		"sessions": sessions, "users": users, "pageviews": pageviews,
+		"bounce_rate": bounceRate, "avg_duration": avgDuration,
+	}})
 }
 
 func GetGAData(c *gin.Context) {
 	siteID := c.Param("id")
-
 	rows, err := db.DB.Query(
 		"SELECT date, sessions, users, pageviews, bounce_rate, avg_duration, channels_json, pages_json FROM ga_data WHERE site_id = ? ORDER BY date DESC LIMIT 30",
 		siteID,
@@ -183,7 +283,6 @@ func GetGAData(c *gin.Context) {
 		return
 	}
 	defer rows.Close()
-
 	var data []gin.H
 	for rows.Next() {
 		var date, channelsJSON, pagesJSON string
@@ -195,11 +294,21 @@ func GetGAData(c *gin.Context) {
 		data = append(data, gin.H{
 			"date": date, "sessions": sessions, "users": users, "pageviews": pageviews,
 			"bounce_rate": bounceRate, "avg_duration": avgDuration,
-			"channels_json": json.RawMessage(channelsJSON), "pages_json": json.RawMessage(pagesJSON),
+			"channels_json": json.RawMessage(channelsJSON),
+			"pages_json":    json.RawMessage(pagesJSON),
 		})
 	}
+
+	// Fetch extra data
+	var extraStr string
+	db.DB.QueryRow("SELECT value FROM settings WHERE key = ?",
+		fmt.Sprintf("ga_extra_%s", siteID)).Scan(&extraStr)
+
 	if data == nil {
 		data = []gin.H{}
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": data})
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": data, "extra": json.RawMessage(func() string {
+		if extraStr == "" { return "null" }
+		return extraStr
+	}())})
 }

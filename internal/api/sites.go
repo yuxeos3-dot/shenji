@@ -14,6 +14,7 @@ type CreateSiteRequest struct {
 	GscSiteURL            string `json:"gsc_site_url"`
 	GaPropertyID          string `json:"ga_property_id"`
 	YandexHostID          string `json:"yandex_host_id"`
+	BingSiteURL           string `json:"bing_site_url"`
 	URLCategory           string `json:"url_category"`
 	URLDetail             string `json:"url_detail"`
 	URLNewsList           string `json:"url_news_list"`
@@ -83,11 +84,11 @@ func CreateSite(c *gin.Context) {
 
 	userID := c.GetInt64("user_id")
 	result, err := db.DB.Exec(
-		`INSERT INTO sites (domain, name, gsc_site_url, ga_property_id, yandex_host_id,
+		`INSERT INTO sites (domain, name, gsc_site_url, ga_property_id, yandex_host_id, bing_site_url,
 		 url_category, url_detail, url_news_list, url_news_detail, url_search, url_static,
 		 url_pages_json, audit_schedule_enabled, audit_interval_hours, audit_daily_hour, created_by)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.Domain, req.Name, req.GscSiteURL, req.GaPropertyID, req.YandexHostID,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.Domain, req.Name, req.GscSiteURL, req.GaPropertyID, req.YandexHostID, req.BingSiteURL,
 		req.URLCategory, req.URLDetail, req.URLNewsList, req.URLNewsDetail, req.URLSearch, req.URLStatic,
 		req.URLPagesJSON, req.AuditScheduleEnabled, req.AuditIntervalHours, req.AuditDailyHour, userID,
 	)
@@ -152,11 +153,11 @@ func UpdateSite(c *gin.Context) {
 	}
 
 	_, err := db.DB.Exec(
-		`UPDATE sites SET domain=?, name=?, gsc_site_url=?, ga_property_id=?, yandex_host_id=?,
+		`UPDATE sites SET domain=?, name=?, gsc_site_url=?, ga_property_id=?, yandex_host_id=?, bing_site_url=?,
 		 url_category=?, url_detail=?, url_news_list=?, url_news_detail=?, url_search=?, url_static=?,
 		 audit_schedule_enabled=?, audit_interval_hours=?, audit_daily_hour=?
 		 WHERE id=?`,
-		req.Domain, req.Name, req.GscSiteURL, req.GaPropertyID, req.YandexHostID,
+		req.Domain, req.Name, req.GscSiteURL, req.GaPropertyID, req.YandexHostID, req.BingSiteURL,
 		req.URLCategory, req.URLDetail, req.URLNewsList, req.URLNewsDetail, req.URLSearch, req.URLStatic,
 		req.AuditScheduleEnabled, req.AuditIntervalHours, req.AuditDailyHour, id,
 	)

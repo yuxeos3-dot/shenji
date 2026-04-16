@@ -103,6 +103,16 @@
             </div>
           </div>
 
+          <!-- Bing Webmaster -->
+          <div class="platform-block">
+            <div class="platform-name">🔷 Bing Webmaster Tools</div>
+            <div class="field-row">
+              <label class="field-label">API Key &nbsp;<a href="https://www.bing.com/webmasters/home" target="_blank" style="font-size:11.5px;color:var(--info);font-weight:600">Bing站长后台 →</a></label>
+              <input class="field-input" v-model="settings.bing_api_key" type="password" placeholder="在 Bing 站长工具 → 设置 → API 访问 中生成" autocomplete="new-password" />
+              <div class="field-hint">填写后在各站点数据中心可同步 Bing 搜索数据（点击/展示/关键词/收录）</div>
+            </div>
+          </div>
+
           <div class="save-bar">
             <button class="btn btn-primary" @click="save" :disabled="saving">{{ saving ? '保存中...' : '💾 保存配置' }}</button>
           </div>

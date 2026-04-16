@@ -16,6 +16,7 @@ var sensitiveKeys = map[string]bool{
 	"telegram_bot_token":   true,
 	"gsc_client_secret":    true,
 	"yandex_client_secret": true,
+	"bing_api_key":         true,
 }
 
 func maskValue(key, value string) string {

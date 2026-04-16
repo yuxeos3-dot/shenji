@@ -107,6 +107,10 @@ export default {
   getReport: (date) => api.get(`/v1/reports/${date}`),
   exportReports: (params) => api.get('/v1/reports/export', { params }),
 
+  // Bing Webmaster
+  syncBing: (siteId) => api.post(`/v1/sites/${siteId}/bing/sync`),
+  getBingData: (siteId) => api.get(`/v1/sites/${siteId}/bing`),
+
   // Settings
   getOnlineUsers: () => api.get('/v1/auth/online'),
   getMyPermissions: () => api.get('/v1/auth/my-permissions'),
