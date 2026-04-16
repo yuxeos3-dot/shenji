@@ -114,6 +114,7 @@
           <template #default="{ row }">
             <div class="action-btns">
               <el-button class="btn-action btn-audit" size="small" @click="triggerAudit(row)">🔍 立即巡检</el-button>
+              <el-button class="btn-action btn-edit" size="small" @click="editSite(row)">✏️ 编辑</el-button>
               <el-button class="btn-action btn-detail" size="small" @click="$router.push(`/sites/${row.id}`)">📋 详情</el-button>
               <el-button class="btn-action btn-data" size="small" @click="$router.push(`/sites/${row.id}/data`)">📊 数据</el-button>
               <el-button class="btn-action btn-delete" size="small" @click="deleteSite(row)">🗑️ 删除</el-button>
@@ -124,14 +125,32 @@
     </div>
 
     <!-- 添加/编辑弹窗 -->
-    <el-dialog v-model="showDialog" :title="editId ? '✏️ 编辑站点' : '🌐 添加站点'" width="480px" class="sunrise-dialog" :close-on-click-modal="false">
-      <el-form :model="form" label-width="100px" class="sunrise-form">
+    <el-dialog v-model="showDialog" :title="editId ? '✏️ 编辑站点' : '🌐 添加站点'" width="560px" class="sunrise-dialog" :close-on-click-modal="false">
+      <el-form :model="form" label-width="120px" class="sunrise-form">
         <div class="form-section-title">基本信息</div>
         <el-form-item label="域名">
-          <el-input v-model="form.domain" placeholder="https://example.com（必须包含 https:// 或 http://）" />
+          <el-input v-model="form.domain" placeholder="https://example.com" />
         </el-form-item>
         <el-form-item label="站点名称">
           <el-input v-model="form.name" placeholder="我的网站" />
+        </el-form-item>
+
+        <div class="form-section-title" style="margin-top:16px">数据平台配置 <span style="font-size:11px;font-weight:400;color:var(--ink-hint)">（用于同步数据和导入关键词）</span></div>
+        <el-form-item label="GSC Site URL">
+          <el-input v-model="form.gsc_site_url" placeholder="sc-domain:example.com 或 https://example.com/" />
+          <div style="font-size:11px;color:var(--ink-hint);margin-top:4px">在 Google Search Console 里复制站点 URL，格式通常是 sc-domain:xxx.com</div>
+        </el-form-item>
+        <el-form-item label="GA4 Property ID">
+          <el-input v-model="form.ga_property_id" placeholder="123456789" />
+          <div style="font-size:11px;color:var(--ink-hint);margin-top:4px">GA4 → 管理 → 媒体资源 → 媒体资源 ID（纯数字）</div>
+        </el-form-item>
+        <el-form-item label="Yandex Host ID">
+          <el-input v-model="form.yandex_host_id" placeholder="https:example.com:443" />
+          <div style="font-size:11px;color:var(--ink-hint);margin-top:4px">Yandex Webmaster → 站点设置 → Host ID</div>
+        </el-form-item>
+        <el-form-item label="Bing Site URL">
+          <el-input v-model="form.bing_site_url" placeholder="https://example.com/" />
+          <div style="font-size:11px;color:var(--ink-hint);margin-top:4px">Bing 站长工具里的站点 URL</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -173,7 +192,26 @@ function auditLabel(status) {
 }
 function openAddDialog() {
   editId.value = null
-  form.value = { domain: '', name: '', gsc_site_url: '', ga_property_id: '', yandex_host_id: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' }
+  form.value = { domain: '', name: '', gsc_site_url: '', ga_property_id: '', yandex_host_id: '', bing_site_url: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' }
+  showDialog.value = true
+}
+
+async function editSite(row) {
+  editId.value = row.id
+  try {
+    const res = await api.getSite(row.id)
+    const s = res.data
+    form.value = {
+      domain: s.domain, name: s.name,
+      gsc_site_url: s.gsc_site_url || '', ga_property_id: s.ga_property_id || '',
+      yandex_host_id: s.yandex_host_id || '', bing_site_url: s.bing_site_url || '',
+      url_category: s.url_category || '', url_detail: s.url_detail || '',
+      url_news_list: s.url_news_list || '', url_news_detail: s.url_news_detail || '',
+      url_search: s.url_search || '', url_static: s.url_static || '',
+    }
+  } catch {
+    form.value = { domain: row.domain, name: row.name, gsc_site_url: '', ga_property_id: '', yandex_host_id: '', bing_site_url: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' }
+  }
   showDialog.value = true
 }
 async function loadSites() { loading.value = true; try { const res = await api.listSites(); sites.value = res.data } catch {} finally { loading.value = false } }
@@ -258,6 +296,8 @@ onMounted(loadSites)
 .action-btns { display:flex; gap:6px; align-items:center; }
 .btn-action { border-radius:var(--r-xs) !important; font-weight:700 !important; font-size:12px !important; padding:5px 10px !important; border:1.5px solid var(--border-light) !important; background:var(--surface) !important; color:var(--ink-mid) !important; transition:all .2s !important; }
 .btn-action:hover { border-color:var(--sun) !important; color:var(--sun-deep) !important; background:var(--sun-light) !important; }
+.btn-edit { border-color:#D1FAE5 !important; color:#065F46 !important; background:#ECFDF5 !important; }
+.btn-edit:hover { background:#10B981 !important; color:#fff !important; border-color:#10B981 !important; }
 .btn-audit { background:var(--sun-light) !important; border-color:var(--peach) !important; color:var(--sun-deep) !important; }
 .btn-audit:hover { background:linear-gradient(135deg,var(--sun),var(--coral)) !important; color:#fff !important; border-color:var(--sun) !important; }
 .btn-delete { border-color:#FFCDD2 !important; color:var(--err) !important; background:#FFF5F5 !important; }
