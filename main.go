@@ -107,6 +107,7 @@ func main() {
 		// GSC
 		v1.GET("/oauth/gsc", api.GetGSCAuthURL)
 		v1.GET("/oauth/gsc/callback", api.GSCCallback)
+		v1.POST("/oauth/gsc/token", api.SaveGSCToken) // receive token from browser-side OAuth
 		v1.POST("/sites/:id/gsc/sync", api.SyncGSCData)
 		v1.GET("/sites/:id/gsc", api.GetGSCData)
 

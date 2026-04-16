@@ -62,6 +62,28 @@ type OAuthToken struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
+// SaveGSCToken receives the access token obtained by browser-side OAuth (gsc-dashboard.html)
+// and stores it in the DB so server-side GSC sync can use it.
+func SaveGSCToken(c *gin.Context) {
+	var req struct {
+		AccessToken string `json:"access_token" binding:"required"`
+		ExpiresIn   int    `json:"expires_in"` // seconds remaining
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "access_token 必填"})
+		return
+	}
+	expiresAt := time.Now().Add(time.Duration(req.ExpiresIn) * time.Second)
+	if req.ExpiresIn <= 0 {
+		expiresAt = time.Now().Add(55 * time.Minute) // default 55 min
+	}
+	db.DB.Exec(
+		"INSERT OR REPLACE INTO oauth_tokens (service, access_token, refresh_token, expires_at) VALUES ('gsc', ?, '', ?)",
+		req.AccessToken, expiresAt,
+	)
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "GSC token 已保存"})
+}
+
 func exchangeGoogleToken(code string) (*OAuthToken, error) {
 	clientID := db.GetSetting("gsc_client_id")
 	clientSecret := db.GetSetting("gsc_client_secret")

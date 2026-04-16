@@ -529,6 +529,11 @@ function startGoogleOAuth(){
         gToken=r.access_token;
         localStorage.setItem('g_access_token',gToken);
         localStorage.setItem('g_token_exp',String(Date.now()+55*60*1000));
+        // Save token to backend so server-side GSC sync works
+        const sysToken=localStorage.getItem('token');
+        if(sysToken){
+          fetch('/api/v1/oauth/gsc/token',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+sysToken},body:JSON.stringify({access_token:gToken,expires_in:3300})}).catch(()=>{});
+        }
         enterDashboard();
       }
     }).requestAccessToken({prompt:'consent'});
@@ -1097,6 +1102,12 @@ window.addEventListener('DOMContentLoaded',()=>{
   const savedExp=parseInt(localStorage.getItem('g_token_exp')||'0');
   if(savedToken&&Date.now()<savedExp){
     gToken=savedToken;
+    // Sync to backend DB (fire-and-forget)
+    const sysToken=localStorage.getItem('token');
+    const remainingSec=Math.floor((savedExp-Date.now())/1000);
+    if(sysToken&&remainingSec>0){
+      fetch('/api/v1/oauth/gsc/token',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+sysToken},body:JSON.stringify({access_token:savedToken,expires_in:remainingSec})}).catch(()=>{});
+    }
     document.getElementById('login-screen').style.display='none';
     enterDashboard();
   }
