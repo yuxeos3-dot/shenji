@@ -487,6 +487,7 @@ func CallAIChapters(prompt string) ([]V6Chapter, string, string, error) {
 		return nil, "", model, fmt.Errorf("AI 无返回")
 	}
 	raw := apiResp.Choices[0].Message.Content
+	finishReason := apiResp.Choices[0].FinishReason
 	content := extractJSON(raw)
 	content = repairJSON(content)
 
@@ -499,8 +500,21 @@ func CallAIChapters(prompt string) ([]V6Chapter, string, string, error) {
 			wrapper.Chapters = wrapper.Chapters[:len(wrapper.Chapters)-1]
 		}
 		return wrapper.Chapters, raw, model, nil
+	} else if err != nil {
+		// Log detailed diagnosis so we can see what broke. These logs go to
+		// journalctl and are crucial for debugging AI output issues.
+		headN := 200
+		if len(content) < headN {
+			headN = len(content)
+		}
+		tailStart := len(content) - 200
+		if tailStart < 0 {
+			tailStart = 0
+		}
+		return nil, raw, model, fmt.Errorf("chapters 解析失败: %v (finish=%s, rawLen=%d, headLen=%d, head=%q, tail=%q)",
+			err, finishReason, len(raw), len(content), content[:headN], content[tailStart:])
 	}
-	return nil, raw, model, fmt.Errorf("AI 返回无法解析为 chapters（预览: %.200s）", content)
+	return nil, raw, model, fmt.Errorf("AI 返回 chapters 为空（finish=%s, rawLen=%d）", finishReason, len(raw))
 }
 
 // ComposeV6Report assembles a full V6Report from batched chapters and the
@@ -1141,47 +1155,62 @@ func extractJSON(s string) string {
 		}
 	}
 
-	// Find first { and matching }
-	start := -1
-	end := -1
-	depth := 0
-	for i, c := range s {
-		if c == '{' {
-			if start == -1 {
-				start = i
-			}
-			depth++
-		} else if c == '}' {
-			depth--
-			if depth == 0 {
-				end = i + 1
-				break
-			}
-		}
-	}
+	// Find first { and matching }, STRING-AWARE so that { and } inside JSON
+	// string values (very common in evidence_code / fix_suggestion) don't
+	// throw off depth counting.
+	start, end := findBalanced(s, '{', '}')
 	if start >= 0 && end > start {
 		return s[start:end]
 	}
-	// Try array [...]
-	start, end, depth = -1, -1, 0
-	for i, c := range s {
-		if c == '[' {
-			if start == -1 {
-				start = i
-			}
-			depth++
-		} else if c == ']' {
-			depth--
-			if depth == 0 {
-				end = i + 1
-				break
-			}
-		}
-	}
+	// Fallback: try an array [...]
+	start, end = findBalanced(s, '[', ']')
 	if start >= 0 && end > start {
 		return s[start:end]
 	}
 	return s
+}
+
+// findBalanced scans s for the first balanced pair of openCh/closeCh while
+// correctly skipping over characters inside JSON string literals. Returns
+// (startIdx, endIdxExclusive) or (-1, -1) if no balanced pair is found.
+func findBalanced(s string, openCh, closeCh byte) (int, int) {
+	start := -1
+	depth := 0
+	inString := false
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inString {
+			switch c {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case openCh:
+			if start == -1 {
+				start = i
+			}
+			depth++
+		case closeCh:
+			if depth > 0 {
+				depth--
+				if depth == 0 {
+					return start, i + 1
+				}
+			}
+		}
+	}
+	return -1, -1
 }
 
 // repairJSON repairs JSON that was cut off by the token limit. The key trick:
@@ -1197,104 +1226,77 @@ func repairJSON(s string) string {
 		return s
 	}
 
-	// 1) Walk forward tracking structure state, recording a "rewind point" each
-	//    time we finish an element at array depth (i.e. just after `,` or just
-	//    before the closing `]` that follows a complete element). If the tail
-	//    turns out to be inside a string, we'll rewind to the last safe point.
-	rewindTo := -1 // byte offset of last `}` that was followed by `,` at array depth
-	braces := 0
-	brackets := 0
-	inString := false
-	escaped := false
-
-	bytes := []byte(s)
-	for i := 0; i < len(bytes); i++ {
-		c := bytes[i]
-		if escaped {
-			escaped = false
-			continue
-		}
-		if c == '\\' && inString {
-			escaped = true
-			continue
-		}
-		if c == '"' {
-			inString = !inString
-			continue
-		}
-		if inString {
-			continue
-		}
-		switch c {
-		case '{':
-			braces++
-		case '}':
-			braces--
-			// Record this position if we're inside at least one array.
-			if brackets > 0 {
-				rewindTo = i + 1 // position *after* the closing brace
-			}
-		case '[':
-			brackets++
-		case ']':
-			brackets--
-		}
-	}
-
-	// 2) If we're still inside a string at EOF, the tail is definitely truncated
-	//    mid-value. Rewind to the last clean `}` inside an array (i.e. a fully
-	//    written element) and discard everything after it.
-	if inString && rewindTo > 0 {
-		s = s[:rewindTo]
-		// Recount the structure state of the rewound prefix.
-		braces, brackets, inString = 0, 0, false
-		escaped = false
-		for i := 0; i < len(s); i++ {
-			c := s[i]
+	// scanState returns (openStack, inString, rewindPoint).
+	// openStack is an ordered list of '{'/'[' that were opened but not closed.
+	// rewindPoint is the byte offset immediately after the last '}' at depth
+	// inside at least one array — a known-clean element boundary.
+	scan := func(in string) (stack []byte, inString bool, rewind int) {
+		rewind = -1
+		escaped := false
+		bracketDepth := 0
+		for i := 0; i < len(in); i++ {
+			c := in[i]
 			if escaped {
 				escaped = false
 				continue
 			}
-			if c == '\\' && inString {
-				escaped = true
-				continue
-			}
-			if c == '"' {
-				inString = !inString
-				continue
-			}
 			if inString {
+				switch c {
+				case '\\':
+					escaped = true
+				case '"':
+					inString = false
+				}
 				continue
 			}
 			switch c {
+			case '"':
+				inString = true
 			case '{':
-				braces++
-			case '}':
-				braces--
+				stack = append(stack, '{')
 			case '[':
-				brackets++
+				stack = append(stack, '[')
+				bracketDepth++
+			case '}':
+				if n := len(stack); n > 0 && stack[n-1] == '{' {
+					stack = stack[:n-1]
+				}
+				if bracketDepth > 0 {
+					rewind = i + 1 // position *after* a '}' that sits inside an array
+				}
 			case ']':
-				brackets--
+				if n := len(stack); n > 0 && stack[n-1] == '[' {
+					stack = stack[:n-1]
+				}
+				if bracketDepth > 0 {
+					bracketDepth--
+				}
 			}
 		}
+		return
 	}
 
-	// 3) Trim any trailing `,` we may have been left with after rewinding or
-	//    after the AI stopping between array elements.
+	stack, inString, rewind := scan(s)
+
+	// If the tail is mid-string, rewind to the last clean element boundary.
+	if inString && rewind > 0 {
+		s = s[:rewind]
+		stack, inString, _ = scan(s)
+		_ = inString
+	}
+
+	// Drop dangling ',' / whitespace.
 	s = strings.TrimRight(s, " \t\r\n,")
 
-	// 4) Close remaining structure. Close arrays and objects in the order they
-	//    were opened (arrays generally live *inside* objects, so we alternate
-	//    by looking at the last unmatched opener if we wanted to be precise,
-	//    but a best-effort close-arrays-first-then-objects works for the known
-	//    V6Report shape).
-	for brackets > 0 {
-		s += "]"
-		brackets--
-	}
-	for braces > 0 {
-		s += "}"
-		braces--
+	// Close the stack in reverse (LIFO) order — this is the crucial correctness
+	// fix: if the open order was { [ { [, the close order must be ] } ] }.
+	for i := len(stack) - 1; i >= 0; i-- {
+		switch stack[i] {
+		case '{':
+			s += "}"
+		case '[':
+			s += "]"
+		}
 	}
 	return s
 }
