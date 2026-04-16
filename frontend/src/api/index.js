@@ -118,6 +118,10 @@ export default {
   saveMyAIConfig: (data) => api.put('/v1/auth/my-ai-config', data),
   testMyAI: () => api.post('/v1/auth/test-my-ai'),
 
+  listExtlinkPool: () => api.get('/v1/extlink-pool'),
+  importExtlinkPool: (data) => api.post('/v1/extlink-pool/import', data),
+  deleteExtlinkPoolItem: (id) => api.delete(`/v1/extlink-pool/${id}`),
+
   getSettings: () => api.get('/v1/settings'),
   saveSettings: (data) => api.put('/v1/settings', data),
   testAI: () => api.post('/v1/settings/test-ai'),

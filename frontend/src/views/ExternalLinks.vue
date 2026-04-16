@@ -120,6 +120,34 @@
         <div style="font-size:12px;color:var(--ink-hint);margin-top:6px">点击「添加外链」开始管理</div>
       </div>
     </template>
+
+    <!-- 公共外链库 -->
+    <div class="panel" style="margin-top:20px">
+      <div class="panel-header">
+        <h2>📦 公共外链库 <span style="font-size:12px;font-weight:400;color:var(--ink-hint);margin-left:8px">所有用户共享</span></h2>
+        <button class="btn btn-primary btn-sm" @click="showPoolImport=true">＋ 批量添加</button>
+      </div>
+      <el-table :data="pool" stripe max-height="400" size="small">
+        <el-table-column type="index" label="#" width="50" />
+        <el-table-column prop="name" label="网站名称" width="200" />
+        <el-table-column prop="url" label="URL" show-overflow-tooltip />
+        <el-table-column prop="created_at" label="添加时间" width="170" />
+        <el-table-column label="操作" width="80">
+          <template #default="{row}"><el-button size="small" type="danger" text @click="delPoolItem(row)">删除</el-button></template>
+        </el-table-column>
+      </el-table>
+      <div v-if="!pool.length" style="text-align:center;padding:30px;color:var(--ink-hint);font-size:13px">暂无外链库数据，点击「批量添加」导入</div>
+    </div>
+
+    <!-- 批量导入弹窗 -->
+    <el-dialog v-model="showPoolImport" title="批量添加外链到公共库" width="560px">
+      <p style="font-size:12px;color:#888;margin-bottom:8px">每行一条，格式：<code>URL|网站名称</code> 或只填 URL（自动去重）</p>
+      <el-input v-model="poolImportText" type="textarea" :rows="10" placeholder="https://example.com|示例站&#10;https://blog.xxx.com|XXX博客&#10;https://news.yyy.com" />
+      <template #footer>
+        <el-button @click="showPoolImport=false">取消</el-button>
+        <el-button type="primary" @click="doPoolImport" :loading="poolImporting">导入</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -204,10 +232,32 @@ async function checkLink(l) {
   l.checking = false
 }
 
+// ── Shared Backlink Pool ──
+const pool = ref([])
+const showPoolImport = ref(false)
+const poolImportText = ref('')
+const poolImporting = ref(false)
+
+async function loadPool() { try { pool.value = (await apiClient.listExtlinkPool()).data } catch {} }
+async function doPoolImport() {
+  poolImporting.value = true
+  try {
+    const res = await apiClient.importExtlinkPool({ text: poolImportText.value })
+    ElMessage.success('导入 ' + res.data.imported + ' 条')
+    showPoolImport.value = false; loadPool()
+  } catch { ElMessage.error('导入失败') }
+  finally { poolImporting.value = false }
+}
+async function delPoolItem(r) {
+  await ElMessageBox.confirm('删除「' + (r.name || r.url) + '」？')
+  await apiClient.deleteExtlinkPoolItem(r.id); loadPool()
+}
+
 onMounted(async () => {
   const res = await apiClient.listSites().catch(() => ({ data: [] }))
   sites.value = res.data || []
   if (sites.value.length) { selectedSiteId.value = sites.value[0].id; loadLinks() }
+  loadPool()
 })
 </script>
 
@@ -263,4 +313,6 @@ onMounted(async () => {
 
 .empty-hint { text-align:center; padding:50px; color:var(--ink-hint); }
 .empty-icon { font-size:44px; margin-bottom:12px; }
+.panel-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+.panel-header h2 { font-size:15px; font-weight:700; }
 </style>

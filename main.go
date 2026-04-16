@@ -92,6 +92,11 @@ func main() {
 		// Content Rewrite (AI)
 		v1.POST("/rewrite", api.RewriteContent)
 
+		// Shared Backlink Pool
+		v1.GET("/extlink-pool", api.ListExtlinkPool)
+		v1.POST("/extlink-pool/import", api.ImportExtlinkPool)
+		v1.DELETE("/extlink-pool/:id", api.DeleteExtlinkPoolItem)
+
 		// External Links
 		v1.GET("/sites/:id/extlinks", api.GetExternalLinks)
 		v1.POST("/extlinks", api.CreateExternalLink)
