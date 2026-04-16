@@ -110,10 +110,9 @@
         <el-table-column prop="created_at" label="添加时间" width="160">
           <template #default="{ row }"><span class="date-text">{{ row.created_at }}</span></template>
         </el-table-column>
-        <el-table-column label="操作" width="380" fixed="right">
+        <el-table-column label="操作" width="320" fixed="right">
           <template #default="{ row }">
             <div class="action-btns">
-              <el-button class="btn-action btn-audit" size="small" @click="triggerAudit(row)">🔍 立即巡检</el-button>
               <el-button class="btn-action btn-edit" size="small" @click="editSite(row)">✏️ 编辑</el-button>
               <el-button class="btn-action btn-detail" size="small" @click="$router.push(`/sites/${row.id}`)">📋 详情</el-button>
               <el-button class="btn-action btn-data" size="small" @click="$router.push(`/sites/${row.id}/data`)">📊 数据</el-button>
