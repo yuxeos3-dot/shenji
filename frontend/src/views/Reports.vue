@@ -1,11 +1,16 @@
 <template>
   <div>
     <div class="page-top">
-      <div>
-        <div class="filter-row">
-          <span class="filter-label">日期筛选</span>
-          <el-date-picker v-model="filterDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" @change="loadReports" clearable size="small" />
-        </div>
+      <div class="filter-row">
+        <span class="filter-label">日期筛选</span>
+        <el-date-picker v-model="filterDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" @change="loadReports" clearable size="small" />
+        <!-- 管理员才显示：按成员筛选 -->
+        <template v-if="userStore.isAdmin()">
+          <span class="filter-label" style="margin-left:8px">成员</span>
+          <el-select v-model="filterUser" placeholder="全部成员" clearable size="small" style="width:140px" @change="loadReports">
+            <el-option v-for="u in users" :key="u.id" :label="u.name" :value="u.id" />
+          </el-select>
+        </template>
       </div>
       <button class="btn btn-primary" @click="$router.push('/reports/write')">📝 写汇报</button>
     </div>
@@ -49,22 +54,36 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useUserStore } from '../stores/user'
 import api from '../api'
 
+const userStore = useUserStore()
 const reports = ref([])
 const filterDate = ref('')
+const filterUser = ref(null)
+const users = ref([])
 const showDetail = ref(false)
 const sel = ref(null)
 
 async function loadReports() {
   try {
-    const params = {}; if (filterDate.value) params.date = filterDate.value
-    const res = await api.listReports(params); reports.value = res.data
+    const params = {}
+    if (filterDate.value) params.date = filterDate.value
+    if (filterUser.value) params.user_id = filterUser.value
+    const res = await api.listReports(params)
+    reports.value = res.data
   } catch {}
 }
+
 function viewReport(r) { sel.value = r; showDetail.value = true }
 function parseTasks(v) { if (!v) return []; try { const a = typeof v === 'string' ? JSON.parse(v) : v; return Array.isArray(a) ? a : [] } catch { return [] } }
-onMounted(loadReports)
+
+onMounted(async () => {
+  if (userStore.isAdmin()) {
+    try { users.value = (await api.listUsers()).data } catch {}
+  }
+  loadReports()
+})
 </script>
 
 <style scoped>

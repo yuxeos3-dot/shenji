@@ -28,13 +28,25 @@ type CreateSiteRequest struct {
 }
 
 func ListSites(c *gin.Context) {
-	rows, err := db.DB.Query(`
+	userID := c.GetInt64("user_id")
+	role, _ := c.Get("role")
+	isAdmin := role == "admin"
+
+	query := `
 		SELECT s.id, s.domain, s.name, s.gsc_site_url, s.ga_property_id, s.yandex_host_id,
 		       s.status, s.created_at,
 		       (SELECT status FROM audit_tasks WHERE site_id = s.id ORDER BY id DESC LIMIT 1) as last_audit_status,
 		       (SELECT created_at FROM audit_tasks WHERE site_id = s.id ORDER BY id DESC LIMIT 1) as last_audit_time
-		FROM sites s ORDER BY s.id DESC
-	`)
+		FROM sites s`
+
+	var args []interface{}
+	if !isAdmin {
+		query += " WHERE s.created_by = ?"
+		args = append(args, userID)
+	}
+	query += " ORDER BY s.id DESC"
+
+	rows, err := db.DB.Query(query, args...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
 		return

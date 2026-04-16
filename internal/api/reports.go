@@ -23,20 +23,30 @@ type ReportRequest struct {
 }
 
 func ListReports(c *gin.Context) {
+	currentUserID := c.GetInt64("user_id")
+	role, _ := c.Get("role")
+	isAdmin := role == "admin"
+
 	date := c.Query("date")
-	userIDFilter := c.Query("user_id")
+	userIDFilter := c.Query("user_id") // admin can filter by specific user
 
 	query := `SELECT r.id, r.user_id, u.name, r.report_date, r.content, r.tasks_done, r.tasks_todo, r.issues, r.created_at
 		FROM daily_reports r JOIN users u ON r.user_id = u.id WHERE 1=1`
 	args := []interface{}{}
 
+	if !isAdmin {
+		// Non-admin: force filter to own reports only
+		query += " AND r.user_id = ?"
+		args = append(args, currentUserID)
+	} else if userIDFilter != "" {
+		// Admin filtered by specific user
+		query += " AND r.user_id = ?"
+		args = append(args, userIDFilter)
+	}
+
 	if date != "" {
 		query += " AND r.report_date = ?"
 		args = append(args, date)
-	}
-	if userIDFilter != "" {
-		query += " AND r.user_id = ?"
-		args = append(args, userIDFilter)
 	}
 	query += " ORDER BY r.report_date DESC, r.user_id LIMIT 200"
 

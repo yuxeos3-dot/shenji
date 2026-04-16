@@ -4,7 +4,7 @@
     <div class="page-header">
       <div class="header-left">
         <h1 class="page-title">站点管理</h1>
-        <span class="page-subtitle">管理所有监控站点，触发深度巡检任务</span>
+        <span class="page-subtitle">{{ userStore.isAdmin() ? '管理所有用户站点，触发深度巡检任务' : '管理我的监控站点，触发深度巡检任务' }}</span>
       </div>
       <el-button class="btn-sunrise" @click="openAddDialog">
         <span class="btn-icon">+</span> 添加站点
@@ -147,7 +147,10 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useUserStore } from '../stores/user'
 import api from '../api'
+
+const userStore = useUserStore()
 
 const sites = ref([])
 const loading = ref(false)
