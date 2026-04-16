@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -359,4 +360,72 @@ func GetGSCData(c *gin.Context) {
 		data = []gin.H{}
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": data})
+}
+
+// StoreSiteKeywords receives keyword data pushed from browser (gsc-dashboard.html)
+// and stores it in gsc_data so backend features can read it without calling GSC API.
+func StoreSiteKeywords(c *gin.Context) {
+	var req struct {
+		SiteURL     string          `json:"site_url" binding:"required"`
+		Keywords    json.RawMessage `json:"keywords"`
+		Pages       json.RawMessage `json:"pages"`
+		Devices     json.RawMessage `json:"devices"`
+		Countries   json.RawMessage `json:"countries"`
+		Clicks      int             `json:"clicks"`
+		Impressions int             `json:"impressions"`
+		CTR         float64         `json:"ctr"`
+		Position    float64         `json:"position"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "参数错误"})
+		return
+	}
+
+	// Find matching site by gsc_site_url or domain
+	var siteID int64
+	err := db.DB.QueryRow(
+		"SELECT id FROM sites WHERE gsc_site_url = ? OR domain = ? LIMIT 1",
+		req.SiteURL, req.SiteURL,
+	).Scan(&siteID)
+	if err != nil {
+		// Try partial match (sc-domain vs https://)
+		cleanURL := strings.TrimPrefix(strings.TrimPrefix(req.SiteURL, "sc-domain:"), "https://")
+		cleanURL = strings.TrimPrefix(cleanURL, "http://")
+		cleanURL = strings.TrimRight(cleanURL, "/")
+		db.DB.QueryRow(
+			"SELECT id FROM sites WHERE REPLACE(REPLACE(REPLACE(gsc_site_url,'sc-domain:',''),'https://',''),'http://','') LIKE ? LIMIT 1",
+			"%"+cleanURL+"%",
+		).Scan(&siteID)
+	}
+	if siteID == 0 {
+		// No matching site, just store without site_id=0
+		c.JSON(http.StatusOK, gin.H{"code": 0, "data": "no matching site"})
+		return
+	}
+
+	kw := "[]"
+	if req.Keywords != nil && string(req.Keywords) != "null" {
+		kw = string(req.Keywords)
+	}
+	pg := "[]"
+	if req.Pages != nil && string(req.Pages) != "null" {
+		pg = string(req.Pages)
+	}
+	dv := "{}"
+	if req.Devices != nil && string(req.Devices) != "null" {
+		dv = string(req.Devices)
+	}
+	ct := "[]"
+	if req.Countries != nil && string(req.Countries) != "null" {
+		ct = string(req.Countries)
+	}
+
+	date := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	db.DB.Exec(
+		`INSERT OR REPLACE INTO gsc_data (site_id, date, clicks, impressions, ctr, position, keywords_json, pages_json, devices_json, countries_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		siteID, date, req.Clicks, req.Impressions, req.CTR, req.Position, kw, pg, dv, ct,
+	)
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"site_id": siteID, "keyword_count": len(strings.Split(kw, ","))}})
 }

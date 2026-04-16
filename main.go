@@ -108,7 +108,8 @@ func main() {
 		// GSC
 		v1.GET("/oauth/gsc", api.GetGSCAuthURL)
 		v1.GET("/oauth/gsc/callback", api.GSCCallback)
-		v1.POST("/oauth/gsc/token", api.SaveGSCToken) // receive token from browser-side OAuth
+		v1.POST("/oauth/gsc/token", api.SaveGSCToken)
+		v1.POST("/gsc/store-keywords", api.StoreSiteKeywords) // push keywords from browser
 		v1.POST("/sites/:id/gsc/sync", api.RequirePermission("data.sync_gsc"), api.SyncGSCData)
 		v1.GET("/sites/:id/gsc", api.RequirePermission("data.view"), api.GetGSCData)
 

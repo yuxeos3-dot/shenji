@@ -718,6 +718,33 @@ async function loadOverview(){
     // Save to localStorage (valid all day, cleared on manual refresh)
     saveCache(selectedDays, allSites, yandexSites);
 
+    // Push keyword data to backend DB (fire-and-forget, 28-day range for best coverage)
+    const sysToken=localStorage.getItem('token');
+    if(sysToken && selectedDays>=28){
+      const{sd:ksd,ed:ked}=getRange(28);
+      allSites.filter(s=>!s.err).forEach(site=>{
+        // Fetch full keywords (500) for each site and push to backend
+        Promise.all([
+          gf(GAPI+'/sites/'+enc(site.url)+'/searchAnalytics/query',{method:'POST',body:JSON.stringify({startDate:ksd,endDate:ked,dimensions:['query'],rowLimit:500})}),
+          gf(GAPI+'/sites/'+enc(site.url)+'/searchAnalytics/query',{method:'POST',body:JSON.stringify({startDate:ksd,endDate:ked,dimensions:['page'],rowLimit:100})})
+        ]).then(([kwRes,pgRes])=>{
+          fetch('/api/v1/gsc/store-keywords',{
+            method:'POST',
+            headers:{'Content-Type':'application/json','Authorization':'Bearer '+sysToken},
+            body:JSON.stringify({
+              site_url: site.url,
+              keywords: kwRes.rows||[],
+              pages: pgRes.rows||[],
+              clicks: site.clicks||0,
+              impressions: site.impressions||0,
+              ctr: site.ctr||0,
+              position: site.position||0
+            })
+          }).catch(()=>{});
+        }).catch(()=>{});
+      });
+    }
+
     renderStrip(allSites);renderCards(allSites);
     const t=new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
     const _st=document.getElementById('sync-time');if(_st)_st.textContent='已同步 '+t;
