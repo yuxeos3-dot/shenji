@@ -447,7 +447,7 @@ func GeoListTasks(c *gin.Context) {
 		q += " WHERE t.site_id = ?"
 		args = append(args, siteID)
 	}
-	q += " GROUP BY t.id ORDER BY t.id DESC"
+	q += " GROUP BY t.id ORDER BY t.id DESC LIMIT 200"
 	rows, err := db.DB.Query(q, args...)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "查询失败"})
