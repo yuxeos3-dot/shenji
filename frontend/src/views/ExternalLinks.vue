@@ -157,7 +157,8 @@ async function loadLinks() {
   loading.value = true
   try {
     const res = await apiClient.getExternalLinks(selectedSiteId.value)
-    links.value = (res.data || []).map(l => ({ ...l, checking: false }))
+    const d = res.data
+    links.value = (d.items || d || []).map(l => ({ ...l, checking: false }))
   } catch {}
   loading.value = false
 }

@@ -320,7 +320,7 @@ func DeleteAudit(c *gin.Context) {
 func ListAudits(c *gin.Context) {
 	siteID := c.Param("id")
 	rows, err := db.DB.Query(
-		"SELECT id, site_id, triggered_by, status, progress, error_msg, created_at, finished_at FROM audit_tasks WHERE site_id = ? ORDER BY id DESC",
+		"SELECT id, site_id, triggered_by, status, progress, error_msg, created_at, finished_at FROM audit_tasks WHERE site_id = ? ORDER BY id DESC LIMIT 200",
 		siteID,
 	)
 	if err != nil {

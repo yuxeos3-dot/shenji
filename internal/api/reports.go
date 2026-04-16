@@ -38,7 +38,7 @@ func ListReports(c *gin.Context) {
 		query += " AND r.user_id = ?"
 		args = append(args, userIDFilter)
 	}
-	query += " ORDER BY r.report_date DESC, r.user_id"
+	query += " ORDER BY r.report_date DESC, r.user_id LIMIT 200"
 
 	rows, err := db.DB.Query(query, args...)
 	if err != nil {

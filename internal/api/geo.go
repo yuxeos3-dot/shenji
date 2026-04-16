@@ -83,7 +83,7 @@ func GeoStats(c *gin.Context) {
 // ─── Title Libraries ─────────────────────────────────────────────────────────
 
 func GeoListTitleLibs(c *gin.Context) {
-	rows, err := db.DB.Query("SELECT id, name, description, title_count, created_at FROM geo_title_libs ORDER BY id DESC")
+	rows, err := db.DB.Query("SELECT id, name, description, title_count, created_at FROM geo_title_libs ORDER BY id DESC LIMIT 200")
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "查询失败"})
 		return
@@ -287,7 +287,7 @@ func GeoImportFromGSC(c *gin.Context) {
 // ─── Prompts ─────────────────────────────────────────────────────────────────
 
 func GeoListPrompts(c *gin.Context) {
-	rows, err := db.DB.Query("SELECT id, name, type, content, description, created_at, updated_at FROM geo_prompts ORDER BY id DESC")
+	rows, err := db.DB.Query("SELECT id, name, type, content, description, created_at, updated_at FROM geo_prompts ORDER BY id DESC LIMIT 200")
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "查询失败"})
 		return
@@ -355,7 +355,7 @@ func GeoDeletePrompt(c *gin.Context) {
 // ─── Knowledge Bases ─────────────────────────────────────────────────────────
 
 func GeoListKnowledge(c *gin.Context) {
-	rows, err := db.DB.Query("SELECT id, name, char_count, created_at FROM geo_knowledge ORDER BY id DESC")
+	rows, err := db.DB.Query("SELECT id, name, char_count, created_at FROM geo_knowledge ORDER BY id DESC LIMIT 200")
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "查询失败"})
 		return
