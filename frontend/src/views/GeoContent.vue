@@ -35,7 +35,7 @@
             <template #default="{row}">
               <el-button size="small" @click="openTitles(row)">查看</el-button>
               <el-button size="small" @click="openImport(row)">手动导入</el-button>
-              <el-button size="small" type="success" @click="doGSCImportDirect(row)" :loading="row._gscImporting">从GSC导入</el-button>
+              <el-button size="small" type="success" @click="doGSCImportDirect(row)" :loading="gscLoadingIds.has(row.id)">从GSC导入</el-button>
               <el-button size="small" type="danger" @click="deleteLib(row)">删除</el-button>
             </template>
           </el-table-column>
@@ -183,6 +183,7 @@ const stats = ref({})
 const sites = ref([])
 const siteId = ref(null)
 const syncing = ref(false)
+const gscLoadingIds = ref(new Set())
 
 function onSiteChange() { loadAll() }
 function loadAll() { if(!siteId.value)return; loadStats(); loadLibs(); loadPrompts(); loadKnowledge(); loadTasks(); loadArticles() }
@@ -190,7 +191,8 @@ function loadAll() { if(!siteId.value)return; loadStats(); loadLibs(); loadPromp
 async function syncGSC() { syncing.value=true; try { await api.syncGSCData(siteId.value); ElMessage.success('GSC 同步成功') } catch(e){ElMessage.error(e?.response?.data?.error||'同步失败')} finally{syncing.value=false} }
 
 // Libs
-const titleLibs = ref([]); const showLibForm = ref(false); const libForm = ref({name:'',description:''}); const showTitles = ref(false); const curLib = ref(null); const curTitles = ref([]); const titlesPage = ref(1); const titlesTotal = ref(0); const showImport = ref(false); const importText = ref(''); const importing = ref(false); const showGSCImport = ref(false); const gscImportLimit = ref(100)
+const titleLibs = ref([]); const showLibForm = ref(false); const libForm = ref({name:'',description:''}); const showTitles = ref(false); const curLib = ref(null); const curTitles = ref([]); const titlesPage = ref(1); const titlesTotal = ref(0); const showImport = ref(false); const importText = ref(''); const importing = ref(false)
+const gscLoadingIds = ref(new Set()); const showGSCImport = ref(false); const gscImportLimit = ref(100)
 async function loadLibs() { try { titleLibs.value = (await api.geoListTitleLibs({site_id:siteId.value,content_type:'geo'})).data } catch {} }
 async function createLib() { await api.geoCreateTitleLib({name:libForm.value.name,description:libForm.value.description,site_id:siteId.value,content_type:'geo'}); showLibForm.value=false; libForm.value={name:'',description:''}; loadLibs(); ElMessage.success('创建成功') }
 async function deleteLib(r) { await ElMessageBox.confirm('删除「'+r.name+'」？'); await api.geoDeleteTitleLib(r.id,'geo'); loadLibs() }
@@ -201,7 +203,7 @@ function openImport(r) { curLib.value=r; importText.value=''; showImport.value=t
 async function doImport() { importing.value=true; try { const res=await api.geoImportTitles(curLib.value.id,{text:importText.value}); ElMessage.success('导入'+res.data.imported+'条'); showImport.value=false; loadLibs() } finally{importing.value=false} }
 function openGSCImport(r) { curLib.value=r; gscImportLimit.value=100; showGSCImport.value=true }
 async function doGSCImport() { importing.value=true; try { const res=await api.geoImportFromGSC(curLib.value.id,{site_id:siteId.value,limit:gscImportLimit.value}); ElMessage.success('从GSC导入'+res.data.imported+'条'); showGSCImport.value=false; loadLibs() } catch(e){ElMessage.error(e?.response?.data?.error||'导入失败')} finally{importing.value=false} }
-async function doGSCImportDirect(r) { r._gscImporting=true; try { const res=await api.geoImportFromGSC(r.id,{site_id:siteId.value,limit:0}); ElMessage.success('从GSC导入 '+res.data.imported+' 条关键词（来源共'+res.data.source_total+'条，已过滤排名1-99）'); loadLibs() } catch(e){ElMessage.error(e?.response?.data?.error||'导入失败，请先在数据中心同步GSC')} finally{r._gscImporting=false} }
+async function doGSCImportDirect(r) { if(gscLoadingIds.value.has(r.id))return; gscLoadingIds.value=new Set([...gscLoadingIds.value,r.id]); try { const res=await api.geoImportFromGSC(r.id,{site_id:siteId.value,limit:0}); ElMessage.success('从GSC导入 '+res.data.imported+' 条关键词（来源共'+res.data.source_total+'条，已过滤排名1-99）'); loadLibs() } catch(e){ElMessage.error(e?.response?.data?.error||'导入失败，请先在数据中心同步GSC')} finally{gscLoadingIds.value=new Set([...gscLoadingIds.value].filter(id=>id!==r.id))} }
 
 // Prompts
 const prompts = ref([]); const showPromptForm = ref(false); const promptForm = ref({id:0,name:'',type:'content',content:'',description:''})
