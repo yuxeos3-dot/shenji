@@ -110,7 +110,7 @@
         <el-table-column prop="created_at" label="添加时间" width="160">
           <template #default="{ row }"><span class="date-text">{{ row.created_at }}</span></template>
         </el-table-column>
-        <el-table-column label="操作" width="320" fixed="right">
+        <el-table-column label="操作" width="360" fixed="right">
           <template #default="{ row }">
             <div class="action-btns">
               <el-button class="btn-action btn-edit" size="small" @click="editSite(row)">✏️ 编辑</el-button>
