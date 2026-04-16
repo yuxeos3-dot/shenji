@@ -108,6 +108,8 @@ export default {
   exportReports: (params) => api.get('/v1/reports/export', { params }),
 
   // Settings
+  getOnlineUsers: () => api.get('/v1/auth/online'),
+
   getSettings: () => api.get('/v1/settings'),
   saveSettings: (data) => api.put('/v1/settings', data),
   testAI: () => api.post('/v1/settings/test-ai'),

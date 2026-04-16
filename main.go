@@ -41,6 +41,7 @@ func main() {
 		v1.POST("/auth/logout", api.Logout)
 		v1.POST("/auth/change-password", api.ChangePassword)
 		v1.GET("/auth/me", api.GetMe)
+		v1.GET("/auth/online", api.GetOnlineUsersAPI)
 
 		// Users (admin only)
 		users := v1.Group("/users")

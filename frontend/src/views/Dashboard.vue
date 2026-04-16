@@ -10,6 +10,25 @@
       </div>
     </div>
 
+    <!-- Online Users -->
+    <div class="panel online-panel" v-if="online.users.length">
+      <div class="panel-header">
+        <h2><span class="online-dot"></span> 在线用户 <span class="online-badge">{{ online.online_count }} 个会话 · {{ online.user_count }} 人在线</span></h2>
+      </div>
+      <div class="online-grid">
+        <div class="online-card" v-for="u in online.users" :key="u.user_id">
+          <div class="online-avatar">{{ (u.name||'U')[0] }}</div>
+          <div class="online-info">
+            <div class="online-name">{{ u.name }} <span class="online-role">{{ u.role }}</span></div>
+            <div class="online-ips">
+              <span class="ip-tag" v-for="ip in u.ips" :key="ip">{{ ip }}</span>
+            </div>
+          </div>
+          <div class="online-sessions" v-if="u.session_count > 1">{{ u.session_count }} 会话</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Main content -->
     <div class="dash-row">
       <div class="panel" style="flex:2">
@@ -47,20 +66,30 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import api from '../api'
 
 const sites = ref([])
+const online = ref({ online_count: 0, user_count: 0, users: [] })
+let onlineTimer = null
+
 const stats = computed(() => [
   { label: '站点总数', value: sites.value.length, icon: '🌐', cls: 'val-sun', sub: '已接入' },
   { label: '健康站点', value: sites.value.filter(s => s.last_audit_status === 'done').length, icon: '✅', cls: 'val-ok', sub: '审计通过' },
   { label: '待审计', value: sites.value.filter(s => !s.last_audit_status).length, icon: '⏳', cls: 'val-warn', sub: '未开始' },
-  { label: '异常站点', value: sites.value.filter(s => s.last_audit_status === 'error').length, icon: '⚠️', cls: 'val-err', sub: '需关注' },
+  { label: '在线人数', value: online.value.user_count, icon: '👥', cls: 'val-ok', sub: online.value.online_count + ' 个会话' },
 ])
+
+async function loadOnline() {
+  try { const res = await api.getOnlineUsers(); online.value = res.data } catch {}
+}
 
 onMounted(async () => {
   try { const res = await api.listSites(); sites.value = res.data } catch {}
+  loadOnline()
+  onlineTimer = setInterval(loadOnline, 30000) // refresh every 30s
 })
+onUnmounted(() => { if (onlineTimer) clearInterval(onlineTimer) })
 </script>
 
 <style scoped>
@@ -123,4 +152,18 @@ onMounted(async () => {
 .health-item:hover { padding-left: 6px; }
 .health-item:last-child { border-bottom: none; }
 .health-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+
+.online-panel { margin-bottom: 18px; }
+.online-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22C55E; margin-right: 6px; animation: pulse-dot 1.5s infinite; }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+.online-badge { font-size: 12px; font-weight: 500; color: var(--ink-hint); margin-left: 8px; }
+.online-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+.online-card { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--surface-2, #f9fafb); border: 1px solid var(--border-light); border-radius: 10px; min-width: 240px; }
+.online-avatar { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, var(--sun), var(--coral, #f97316)); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #fff; flex-shrink: 0; }
+.online-info { flex: 1; min-width: 0; }
+.online-name { font-size: 13px; font-weight: 700; color: var(--ink); }
+.online-role { font-size: 11px; font-weight: 500; color: var(--ink-hint); background: var(--surface-3, #f3f4f6); padding: 1px 6px; border-radius: 4px; margin-left: 4px; }
+.online-ips { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
+.ip-tag { font-size: 11px; font-family: 'Consolas', monospace; color: var(--sun); background: rgba(249,115,22,.08); padding: 1px 6px; border-radius: 4px; }
+.online-sessions { font-size: 11px; font-weight: 700; color: var(--sun); background: rgba(249,115,22,.1); padding: 3px 8px; border-radius: 6px; flex-shrink: 0; }
 </style>
