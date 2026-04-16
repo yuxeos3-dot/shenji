@@ -353,6 +353,7 @@ func Init() {
 		`CREATE INDEX IF NOT EXISTS idx_geo_tasks_site ON geo_tasks(site_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_geo_articles_site ON geo_articles(site_id)`,
 		"ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT ''",
+		"ALTER TABLE users ADD COLUMN ai_configs TEXT DEFAULT ''",
 	}
 	for _, m := range migrations {
 		DB.Exec(m) // ignore errors (column/table already exists)

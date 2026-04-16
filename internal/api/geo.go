@@ -1,14 +1,10 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"seo-system/internal/db"
@@ -18,51 +14,14 @@ import (
 
 // ─── Helper: AI call for GEO ─────────────────────────────────────────────────
 
-func geoCallAI(prompt string, maxTokens int) (string, error) {
-	apiURL := db.GetSetting("ai_api_url")
-	apiKey := db.GetSetting("ai_api_key")
-	model := db.GetSetting("ai_model")
-	if apiURL == "" {
-		apiURL = "https://ai.router.team/v1"
-	}
-	if model == "" {
-		model = "claude-sonnet-4-6"
-	}
-	if apiKey == "" {
-		return "", fmt.Errorf("AI API key 未配置")
-	}
-	body := map[string]interface{}{
-		"model":       model,
-		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-		"max_tokens":  maxTokens,
-		"temperature": 0.7,
-	}
-	bj, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(bj))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Do(req)
+// geoCallAI uses user's AI config with round-robin failover.
+// Falls back to system config if user has no slots configured.
+func geoCallAI(userID int64, prompt string, maxTokens int) (string, error) {
+	content, _, err := CallAIWithUserConfig(userID, prompt, maxTokens)
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("AI HTTP %d: %.500s", resp.StatusCode, string(respBody))
-	}
-	var parsed struct {
-		Choices []struct {
-			Message struct{ Content string `json:"content"` } `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return "", err
-	}
-	if len(parsed.Choices) == 0 {
-		return "", fmt.Errorf("AI 无返回")
-	}
-	return strings.TrimSpace(parsed.Choices[0].Message.Content), nil
+	return strings.TrimSpace(content), nil
 }
 
 // ─── Stats ───────────────────────────────────────────────────────────────────
@@ -552,6 +511,7 @@ func GeoStopTask(c *gin.Context) {
 // GeoRunTask executes one article generation NOW.
 func GeoRunTask(c *gin.Context) {
 	taskID := c.Param("id")
+	userID := c.GetInt64("user_id")
 
 	// Load task
 	var name string
@@ -599,7 +559,7 @@ func GeoRunTask(c *gin.Context) {
 	finalPrompt = strings.ReplaceAll(finalPrompt, "{{knowledge}}", knowledgeText)
 
 	// Call AI for main content
-	content, err := geoCallAI(finalPrompt, 4000)
+	content, err := geoCallAI(userID, finalPrompt, 4000)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "AI 生成失败: " + err.Error()})
 		return
@@ -608,7 +568,7 @@ func GeoRunTask(c *gin.Context) {
 	// Auto-extract keywords
 	keywords := keyword
 	if autoKW == 1 && content != "" {
-		kw, kerr := geoCallAI(fmt.Sprintf("从以下文章中提取 5-8 个 SEO 关键词，用英文逗号分隔，只输出关键词不要其他内容：\n\n%s", content), 200)
+		kw, kerr := geoCallAI(userID, fmt.Sprintf("从以下文章中提取 5-8 个 SEO 关键词，用英文逗号分隔，只输出关键词不要其他内容：\n\n%s", content), 200)
 		if kerr == nil && kw != "" {
 			keywords = kw
 		}
@@ -617,7 +577,7 @@ func GeoRunTask(c *gin.Context) {
 	// Auto-generate meta description
 	metaDesc := ""
 	if autoDesc == 1 && content != "" {
-		md, merr := geoCallAI(fmt.Sprintf("为以下文章生成一段 SEO meta description，不超过 160 字符，直接输出描述文字不要加引号或前缀：\n\n%s", content), 200)
+		md, merr := geoCallAI(userID, fmt.Sprintf("为以下文章生成一段 SEO meta description，不超过 160 字符，直接输出描述文字不要加引号或前缀：\n\n%s", content), 200)
 		if merr == nil && md != "" {
 			metaDesc = md
 		}

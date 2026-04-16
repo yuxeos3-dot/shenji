@@ -114,6 +114,10 @@ export default {
   getUserPermissions: (id) => api.get(`/v1/users/${id}/permissions`),
   saveUserPermissions: (id, data) => api.put(`/v1/users/${id}/permissions`, data),
 
+  getMyAIConfig: () => api.get('/v1/auth/my-ai-config'),
+  saveMyAIConfig: (data) => api.put('/v1/auth/my-ai-config', data),
+  testMyAI: () => api.post('/v1/auth/test-my-ai'),
+
   getSettings: () => api.get('/v1/settings'),
   saveSettings: (data) => api.put('/v1/settings', data),
   testAI: () => api.post('/v1/settings/test-ai'),

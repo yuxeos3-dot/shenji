@@ -43,6 +43,9 @@ func main() {
 		v1.GET("/auth/me", api.GetMe)
 		v1.GET("/auth/online", api.GetOnlineUsersAPI)
 		v1.GET("/auth/my-permissions", api.GetMyPermissions)
+		v1.GET("/auth/my-ai-config", api.GetMyAIConfig)
+		v1.PUT("/auth/my-ai-config", api.SaveMyAIConfig)
+		v1.POST("/auth/test-my-ai", api.TestMyAI)
 
 		// Users (admin only)
 		users := v1.Group("/users")
