@@ -230,5 +230,8 @@ func DeleteSite(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 		return
 	}
+
+	WriteAuditLog(c, "delete_site", "site", id, "")
+
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "删除成功"})
 }

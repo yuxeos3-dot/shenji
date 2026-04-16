@@ -67,8 +67,8 @@ func main() {
 		v1.PUT("/sites/:id", api.UpdateSite)
 		v1.DELETE("/sites/:id", api.DeleteSite)
 
-		// Audit
-		v1.POST("/sites/:id/audit", api.TriggerAudit)
+		// Audit (rate-limited: 5/min per user)
+		v1.POST("/sites/:id/audit", middleware.UserRateLimit(5), api.TriggerAudit)
 		v1.GET("/sites/:id/audits", api.ListAudits)
 		v1.GET("/audits/:task_id", api.GetAudit)
 		v1.DELETE("/audits/:task_id", api.DeleteAudit)
@@ -83,14 +83,14 @@ func main() {
 		v1.POST("/sites/:id/pages/:page_id/fetch", api.FetchSitePage)
 		v1.GET("/sites/:id/pages/:page_id/source", api.GetSitePageSource)
 
-		// Dead Link Check
+		// Dead Link Check (rate-limited: 5/min per user)
 		v1.GET("/sites/:id/deadlinks", api.GetDeadLinks)
 		v1.GET("/sites/:id/deadlinks/progress", api.GetDeadLinkProgress)
-		v1.POST("/sites/:id/deadlinks/check", api.StartDeadLinkCheck)
+		v1.POST("/sites/:id/deadlinks/check", middleware.UserRateLimit(5), api.StartDeadLinkCheck)
 		v1.POST("/sites/:id/deadlinks/retry", api.RetryDeadLinks)
 
-		// Content Rewrite (AI)
-		v1.POST("/rewrite", api.RewriteContent)
+		// Content Rewrite (AI, rate-limited: 10/min per user)
+		v1.POST("/rewrite", middleware.UserRateLimit(10), api.RewriteContent)
 
 		// Shared Backlink Pool
 		v1.GET("/extlink-pool", api.ListExtlinkPool)
@@ -142,6 +142,9 @@ func main() {
 			settings.POST("/test-ai", api.TestAI)
 			settings.POST("/test-telegram", api.TestTelegram)
 		}
+
+		// Audit Logs (admin only)
+		v1.GET("/audit-logs", middleware.AdminRequired(), api.ListAuditLogs)
 
 		// GEO Content Production
 		geo := v1.Group("/geo")

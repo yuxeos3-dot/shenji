@@ -125,6 +125,9 @@ func SaveUserPermissions(c *gin.Context) {
 		c.JSON(500, gin.H{"code": -1, "error": "保存失败"})
 		return
 	}
+
+	WriteAuditLog(c, "save_permissions", "user", userID, string(js))
+
 	c.JSON(200, gin.H{"code": 0, "data": "权限已保存"})
 }
 
