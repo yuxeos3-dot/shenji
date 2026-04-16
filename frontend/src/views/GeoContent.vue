@@ -188,7 +188,7 @@ const gscLoadingIds = ref(new Set())
 function onSiteChange() { loadAll() }
 function loadAll() { if(!siteId.value)return; loadStats(); loadLibs(); loadPrompts(); loadKnowledge(); loadTasks(); loadArticles() }
 
-async function syncGSC() { syncing.value=true; try { await api.syncGSCData(siteId.value); ElMessage.success('GSC 同步成功') } catch(e){ElMessage.error(e?.response?.data?.error||'同步失败')} finally{syncing.value=false} }
+async function syncGSC() { syncing.value=true; try { await api.syncGSC(siteId.value); ElMessage.success('GSC 同步成功，可点击「从GSC导入」导入关键词') } catch(e){ElMessage.error(e?.response?.data?.error||'同步失败，请检查站点是否配置了GSC URL')} finally{syncing.value=false} }
 
 // Libs
 const titleLibs = ref([]); const showLibForm = ref(false); const libForm = ref({name:'',description:''}); const showTitles = ref(false); const curLib = ref(null); const curTitles = ref([]); const titlesPage = ref(1); const titlesTotal = ref(0); const showImport = ref(false); const importText = ref(''); const importing = ref(false)
