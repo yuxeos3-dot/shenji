@@ -244,8 +244,8 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	}
 	taskID, _ := result.LastInsertId()
 
+	// Step 1: Crawl standard pages
 	pages := crawler.CrawlAllPages(config)
-
 	for _, p := range pages {
 		db.DB.Exec(
 			"INSERT INTO audit_pages (task_id, page_type, url, status_code, ttfb_ms, html, html_size, error_msg) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -253,7 +253,39 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		)
 	}
 
-	prompt := ai.BuildAnalysisPrompt(config.Domain, pages, nil, nil, nil)
+	// Step 2: Auto re-fetch all site_pages to ensure fresh HTML
+	pageRows, err := db.DB.Query("SELECT id, name, url FROM site_pages WHERE site_id = ?", siteID)
+	var sitePagesList []ai.SitePageForPrompt
+	if err == nil {
+		type pgInfo struct{ id int64; name, url string }
+		var pgList []pgInfo
+		for pageRows.Next() {
+			var p pgInfo
+			if pageRows.Scan(&p.id, &p.name, &p.url) == nil {
+				pgList = append(pgList, p)
+			}
+		}
+		pageRows.Close()
+		for _, p := range pgList {
+			r := crawler.FetchPage(crawler.URLSpec{PageType: p.name, URL: p.url}, 30*time.Second)
+			now := time.Now().Format("2006-01-02 15:04:05")
+			db.DB.Exec(`UPDATE site_pages SET last_html=?, last_fetched_at=?, status_code=?, ttfb_ms=? WHERE id=?`,
+				r.HTML, now, r.StatusCode, r.TTFB, p.id)
+		}
+		// Reload fresh site_pages for prompt
+		freshRows, _ := db.DB.Query("SELECT name, url, last_html, last_fetched_at, status_code, ttfb_ms FROM site_pages WHERE site_id = ? AND last_html != ''", siteID)
+		if freshRows != nil {
+			for freshRows.Next() {
+				var sp ai.SitePageForPrompt
+				freshRows.Scan(&sp.Name, &sp.URL, &sp.HTML, &sp.LastFetchedAt, &sp.StatusCode, &sp.TTFB)
+				sitePagesList = append(sitePagesList, sp)
+			}
+			freshRows.Close()
+		}
+	}
+
+	// Step 3: Build prompt and call AI
+	prompt := ai.BuildV6AuditPrompt(config.Domain, sitePagesList, pages, nil, nil, nil)
 	analysisResult, model, err := ai.CallAI(prompt)
 	if err != nil {
 		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
@@ -268,10 +300,10 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	perfJSON, _ := json.Marshal(analysisResult.PerfIssues)
 
 	db.DB.Exec(
-		`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, v6_report)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		taskID, string(seoJSON), string(codeJSON), string(secJSON), string(perfJSON),
-		analysisResult.Suggestions, analysisResult.Summary, model,
+		analysisResult.Suggestions, analysisResult.Summary, model, analysisResult.V6Report,
 	)
 
 	db.DB.Exec("UPDATE audit_tasks SET status='done', progress=100, finished_at=? WHERE id=?", time.Now(), taskID)

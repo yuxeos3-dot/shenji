@@ -90,8 +90,10 @@ func DownloadAuditReport(c *gin.Context) {
 		}
 	}
 
-	// Install python-docx if needed
-	exec.Command("pip3", "install", "python-docx", "--break-system-packages", "-q").Run()
+	// Install python-docx only once (skip if already installed)
+	if err := exec.Command("python3", "-c", "import docx").Run(); err != nil {
+		exec.Command("pip3", "install", "python-docx", "--break-system-packages", "-q").Run()
+	}
 
 	// Generate docx
 	cmd := exec.Command("python3", scriptPath, jsonPath, docxPath, domain)

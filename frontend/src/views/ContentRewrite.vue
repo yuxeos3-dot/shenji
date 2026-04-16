@@ -211,7 +211,10 @@ async function rewriteTDK() {
       extra: tdkForm.value.extra,
     })
     tdkResults.value = res.data || []
-    if (tdkResults.value.length) ElMessage.success(`已生成 ${tdkResults.value.length} 个版本`)
+    if (tdkResults.value.length) {
+      ElMessage.success(`已生成 ${tdkResults.value.length} 个版本`)
+      history.value.unshift({ id: Date.now(), type: 'tdk', original: tdkForm.value.title || tdkForm.value.desc, version_count: tdkResults.value.length, results: tdkResults.value, created_at: new Date().toLocaleString() })
+    }
   } catch {}
   rewriting.value.tdk = false
 }
@@ -238,6 +241,18 @@ async function rewriteContent() {
 
 function copyText(text) {
   navigator.clipboard.writeText(text).then(() => ElMessage.success('已复制到剪贴板'))
+}
+
+function loadHistory(h) {
+  // Restore result into the correct tab for review
+  if (h.type === 'tdk') {
+    activeTab.value = 'tdk'
+    tdkResults.value = h.results || []
+  } else {
+    activeTab.value = 'content'
+    contentResults.value = h.results || []
+  }
+  ElMessage.success('已加载历史记录')
 }
 
 onMounted(async () => {

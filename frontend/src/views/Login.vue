@@ -11,7 +11,7 @@
         </div>
         <div class="form-group">
           <label>密码</label>
-          <input v-model="form.password" type="password" placeholder="请输入密码" @keyup.enter="handleLogin" />
+          <input v-model="form.password" type="password" placeholder="默认：Admin@123456" @keyup.enter="handleLogin" />
         </div>
         <button class="login-btn" @click="handleLogin" :disabled="loading">
           <span v-if="loading">登录中...</span>
