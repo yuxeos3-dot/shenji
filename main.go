@@ -41,6 +41,11 @@ func main() {
 		v1.POST("/auth/logout", api.Logout)
 		v1.POST("/auth/change-password", api.ChangePassword)
 		v1.GET("/auth/me", api.GetMe)
+		v1.GET("/auth/online", api.GetOnlineUsersAPI)
+		v1.GET("/auth/my-permissions", api.GetMyPermissions)
+		v1.GET("/auth/my-ai-config", api.GetMyAIConfig)
+		v1.PUT("/auth/my-ai-config", api.SaveMyAIConfig)
+		v1.POST("/auth/test-my-ai", api.TestMyAI)
 
 		// Users (admin only)
 		users := v1.Group("/users")
@@ -50,6 +55,9 @@ func main() {
 			users.POST("", api.CreateUser)
 			users.PUT("/:id", api.UpdateUser)
 			users.DELETE("/:id", api.DeleteUser)
+			users.GET("/:id/permissions", api.GetUserPermissions)
+			users.PUT("/:id/permissions", api.SaveUserPermissions)
+			users.GET("/permission-tree", api.GetPermissionTree)
 		}
 
 		// Sites
@@ -79,9 +87,15 @@ func main() {
 		v1.GET("/sites/:id/deadlinks", api.GetDeadLinks)
 		v1.GET("/sites/:id/deadlinks/progress", api.GetDeadLinkProgress)
 		v1.POST("/sites/:id/deadlinks/check", api.StartDeadLinkCheck)
+		v1.POST("/sites/:id/deadlinks/retry", api.RetryDeadLinks)
 
 		// Content Rewrite (AI)
 		v1.POST("/rewrite", api.RewriteContent)
+
+		// Shared Backlink Pool
+		v1.GET("/extlink-pool", api.ListExtlinkPool)
+		v1.POST("/extlink-pool/import", api.ImportExtlinkPool)
+		v1.DELETE("/extlink-pool/:id", api.DeleteExtlinkPoolItem)
 
 		// External Links
 		v1.GET("/sites/:id/extlinks", api.GetExternalLinks)
@@ -111,6 +125,7 @@ func main() {
 		// Reports
 		v1.GET("/reports", api.ListReports)
 		v1.POST("/reports", api.SubmitReport)
+		v1.POST("/reports/polish", api.PolishReport)
 		v1.GET("/reports/export", api.ExportReports)  // must be before /:date
 		v1.GET("/reports/:date", api.GetReportByDate)
 
@@ -123,11 +138,51 @@ func main() {
 			settings.POST("/test-ai", api.TestAI)
 			settings.POST("/test-telegram", api.TestTelegram)
 		}
+
+		// GEO Content Production
+		geo := v1.Group("/geo")
+		{
+			geo.GET("/stats", api.GeoStats)
+
+			geo.GET("/title-libs", api.GeoListTitleLibs)
+			geo.POST("/title-libs", api.GeoCreateTitleLib)
+			geo.DELETE("/title-libs/:id", api.GeoDeleteTitleLib)
+			geo.GET("/title-libs/:id/titles", api.GeoListTitles)
+			geo.POST("/title-libs/:id/titles", api.GeoAddTitles)
+			geo.POST("/title-libs/:id/import", api.GeoImportTitles)
+			geo.POST("/title-libs/:id/import-gsc", api.GeoImportFromGSC)
+			geo.DELETE("/titles/:id", api.GeoDeleteTitle)
+
+			geo.GET("/prompts", api.GeoListPrompts)
+			geo.POST("/prompts", api.GeoCreatePrompt)
+			geo.PUT("/prompts/:id", api.GeoUpdatePrompt)
+			geo.DELETE("/prompts/:id", api.GeoDeletePrompt)
+
+			geo.GET("/knowledge", api.GeoListKnowledge)
+			geo.POST("/knowledge", api.GeoCreateKnowledge)
+			geo.PUT("/knowledge/:id", api.GeoUpdateKnowledge)
+			geo.DELETE("/knowledge/:id", api.GeoDeleteKnowledge)
+
+			geo.GET("/tasks", api.GeoListTasks)
+			geo.POST("/tasks", api.GeoCreateTask)
+			geo.PUT("/tasks/:id", api.GeoUpdateTask)
+			geo.DELETE("/tasks/:id", api.GeoDeleteTask)
+			geo.POST("/tasks/:id/start", api.GeoStartTask)
+			geo.POST("/tasks/:id/stop", api.GeoStopTask)
+			geo.POST("/tasks/:id/run", api.GeoRunTask)
+
+			geo.GET("/articles", api.GeoListArticles)
+			geo.GET("/articles/:id", api.GeoGetArticle)
+			geo.PUT("/articles/:id", api.GeoUpdateArticle)
+			geo.DELETE("/articles/:id", api.GeoDeleteArticle)
+			geo.POST("/articles/:id/review", api.GeoReviewArticle)
+			geo.POST("/articles/:id/publish", api.GeoPublishArticle)
+		}
 	}
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "8088"
 	}
 
 	log.Printf("SEO巡站系统启动，端口: %s", port)

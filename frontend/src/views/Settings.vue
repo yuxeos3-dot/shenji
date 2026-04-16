@@ -23,28 +23,34 @@
       <el-tab-pane label="🤖 人工智能" name="ai">
         <div class="tab-content">
           <div class="section-card">
-            <div class="section-title">AI 接口配置</div>
-            <div class="section-desc">用于对爬取页面进行 SEO 分析的 AI 大语言模型接口</div>
-            <div class="field-row">
-              <label class="field-label">接口地址</label>
-              <input class="field-input" v-model="settings.ai_api_url" placeholder="https://api.openai.com/v1" />
+            <div class="section-title">AI 接口配置（个人）</div>
+            <div class="section-desc">每个用户使用自己的 API Key，最多配 3 组。第一组不可用时自动切换到第二组。</div>
+            <div v-for="(slot, idx) in aiSlots" :key="idx" class="ai-slot-card">
+              <div class="ai-slot-head">API {{ idx + 1 }} <span v-if="idx===0" class="ai-slot-tag">主用</span><span v-else class="ai-slot-tag backup">备用</span></div>
+              <div class="field-row">
+                <label class="field-label">接口地址</label>
+                <input class="field-input" v-model="slot.api_url" placeholder="https://api.openai.com/v1" />
+              </div>
+              <div class="field-row">
+                <label class="field-label">API Key</label>
+                <input class="field-input" v-model="slot.api_key" type="password" placeholder="sk-..." autocomplete="new-password" />
+              </div>
+              <div class="field-row">
+                <label class="field-label">模型名称</label>
+                <input class="field-input" v-model="slot.model" placeholder="claude-sonnet-4-6 / gpt-4o" />
+              </div>
             </div>
-            <div class="field-row">
-              <label class="field-label">接口密钥（API Key）</label>
-              <input class="field-input" v-model="settings.ai_api_key" type="password" placeholder="••••••" autocomplete="new-password" />
-              <div class="field-hint">密钥已加密保存，填写新值可覆盖原密钥</div>
+            <div class="action-row" style="display:flex;gap:10px">
+              <button class="btn btn-test" @click="testMyAI" :disabled="testing.ai">{{ testing.ai ? '检测中...' : '🔌 测试所有 API 连通性' }}</button>
             </div>
-            <div class="field-row">
-              <label class="field-label">模型名称</label>
-              <input class="field-input" v-model="settings.ai_model" placeholder="claude-sonnet-4-6 / gpt-4o" />
-              <div class="field-hint">填写模型的完整名称，例如 claude-sonnet-4-6、gpt-4o、gemini-2.0-flash 等</div>
-            </div>
-            <div class="action-row">
-              <button class="btn btn-test" @click="testAI" :disabled="testing.ai">{{ testing.ai ? '检测中...' : '🔌 测试接口连通性' }}</button>
+            <div v-if="aiTestResults.length" class="ai-test-results">
+              <div v-for="r in aiTestResults" :key="r.slot" :class="['ai-test-item', r.status==='ok'?'test-ok':'test-fail']">
+                API {{ r.slot }}: {{ r.status==='ok' ? '✅ 连通 ('+r.model+')' : r.status==='skip' ? '⏭ 未填写' : '❌ '+r.error }}
+              </div>
             </div>
           </div>
           <div class="save-bar">
-            <button class="btn btn-primary" @click="save" :disabled="saving">{{ saving ? '保存中...' : '💾 保存配置' }}</button>
+            <button class="btn btn-primary" @click="saveAll" :disabled="saving">{{ saving ? '保存中...' : '💾 保存配置' }}</button>
           </div>
         </div>
       </el-tab-pane>
@@ -232,6 +238,8 @@ const saving = ref(false)
 const settings = ref({})
 const testing = ref({ ai: false, tg: false })
 const showKey = ref({ ai: false, gsc: false, yandex: false, tg: false })
+const aiSlots = ref([{api_url:'',api_key:'',model:''},{api_url:'',api_key:'',model:''},{api_url:'',api_key:'',model:''}])
+const aiTestResults = ref([])
 
 const scheduleMode = ref('daily')
 const intervalHours = ref(24)
@@ -265,6 +273,12 @@ onMounted(async () => {
       scheduleMode.value = 'interval'
     }
   } catch {}
+  // Load user AI config
+  try {
+    const aiRes = await api.getMyAIConfig()
+    const slots = aiRes.data?.slots || []
+    for (let i = 0; i < 3; i++) aiSlots.value[i] = slots[i] || {api_url:'',api_key:'',model:''}
+  } catch {}
 })
 
 // Sync cron expression based on mode
@@ -282,6 +296,28 @@ async function save() {
   saving.value = true
   try { await api.saveSettings(settings.value); ElMessage.success('保存成功') } catch {}
   finally { saving.value = false }
+}
+
+async function saveAll() {
+  saving.value = true
+  try {
+    await Promise.all([
+      api.saveSettings(settings.value),
+      api.saveMyAIConfig({ slots: aiSlots.value }),
+    ])
+    ElMessage.success('全部保存成功')
+  } catch { ElMessage.error('保存失败') }
+  finally { saving.value = false }
+}
+
+async function testMyAI() {
+  testing.value.ai = true
+  aiTestResults.value = []
+  try {
+    const res = await api.testMyAI()
+    aiTestResults.value = res.data || []
+  } catch { ElMessage.error('测试失败') }
+  finally { testing.value.ai = false }
 }
 
 async function saveSchedule() {
@@ -451,4 +487,12 @@ async function authYandex() { try { const res = await api.getYandexAuthURL(); wi
 }
 .hour-chip:hover { background: var(--sun-light); border-color: var(--peach); color: var(--sun); }
 .hour-active { background: var(--sun) !important; color: #fff !important; border-color: var(--sun) !important; box-shadow: 0 2px 8px rgba(249,115,22,.3); }
+.ai-slot-card { border:1.5px solid #E5E7EB; border-radius:10px; padding:14px 16px; margin-bottom:12px; background:#FAFBFC; }
+.ai-slot-head { font-weight:700; font-size:13px; color:#4338CA; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+.ai-slot-tag { font-size:11px; font-weight:600; padding:2px 8px; border-radius:4px; background:#EEF2FF; color:#4338CA; }
+.ai-slot-tag.backup { background:#FEF3C7; color:#92400E; }
+.ai-test-results { margin-top:12px; }
+.ai-test-item { padding:6px 12px; border-radius:6px; margin-bottom:4px; font-size:13px; font-weight:500; }
+.test-ok { background:#F0FDF4; color:#166534; }
+.test-fail { background:#FEF2F2; color:#991B1B; }
 </style>

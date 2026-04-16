@@ -130,6 +130,62 @@ func GetMe(c *gin.Context) {
 	})
 }
 
+// GetOnlineUsers returns all users active in the last 5 minutes.
+// Same user on different IPs shows as separate entries.
+func GetOnlineUsersAPI(c *gin.Context) {
+	entries := middleware.GetOnlineUsers()
+	// Group by user, collect IPs
+	type userInfo struct {
+		UserID int64    `json:"user_id"`
+		Email  string   `json:"email"`
+		Role   string   `json:"role"`
+		IPs    []string `json:"ips"`
+		Name   string   `json:"name"`
+	}
+	userMap := make(map[int64]*userInfo)
+	for _, e := range entries {
+		if u, ok := userMap[e.UserID]; ok {
+			found := false
+			for _, ip := range u.IPs {
+				if ip == e.IP {
+					found = true
+					break
+				}
+			}
+			if !found {
+				u.IPs = append(u.IPs, e.IP)
+			}
+		} else {
+			userMap[e.UserID] = &userInfo{UserID: e.UserID, Email: e.Email, Role: e.Role, IPs: []string{e.IP}}
+		}
+	}
+	// Get names from DB
+	var list []gin.H
+	for _, u := range userMap {
+		var name string
+		db.DB.QueryRow("SELECT name FROM users WHERE id = ?", u.UserID).Scan(&name)
+		if name == "" {
+			name = u.Email
+		}
+		list = append(list, gin.H{
+			"user_id":    u.UserID,
+			"name":       name,
+			"email":      u.Email,
+			"role":       u.Role,
+			"ips":        u.IPs,
+			"session_count": len(u.IPs),
+		})
+	}
+	if list == nil {
+		list = []gin.H{}
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
+		"online_count":   len(entries), // total sessions (user+IP combos)
+		"user_count":     len(userMap), // unique users
+		"users":          list,
+	}})
+}
+
 func GetInt64(c *gin.Context, key string) int64 {
 	val, _ := c.Get(key)
 	if v, ok := val.(int64); ok {

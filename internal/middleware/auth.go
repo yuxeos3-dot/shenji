@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -15,8 +17,9 @@ var jwtSecret []byte
 
 func init() {
 	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		secret = "default-jwt-secret-change-me-in-production"
+	if secret == "" || len(secret) < 16 {
+		log.Fatal("JWT_SECRET environment variable must be set and at least 16 characters long. " +
+			"Generate a strong random string, e.g. `openssl rand -hex 32`")
 	}
 	jwtSecret = []byte(secret)
 }
@@ -58,6 +61,10 @@ func AuthRequired() gin.HandlerFunc {
 		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 		claims := &Claims{}
 		token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
+			// Enforce HMAC signing method to prevent alg=none / RSA confusion attacks
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
 			return jwtSecret, nil
 		})
 
@@ -70,6 +77,10 @@ func AuthRequired() gin.HandlerFunc {
 		c.Set("user_id", claims.UserID)
 		c.Set("email", claims.Email)
 		c.Set("role", claims.Role)
+
+		// Track online presence
+		RecordOnline(claims.UserID, claims.Email, claims.Role, c.ClientIP())
+
 		c.Next()
 	}
 }
@@ -86,7 +97,40 @@ func AdminRequired() gin.HandlerFunc {
 	}
 }
 
-// Rate limiter for login endpoint
+// Online user tracking — records each authenticated request's user + IP.
+type OnlineEntry struct {
+	UserID   int64
+	Email    string
+	Role     string
+	IP       string
+	LastSeen time.Time
+}
+
+var onlineUsers sync.Map // key: "userID:IP" → *OnlineEntry
+
+func RecordOnline(userID int64, email, role, ip string) {
+	key := fmt.Sprintf("%d:%s", userID, ip)
+	onlineUsers.Store(key, &OnlineEntry{
+		UserID: userID, Email: email, Role: role, IP: ip, LastSeen: time.Now(),
+	})
+}
+
+// GetOnlineUsers returns users active in the last 5 minutes.
+func GetOnlineUsers() []OnlineEntry {
+	cutoff := time.Now().Add(-5 * time.Minute)
+	var result []OnlineEntry
+	onlineUsers.Range(func(k, v interface{}) bool {
+		e := v.(*OnlineEntry)
+		if e.LastSeen.After(cutoff) {
+			result = append(result, *e)
+		} else {
+			onlineUsers.Delete(k) // cleanup stale
+		}
+		return true
+	})
+	return result
+}
+// Bounded map; janitor goroutine prunes stale IPs every 10 minutes.
 type rateLimiter struct {
 	mu       sync.Mutex
 	attempts map[string][]time.Time
@@ -94,6 +138,36 @@ type rateLimiter struct {
 
 var loginLimiter = &rateLimiter{
 	attempts: make(map[string][]time.Time),
+}
+
+func init() {
+	// Periodic cleanup to prevent unbounded growth.
+	go func() {
+		t := time.NewTicker(10 * time.Minute)
+		defer t.Stop()
+		for range t.C {
+			loginLimiter.cleanup()
+		}
+	}()
+}
+
+func (r *rateLimiter) cleanup() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cutoff := time.Now().Add(-5 * time.Minute)
+	for ip, ts := range r.attempts {
+		fresh := ts[:0]
+		for _, t := range ts {
+			if t.After(cutoff) {
+				fresh = append(fresh, t)
+			}
+		}
+		if len(fresh) == 0 {
+			delete(r.attempts, ip)
+		} else {
+			r.attempts[ip] = fresh
+		}
+	}
 }
 
 func LoginRateLimit() gin.HandlerFunc {
@@ -106,8 +180,7 @@ func LoginRateLimit() gin.HandlerFunc {
 		now := time.Now()
 		window := now.Add(-1 * time.Minute)
 
-		// Clean old entries
-		valid := make([]time.Time, 0)
+		valid := make([]time.Time, 0, len(loginLimiter.attempts[ip]))
 		for _, t := range loginLimiter.attempts[ip] {
 			if t.After(window) {
 				valid = append(valid, t)

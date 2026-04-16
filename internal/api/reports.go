@@ -1,8 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"seo-system/internal/db"
@@ -34,7 +38,7 @@ func ListReports(c *gin.Context) {
 		query += " AND r.user_id = ?"
 		args = append(args, userIDFilter)
 	}
-	query += " ORDER BY r.report_date DESC, r.user_id"
+	query += " ORDER BY r.report_date DESC, r.user_id LIMIT 200"
 
 	rows, err := db.DB.Query(query, args...)
 	if err != nil {
@@ -117,6 +121,227 @@ func GetReportByDate(c *gin.Context) {
 		"tasks_done": json.RawMessage(tasksDone), "tasks_todo": json.RawMessage(tasksTodo),
 		"issues": issues, "created_at": createdAt,
 	}})
+}
+
+// ─── AI 日报润色 ──────────────────────────────────────────────────────────────
+
+type PolishRequest struct {
+	DoneRaw      string `json:"done_raw"`      // 今天做的事情，流水账
+	CoreData     string `json:"core_data"`     // 核心数据（GSC / GA / 流量等）
+	TomorrowRaw  string `json:"tomorrow_raw"`  // 明天的计划
+	Issues       string `json:"issues"`        // 遇到的问题
+	AgentEntries []struct {
+		Scenario   string `json:"scenario"`    // 跑通场景
+		Flow       string `json:"flow"`        // 自动化流程
+		Output     string `json:"output"`      // 自动化产出
+		HoursSaved string `json:"hours_saved"` // 节省工时
+		SkillName  string `json:"skill_name"`  // 封装 Skill / 工作流名称
+		InLibrary  string `json:"in_library"`  // 是否入库：是 / 否
+	} `json:"agent_entries"`
+}
+
+// 被禁止出现在 Agent 自动化应用里的词（违规直接拒绝）
+var agentBannedWords = []string{
+	"学习 AI", "学习AI", "学习人工智能",
+	"调研工具", "工具调研",
+	"研究自动化", "研究 AI",
+	"部署环境", "环境部署", "环境搭建",
+}
+
+// PolishReport 调用 AI 把流水账润色成规范格式，并做 Agent 自动化应用合规校验。
+func PolishReport(c *gin.Context) {
+	var req PolishRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "参数错误"})
+		return
+	}
+
+	// ── 1. 硬校验 Agent 自动化应用 ────────────────────────────────────────
+	if len(req.AgentEntries) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1,
+			"error": "Agent 自动化应用为必填项，至少需要 1 条实际跑通的场景"})
+		return
+	}
+	for i, e := range req.AgentEntries {
+		if strings.TrimSpace(e.Scenario) == "" || strings.TrimSpace(e.Flow) == "" ||
+			strings.TrimSpace(e.Output) == "" || strings.TrimSpace(e.HoursSaved) == "" ||
+			strings.TrimSpace(e.SkillName) == "" || strings.TrimSpace(e.InLibrary) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": -1,
+				"error": fmt.Sprintf("Agent 自动化应用 #%d 存在空字段，所有 6 项必须填写", i+1)})
+			return
+		}
+		blob := e.Scenario + " " + e.Flow + " " + e.Output + " " + e.SkillName
+		for _, bad := range agentBannedWords {
+			if strings.Contains(blob, bad) {
+				c.JSON(http.StatusBadRequest, gin.H{"code": -1,
+					"error": fmt.Sprintf("Agent 自动化应用 #%d 出现禁止内容「%s」。本项只接受实际业务场景 / 自动化产出 / 人效提升，日报已退回重写", i+1, bad)})
+				return
+			}
+		}
+		if e.InLibrary != "是" && e.InLibrary != "否" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": -1,
+				"error": fmt.Sprintf("Agent 自动化应用 #%d 的「是否入库」必须填「是」或「否」", i+1)})
+			return
+		}
+	}
+
+	// ── 2. 调用 AI 润色（允许失败兜底：AI 失败则用结构化模板拼装） ────────────
+	polished, err := polishWithAI(req)
+	if err != nil || strings.TrimSpace(polished) == "" {
+		polished = assembleFallback(req)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
+		"content":     polished,
+		"format_used": "v1",
+	}})
+}
+
+func polishWithAI(req PolishRequest) (string, error) {
+	apiURL := db.GetSetting("ai_api_url")
+	apiKey := db.GetSetting("ai_api_key")
+	model := db.GetSetting("ai_model")
+	if apiURL == "" {
+		apiURL = "https://ai.router.team/v1"
+	}
+	if model == "" {
+		model = "claude-sonnet-4-6"
+	}
+	if apiKey == "" {
+		return "", fmt.Errorf("AI API key 未配置")
+	}
+
+	agentsText := ""
+	for i, e := range req.AgentEntries {
+		agentsText += fmt.Sprintf(`
+自动化应用 %d
+- 跑通场景：%s
+- 自动化流程：%s
+- 自动化产出：%s
+- 节省工时：%s
+- 封装 Skill / 工作流名称：%s
+- 是否入库（集团工作流库）：%s
+`, i+1, e.Scenario, e.Flow, e.Output, e.HoursSaved, e.SkillName, e.InLibrary)
+	}
+
+	prompt := fmt.Sprintf(`你是一名职场日报润色专家。用户提供流水账，你整理成简洁、专业、可提交给 leader 的日报。
+
+## 用户输入
+
+【今日做的事情（流水账）】
+%s
+
+【核心数据】
+%s
+
+【明日计划】
+%s
+
+【遇到的问题】
+%s
+
+【Agent 自动化应用（用户已按规范填写，你只需要保持原格式、适度润色表述，不得增删条目、不得改变结构化字段的含义）】
+%s
+
+## 输出要求
+
+严格按以下格式输出 Markdown，5 个一级标题必须齐全且顺序不变。不要加任何解释、不要加代码块包裹，直接输出日报全文：
+
+今日工作完成：
+（把用户流水账整理成 3-8 条项目符号，每条 ≤ 30 字，按重要性排序；口径要具体、可量化；避免空话）
+
+核心数据：
+（把核心数据整理成清单，每项给出数字和同比/环比变化；若用户未提供则写「本日无关键数据更新」）
+
+明日工作规划：
+（3-6 条项目符号，每条要有明确动作和交付物）
+
+遇到问题：
+（1-4 条；如果没有问题则写「无」）
+
+Agent自动化应用（必须有）：
+（保持用户输入的结构化字段不变，仅对措辞做轻度润色；不得合并条目、不得删减字段）
+
+输出规则：
+- 语气专业克制，不要使用感叹号
+- 不要加「本人」「我今天」等口语化字眼
+- 每个一级标题后空一行再写内容
+- 不要输出任何超出上述 5 个章节的多余内容`,
+		strings.TrimSpace(req.DoneRaw),
+		strings.TrimSpace(req.CoreData),
+		strings.TrimSpace(req.TomorrowRaw),
+		strings.TrimSpace(req.Issues),
+		agentsText,
+	)
+
+	body := map[string]interface{}{
+		"model":       model,
+		"messages":    []map[string]string{{"role": "user", "content": prompt}},
+		"max_tokens":  4000,
+		"temperature": 0.3,
+	}
+	bj, _ := json.Marshal(body)
+	httpReq, _ := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(bj))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+
+	client := &http.Client{Timeout: 90 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("AI HTTP %d", resp.StatusCode)
+	}
+	var parsed struct {
+		Choices []struct {
+			Message struct{ Content string `json:"content"` } `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return "", err
+	}
+	if len(parsed.Choices) == 0 {
+		return "", fmt.Errorf("AI 无返回")
+	}
+	out := strings.TrimSpace(parsed.Choices[0].Message.Content)
+	// 剥 markdown 代码块（如果 AI 误包）
+	if strings.HasPrefix(out, "```") {
+		out = strings.TrimPrefix(out, "```markdown")
+		out = strings.TrimPrefix(out, "```")
+		out = strings.TrimSuffix(out, "```")
+		out = strings.TrimSpace(out)
+	}
+	return out, nil
+}
+
+// assembleFallback 在 AI 失败时直接按模板拼装，保证不会因为 AI 挂掉就无法提交
+func assembleFallback(req PolishRequest) string {
+	var b strings.Builder
+	b.WriteString("今日工作完成：\n")
+	b.WriteString(strings.TrimSpace(req.DoneRaw))
+	b.WriteString("\n\n核心数据：\n")
+	if s := strings.TrimSpace(req.CoreData); s != "" {
+		b.WriteString(s)
+	} else {
+		b.WriteString("本日无关键数据更新")
+	}
+	b.WriteString("\n\n明日工作规划：\n")
+	b.WriteString(strings.TrimSpace(req.TomorrowRaw))
+	b.WriteString("\n\n遇到问题：\n")
+	if s := strings.TrimSpace(req.Issues); s != "" {
+		b.WriteString(s)
+	} else {
+		b.WriteString("无")
+	}
+	b.WriteString("\n\nAgent自动化应用（必须有）：\n")
+	for i, e := range req.AgentEntries {
+		fmt.Fprintf(&b, "\n自动化应用 %d\n- 跑通场景：%s\n- 自动化流程：%s\n- 自动化产出：%s\n- 节省工时：%s\n- 封装 Skill / 工作流名称：%s\n- 是否入库（集团工作流库）：%s\n",
+			i+1, e.Scenario, e.Flow, e.Output, e.HoursSaved, e.SkillName, e.InLibrary)
+	}
+	return b.String()
 }
 
 func ExportReports(c *gin.Context) {

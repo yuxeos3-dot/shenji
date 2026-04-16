@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"seo-system/internal/db"
@@ -157,6 +158,24 @@ func getYandexAccessToken() (string, error) {
 	return accessToken, nil
 }
 
+// getYandexUserIDCached gets userID from DB cache first, fetches and saves if missing
+func getYandexUserIDCached(token string) (string, error) {
+	// Try cache first
+	var cached string
+	db.DB.QueryRow("SELECT value FROM settings WHERE key = 'yandex_user_id'").Scan(&cached)
+	if cached != "" {
+		return cached, nil
+	}
+	// Fetch fresh
+	userID, err := getYandexUserID(token)
+	if err != nil {
+		return "", err
+	}
+	// Save to cache
+	db.DB.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES ('yandex_user_id', ?)", userID)
+	return userID, nil
+}
+
 // SyncYandexData mirrors fetchYandexSiteData() in gsc-dashboard.html:
 // Uses search-queries/all/history for trend data (TOTAL_CLICKS, TOTAL_SHOWS, AVG_SHOW_POSITION)
 // Uses search-queries/popular for top keywords
@@ -176,7 +195,7 @@ func SyncYandexData(c *gin.Context) {
 		return
 	}
 
-	userID, err := getYandexUserID(token)
+	userID, err := getYandexUserIDCached(token)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": err.Error()})
 		return
@@ -187,18 +206,46 @@ func SyncYandexData(c *gin.Context) {
 	sd := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
 	encodedHostID := url.PathEscape(yandexHostID)
 
-	// Fetch search-queries/all/history — trend data with indicators
-	// Mirrors: yf('/user/'+yUserId+'/hosts/'+hostId+'/search-queries/all/history?...')
 	historyPath := fmt.Sprintf("/user/%s/hosts/%s/search-queries/all/history?date_from=%s&date_to=%s&query_indicator=TOTAL_CLICKS&query_indicator=TOTAL_SHOWS&query_indicator=AVG_SHOW_POSITION&query_indicator=AVG_CLICK_POSITION",
 		userID, encodedHostID, sd, ed)
-
-	// Fetch search-queries/popular — top keywords
-	// Mirrors: yf('/user/'+yUserId+'/hosts/'+hostId+'/search-queries/popular?...')
 	popularPath := fmt.Sprintf("/user/%s/hosts/%s/search-queries/popular?date_from=%s&date_to=%s&order_by=TOTAL_CLICKS&limit=20&query_indicator=TOTAL_CLICKS&query_indicator=TOTAL_SHOWS&query_indicator=AVG_SHOW_POSITION&query_indicator=AVG_CLICK_POSITION",
 		userID, encodedHostID, sd, ed)
+	diagPath := fmt.Sprintf("/user/%s/hosts/%s/diagnostics", userID, encodedHostID)
+	indexPath := fmt.Sprintf("/user/%s/hosts/%s/indexing/history", userID, encodedHostID)
 
-	histData, histErr := yandexFetch(token, historyPath)
-	popData, _ := yandexFetch(token, popularPath)
+	// Fetch all 4 endpoints in parallel
+	type fetchResult struct {
+		data json.RawMessage
+		err  error
+	}
+	results := make(map[string]fetchResult)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, req := range []struct{ name, path string }{
+		{"history", historyPath},
+		{"popular", popularPath},
+		{"diag", diagPath},
+		{"index", indexPath},
+	} {
+		wg.Add(1)
+		go func(name, path string) {
+			defer wg.Done()
+			data, err := yandexFetch(token, path)
+			mu.Lock()
+			results[name] = fetchResult{data, err}
+			mu.Unlock()
+		}(req.name, req.path)
+	}
+	wg.Wait()
+
+	histData := results["history"].data
+	histErr := results["history"].err
+	popData := results["popular"].data
+	diagData := results["diag"].data
+	diagErr := results["diag"].err
+	indexData := results["index"].data
+	indexErr := results["index"].err
 
 	// Parse history data — mirrors gsc-dashboard.html logic:
 	// const ind=hist.indicators||{};
@@ -251,16 +298,12 @@ func SyncYandexData(c *gin.Context) {
 
 	// Store errors from diagnostics
 	errorsJSON := "[]"
-	diagPath := fmt.Sprintf("/user/%s/hosts/%s/diagnostics", userID, encodedHostID)
-	diagData, diagErr := yandexFetch(token, diagPath)
 	if diagErr == nil {
 		errorsJSON = string(diagData)
 	}
 
 	// Fetch indexing count
 	indexCount := 0
-	indexPath := fmt.Sprintf("/user/%s/hosts/%s/indexing/history", userID, encodedHostID)
-	indexData, indexErr := yandexFetch(token, indexPath)
 	if indexErr == nil {
 		var idxResp struct {
 			Indicators map[string][]struct {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"seo-system/internal/db"
@@ -221,14 +222,24 @@ func SyncGSCData(c *gin.Context) {
 	}
 
 	results := make(map[string]json.RawMessage)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
 	for _, q := range queries {
-		data, err := gscFetch(token, baseURL, "POST", q.body)
-		if err != nil {
-			results[q.name] = json.RawMessage("null")
-			continue
-		}
-		results[q.name] = data
+		wg.Add(1)
+		go func(name string, body queryReq) {
+			defer wg.Done()
+			data, err := gscFetch(token, baseURL, "POST", body)
+			mu.Lock()
+			if err != nil {
+				results[name] = json.RawMessage("null")
+			} else {
+				results[name] = data
+			}
+			mu.Unlock()
+		}(q.name, q.body)
 	}
+	wg.Wait()
 
 	// Parse overview for totals
 	var overview struct {

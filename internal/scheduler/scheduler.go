@@ -39,8 +39,32 @@ func Start() {
 	// Per-site interval check: every hour at :00
 	c.AddFunc("0 * * * *", runPerSiteIntervalCheck)
 
+	// Zombie task cleanup: every 5 minutes, mark any audit_task that's been
+	// running > 10 minutes as errored. Handles AI timeouts / crashes that
+	// would otherwise leave progress stuck at 65%.
+	c.AddFunc("*/5 * * * *", reapZombieTasks)
+
 	c.Start()
 	log.Println("调度器已启动")
+}
+
+// reapZombieTasks marks audit tasks running too long as errored.
+func reapZombieTasks() {
+	cutoff := time.Now().Add(-10 * time.Minute).Format("2006-01-02 15:04:05")
+	res, err := db.DB.Exec(
+		`UPDATE audit_tasks
+		 SET status='error',
+		     error_msg='任务超时（超过10分钟未完成，自动标记失败）',
+		     finished_at=CURRENT_TIMESTAMP
+		 WHERE status='running' AND created_at < ?`, cutoff,
+	)
+	if err != nil {
+		log.Printf("zombie task cleanup failed: %v", err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		log.Printf("zombie task cleanup: reaped %d stuck tasks", n)
+	}
 }
 
 func Stop() {
@@ -232,11 +256,12 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("站点 %d 巡检异常: %v", siteID, r)
+			db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg='internal panic', finished_at=? WHERE site_id=? AND status='running'", time.Now(), siteID)
 		}
 	}()
 
 	result, err := db.DB.Exec(
-		"INSERT INTO audit_tasks (site_id, triggered_by, status) VALUES (?, 0, 'running')", siteID,
+		"INSERT INTO audit_tasks (site_id, triggered_by, status, progress) VALUES (?, 0, 'running', 10)", siteID,
 	)
 	if err != nil {
 		log.Printf("创建巡检任务失败 站点%d: %v", siteID, err)
@@ -244,68 +269,182 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	}
 	taskID, _ := result.LastInsertId()
 
-	// Step 1: Crawl standard pages
-	pages := crawler.CrawlAllPages(config)
-	for _, p := range pages {
-		db.DB.Exec(
-			"INSERT INTO audit_pages (task_id, page_type, url, status_code, ttfb_ms, html, html_size, error_msg) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-			taskID, p.PageType, p.URL, p.StatusCode, p.TTFB, p.HTML, p.HTMLSize, p.Error,
-		)
+	updateProgress := func(progress int) {
+		db.DB.Exec("UPDATE audit_tasks SET progress=? WHERE id=?", progress, taskID)
 	}
 
-	// Step 2: Auto re-fetch all site_pages to ensure fresh HTML
+	// Step 1: standard page crawl
+	pages := crawler.CrawlAllPages(config)
+	for _, p := range pages {
+		if _, err := db.DB.Exec(
+			"INSERT INTO audit_pages (task_id, page_type, url, status_code, ttfb_ms, html, html_size, error_msg) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			taskID, p.PageType, p.URL, p.StatusCode, p.TTFB, p.HTML, p.HTMLSize, p.Error,
+		); err != nil {
+			log.Printf("[audit %d] insert audit_page failed: %v", taskID, err)
+		}
+	}
+	updateProgress(35)
+
+	// Step 2: re-fetch monitored site_pages so AI uses fresh HTML
+	var sitePages []ai.SitePageForPrompt
 	pageRows, err := db.DB.Query("SELECT id, name, url FROM site_pages WHERE site_id = ?", siteID)
-	var sitePagesList []ai.SitePageForPrompt
 	if err == nil {
-		type pgInfo struct{ id int64; name, url string }
-		var pgList []pgInfo
+		type pageInfo struct {
+			id   int64
+			name string
+			url  string
+		}
+		var pageList []pageInfo
 		for pageRows.Next() {
-			var p pgInfo
-			if pageRows.Scan(&p.id, &p.name, &p.url) == nil {
-				pgList = append(pgList, p)
+			var p pageInfo
+			if err := pageRows.Scan(&p.id, &p.name, &p.url); err == nil {
+				pageList = append(pageList, p)
 			}
 		}
 		pageRows.Close()
-		for _, p := range pgList {
-			r := crawler.FetchPage(crawler.URLSpec{PageType: p.name, URL: p.url}, 30*time.Second)
+		for _, p := range pageList {
+			fp := crawler.FetchPage(crawler.URLSpec{PageType: p.name, URL: p.url}, 30*time.Second)
 			now := time.Now().Format("2006-01-02 15:04:05")
 			db.DB.Exec(`UPDATE site_pages SET last_html=?, last_fetched_at=?, status_code=?, ttfb_ms=? WHERE id=?`,
-				r.HTML, now, r.StatusCode, r.TTFB, p.id)
-		}
-		// Reload fresh site_pages for prompt
-		freshRows, _ := db.DB.Query("SELECT name, url, last_html, last_fetched_at, status_code, ttfb_ms FROM site_pages WHERE site_id = ? AND last_html != ''", siteID)
-		if freshRows != nil {
-			for freshRows.Next() {
-				var sp ai.SitePageForPrompt
-				freshRows.Scan(&sp.Name, &sp.URL, &sp.HTML, &sp.LastFetchedAt, &sp.StatusCode, &sp.TTFB)
-				sitePagesList = append(sitePagesList, sp)
-			}
-			freshRows.Close()
+				fp.HTML, now, fp.StatusCode, fp.TTFB, p.id)
+			sitePages = append(sitePages, ai.SitePageForPrompt{
+				Name: p.name, URL: p.url, HTML: fp.HTML,
+				LastFetchedAt: now, StatusCode: fp.StatusCode, TTFB: fp.TTFB,
+			})
 		}
 	}
+	updateProgress(55)
 
-	// Step 3: Build prompt and call AI
-	prompt := ai.BuildV6AuditPrompt(config.Domain, sitePagesList, pages, nil, nil, nil)
-	analysisResult, model, err := ai.CallAI(prompt)
-	if err != nil {
-		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
-			err.Error(), time.Now(), taskID)
-		telegram.SendNotification("巡检失败", siteName+": "+err.Error())
+	// Step 3: fetch analytics snapshots (best-effort)
+	var gscData *ai.GSCDataForPrompt
+	var gaData *ai.GADataForPrompt
+	var yandexData *ai.YandexDataForPrompt
+	{
+		var clicks, impressions int
+		var ctr, position float64
+		var kwJSON, pgJSON string
+		if err := db.DB.QueryRow(
+			"SELECT clicks, impressions, ctr, position, keywords_json, pages_json FROM gsc_data WHERE site_id = ? ORDER BY date DESC LIMIT 1",
+			siteID,
+		).Scan(&clicks, &impressions, &ctr, &position, &kwJSON, &pgJSON); err == nil {
+			gscData = &ai.GSCDataForPrompt{Clicks: clicks, Impressions: impressions, CTR: ctr, Position: position, Keywords: kwJSON, Pages: pgJSON}
+		}
+	}
+	{
+		var sessions, users, pv int
+		var channels string
+		if err := db.DB.QueryRow(
+			"SELECT sessions, users, pageviews, channels_json FROM ga_data WHERE site_id = ? ORDER BY date DESC LIMIT 1",
+			siteID,
+		).Scan(&sessions, &users, &pv, &channels); err == nil {
+			gaData = &ai.GADataForPrompt{Sessions: sessions, Users: users, Pageviews: pv, Channels: channels}
+		}
+	}
+	{
+		var idx int
+		var errs string
+		if err := db.DB.QueryRow(
+			"SELECT index_count, errors_json FROM yandex_data WHERE site_id = ? ORDER BY date DESC LIMIT 1",
+			siteID,
+		).Scan(&idx, &errs); err == nil {
+			yandexData = &ai.YandexDataForPrompt{IndexCount: idx, Errors: errs}
+		}
+	}
+	updateProgress(60)
+
+	// Step 4: batched technical audit (same logic as manual trigger)
+	allChapters := make([]ai.V6Chapter, 0, 8)
+	var lastModel string
+	var lastRaw string
+	batchTotal := len(ai.TechnicalBatches)
+	for i, batch := range ai.TechnicalBatches {
+		log.Printf("[audit %d] scheduler 批次 %d/%d：%s", taskID, i+1, batchTotal, batch.Name)
+		bp := ai.BuildTechPromptBatch(batch, config.Domain, sitePages, pages, gscData, gaData, yandexData)
+		chs, raw, model, bErr := ai.CallAIChapters(bp)
+		lastModel = model
+		if raw != "" {
+			lastRaw = raw
+		}
+		if bErr != nil {
+			log.Printf("[audit %d] scheduler 批次 %d 失败: %v", taskID, i+1, bErr)
+			continue
+		}
+		allChapters = append(allChapters, chs...)
+		updateProgress(65 + ((i + 1) * 15 / batchTotal))
+	}
+	model := lastModel
+
+	if len(allChapters) == 0 {
+		snippet := lastRaw
+		if len(snippet) > 100000 {
+			snippet = snippet[:100000]
+		}
+		db.DB.Exec(
+			`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, v6_report, raw_ai_response)
+			 VALUES (?, '[]', '[]', '[]', '[]', '', '', ?, '', ?)`,
+			taskID, model, snippet,
+		)
+		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg='所有技术审计批次均失败', finished_at=? WHERE id=?",
+			time.Now(), taskID)
+		telegram.SendNotification("巡检失败", siteName+": 所有技术审计批次均失败")
 		return
 	}
 
+	// Step 4b: strategy chapter (independent call, failure not fatal)
+	var strategyChapter *ai.V6Chapter
+	stratPrompt := ai.BuildStrategyPrompt(config.Domain, sitePages, pages, gscData, gaData, yandexData)
+	if strategyCh, _, sErr := ai.CallAIStrategy(stratPrompt); sErr == nil && strategyCh != nil {
+		strategyChapter = strategyCh
+		log.Printf("[audit %d] scheduler 策略章节已生成（%d 条）", taskID, len(strategyCh.Issues))
+	} else {
+		log.Printf("[audit %d] scheduler 策略章节失败（忽略）: %v", taskID, sErr)
+	}
+	updateProgress(85)
+
+	_, v6JSON := ai.ComposeV6Report(config.Domain, allChapters, strategyChapter)
+	analysisResult := &ai.AnalysisResult{
+		V6Report:       v6JSON,
+		Summary:        "",
+		Suggestions:    "",
+		SEOIssues:      json.RawMessage("[]"),
+		CodeIssues:     json.RawMessage("[]"),
+		SecurityIssues: json.RawMessage("[]"),
+		PerfIssues:     json.RawMessage("[]"),
+	}
+
+	// Step 5: save results (including v6_report) atomically
 	seoJSON, _ := json.Marshal(analysisResult.SEOIssues)
 	codeJSON, _ := json.Marshal(analysisResult.CodeIssues)
 	secJSON, _ := json.Marshal(analysisResult.SecurityIssues)
 	perfJSON, _ := json.Marshal(analysisResult.PerfIssues)
 
-	db.DB.Exec(
+	tx, txErr := db.DB.Begin()
+	if txErr != nil {
+		log.Printf("[audit %d] scheduler begin tx failed: %v", taskID, txErr)
+		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
+			"数据库写入失败: "+txErr.Error(), time.Now(), taskID)
+		return
+	}
+	if _, err := tx.Exec(
 		`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, v6_report)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		taskID, string(seoJSON), string(codeJSON), string(secJSON), string(perfJSON),
 		analysisResult.Suggestions, analysisResult.Summary, model, analysisResult.V6Report,
-	)
+	); err != nil {
+		tx.Rollback()
+		log.Printf("[audit %d] scheduler insert results failed: %v", taskID, err)
+		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
+			"写入失败: "+err.Error(), time.Now(), taskID)
+		return
+	}
+	if _, err := tx.Exec("UPDATE audit_tasks SET status='done', progress=100, finished_at=? WHERE id=?", time.Now(), taskID); err != nil {
+		tx.Rollback()
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("[audit %d] scheduler commit failed: %v", taskID, err)
+		return
+	}
 
-	db.DB.Exec("UPDATE audit_tasks SET status='done', progress=100, finished_at=? WHERE id=?", time.Now(), taskID)
 	telegram.SendNotification("巡检完成", siteName+": "+analysisResult.Summary)
 }

@@ -63,7 +63,8 @@ export default {
   downloadAuditReport: (taskId) => `/api/v1/audits/${taskId}/report/download`,
 
   // Dead Link Check
-  getDeadLinks: (siteId) => api.get(`/v1/sites/${siteId}/deadlinks`),
+  getDeadLinks: (siteId, params) => api.get(`/v1/sites/${siteId}/deadlinks`, { params }),
+  retryDeadLinks: (siteId) => api.post(`/v1/sites/${siteId}/deadlinks/retry`),
   getDeadLinkProgress: (siteId) => api.get(`/v1/sites/${siteId}/deadlinks/progress`),
   startDeadLinkCheck: (siteId) => api.post(`/v1/sites/${siteId}/deadlinks/check`),
 
@@ -102,12 +103,59 @@ export default {
   // Reports
   listReports: (params) => api.get('/v1/reports', { params }),
   submitReport: (data) => api.post('/v1/reports', data),
+  polishReport: (data) => api.post('/v1/reports/polish', data),
   getReport: (date) => api.get(`/v1/reports/${date}`),
   exportReports: (params) => api.get('/v1/reports/export', { params }),
 
   // Settings
+  getOnlineUsers: () => api.get('/v1/auth/online'),
+  getMyPermissions: () => api.get('/v1/auth/my-permissions'),
+  getPermissionTree: () => api.get('/v1/users/permission-tree'),
+  getUserPermissions: (id) => api.get(`/v1/users/${id}/permissions`),
+  saveUserPermissions: (id, data) => api.put(`/v1/users/${id}/permissions`, data),
+
+  getMyAIConfig: () => api.get('/v1/auth/my-ai-config'),
+  saveMyAIConfig: (data) => api.put('/v1/auth/my-ai-config', data),
+  testMyAI: () => api.post('/v1/auth/test-my-ai'),
+
+  listExtlinkPool: () => api.get('/v1/extlink-pool'),
+  importExtlinkPool: (data) => api.post('/v1/extlink-pool/import', data),
+  deleteExtlinkPoolItem: (id) => api.delete(`/v1/extlink-pool/${id}`),
+
   getSettings: () => api.get('/v1/settings'),
   saveSettings: (data) => api.put('/v1/settings', data),
   testAI: () => api.post('/v1/settings/test-ai'),
   testTelegram: () => api.post('/v1/settings/test-telegram'),
+
+  // GEO Content Production
+  geoStats: (params) => api.get('/v1/geo/stats', { params }),
+  geoListTitleLibs: (params) => api.get('/v1/geo/title-libs', { params }),
+  geoCreateTitleLib: (data) => api.post('/v1/geo/title-libs', data),
+  geoDeleteTitleLib: (id) => api.delete(`/v1/geo/title-libs/${id}`),
+  geoListTitles: (libId, params) => api.get(`/v1/geo/title-libs/${libId}/titles`, { params }),
+  geoAddTitles: (libId, data) => api.post(`/v1/geo/title-libs/${libId}/titles`, data),
+  geoImportTitles: (libId, data) => api.post(`/v1/geo/title-libs/${libId}/import`, data),
+  geoImportFromGSC: (libId, data) => api.post(`/v1/geo/title-libs/${libId}/import-gsc`, data),
+  geoDeleteTitle: (id) => api.delete(`/v1/geo/titles/${id}`),
+  geoListPrompts: () => api.get('/v1/geo/prompts'),
+  geoCreatePrompt: (data) => api.post('/v1/geo/prompts', data),
+  geoUpdatePrompt: (id, data) => api.put(`/v1/geo/prompts/${id}`, data),
+  geoDeletePrompt: (id) => api.delete(`/v1/geo/prompts/${id}`),
+  geoListKnowledge: () => api.get('/v1/geo/knowledge'),
+  geoCreateKnowledge: (data) => api.post('/v1/geo/knowledge', data),
+  geoUpdateKnowledge: (id, data) => api.put(`/v1/geo/knowledge/${id}`, data),
+  geoDeleteKnowledge: (id) => api.delete(`/v1/geo/knowledge/${id}`),
+  geoListTasks: (params) => api.get('/v1/geo/tasks', { params }),
+  geoCreateTask: (data) => api.post('/v1/geo/tasks', data),
+  geoUpdateTask: (id, data) => api.put(`/v1/geo/tasks/${id}`, data),
+  geoDeleteTask: (id) => api.delete(`/v1/geo/tasks/${id}`),
+  geoStartTask: (id) => api.post(`/v1/geo/tasks/${id}/start`),
+  geoStopTask: (id) => api.post(`/v1/geo/tasks/${id}/stop`),
+  geoRunTask: (id) => api.post(`/v1/geo/tasks/${id}/run`),
+  geoListArticles: (params) => api.get('/v1/geo/articles', { params }),
+  geoGetArticle: (id) => api.get(`/v1/geo/articles/${id}`),
+  geoUpdateArticle: (id, data) => api.put(`/v1/geo/articles/${id}`, data),
+  geoDeleteArticle: (id) => api.delete(`/v1/geo/articles/${id}`),
+  geoReviewArticle: (id, data) => api.post(`/v1/geo/articles/${id}/review`, data),
+  geoPublishArticle: (id) => api.post(`/v1/geo/articles/${id}/publish`),
 }

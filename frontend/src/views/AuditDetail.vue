@@ -38,6 +38,19 @@
         ❌ 审计失败原因：{{ task.error_msg || 'AI接口超时或配置错误，请检查系统设置中的AI接口配置，然后重新巡检' }}
       </div>
 
+      <!-- AI 原始输出（仅在解析失败时展示） -->
+      <div v-if="task.status==='error' && result && result.raw_ai_response" class="raw-ai-box">
+        <div class="raw-ai-head">
+          <span>🔍 AI 原始输出（{{ result.raw_ai_response.length }} 字符）</span>
+          <div>
+            <button class="btn btn-sm" @click="showRaw = !showRaw">{{ showRaw ? '收起' : '展开' }}</button>
+            <button class="btn btn-sm" style="margin-left:6px" @click="copyRaw">📋 复制</button>
+          </div>
+        </div>
+        <pre v-if="showRaw" class="raw-ai-pre">{{ result.raw_ai_response }}</pre>
+        <div v-else class="raw-ai-preview">{{ result.raw_ai_response.slice(0, 400) }}...</div>
+      </div>
+
       <!-- 报告概览 -->
       <div v-if="v6Report" class="report-overview">
         <div class="overview-stat ov-fatal">
@@ -157,6 +170,16 @@ const PAGE_SIZE = 20
 let pollTimer = null
 
 const downloading = ref(false)
+const showRaw = ref(false)
+
+async function copyRaw() {
+  try {
+    await navigator.clipboard.writeText(result.value?.raw_ai_response || '')
+    if (window.ElMessage) window.ElMessage.success('已复制到剪贴板')
+  } catch (e) {
+    alert('复制失败，请手动选择复制')
+  }
+}
 
 async function downloadReport() {
   downloading.value = true
@@ -269,6 +292,12 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
 .back-url { font-size:14px; font-weight:700; color:var(--ink); }
 
 .error-bar { background:var(--err-bg); border:1.5px solid var(--err-border); border-radius:var(--r-sm); padding:12px 16px; font-size:13.5px; color:var(--err); font-weight:600; margin-top:12px; line-height:1.6; }
+.raw-ai-box { background:#fafafa; border:1px solid #ddd; border-radius:var(--r-sm); padding:10px 14px; margin-top:12px; font-size:13px; }
+.raw-ai-head { display:flex; justify-content:space-between; align-items:center; font-weight:600; color:#555; margin-bottom:6px; }
+.raw-ai-pre { max-height:520px; overflow:auto; background:#1e1e1e; color:#d4d4d4; padding:12px; border-radius:4px; font-family:Consolas,Menlo,monospace; font-size:12px; white-space:pre-wrap; word-break:break-all; margin:0; }
+.raw-ai-preview { color:#888; font-family:Consolas,Menlo,monospace; font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-all; max-height:80px; overflow:hidden; }
+.btn-sm { padding:3px 10px; font-size:12px; border-radius:4px; border:1px solid #ccc; background:white; cursor:pointer; }
+.btn-sm:hover { background:#f0f0f0; }
 .panel { background:var(--surface); border-radius:var(--r); box-shadow:var(--s1); border:1.5px solid var(--border-light); padding:22px 26px; }
 .panel-amber { background:linear-gradient(135deg,#FFFDF8 0%,#FFF8EC 60%,#FFF2D8 100%); border-color:var(--peach); }
 

@@ -1,10 +1,15 @@
 package crawler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -140,21 +145,123 @@ func CrawlAllPages(site SiteConfig) []PageResult {
 	return results
 }
 
+// ─── SSRF protection ─────────────────────────────────────────────────────────
+
+var errBlockedHost = errors.New("目标地址被安全策略拒绝（内网/环回/元数据端点不可访问）")
+
+// isPrivateIP returns true for private / loopback / link-local / CGNAT / multicast /
+// unspecified / IPv6 ULA addresses, plus the AWS/GCP/Azure metadata endpoint.
+func isPrivateIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	if ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsPrivate() {
+		return true
+	}
+	// IPv4 CGNAT 100.64.0.0/10
+	if v4 := ip.To4(); v4 != nil {
+		if v4[0] == 100 && v4[1]&0xC0 == 64 {
+			return true
+		}
+		// Cloud metadata service: 169.254.169.254 (covered by IsLinkLocalUnicast)
+		if v4[0] == 169 && v4[1] == 254 {
+			return true
+		}
+	}
+	return false
+}
+
+func ssrfAllowed() bool {
+	// Escape hatch for local development / CI.
+	return strings.EqualFold(os.Getenv("ALLOW_PRIVATE_FETCH"), "true")
+}
+
+// safeDialContext wraps a base dialer to reject connections to private IPs.
+func safeDialContext(base *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if ssrfAllowed() {
+			return base.DialContext(ctx, network, addr)
+		}
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+		if err != nil {
+			return nil, err
+		}
+		for _, ip := range ips {
+			if isPrivateIP(ip) {
+				return nil, errBlockedHost
+			}
+		}
+		// Re-resolve via dialer (will hit DNS again, but at least we've rejected
+		// private IPs; accept that small race window).
+		return base.DialContext(ctx, network, net.JoinHostPort(host, port))
+	}
+}
+
+// validateURL rejects obviously bad URLs before any network work happens.
+func validateURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("URL 解析失败: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("仅支持 http / https 协议")
+	}
+	if u.Host == "" {
+		return fmt.Errorf("URL 缺少主机名")
+	}
+	if ssrfAllowed() {
+		return nil
+	}
+	// If the host is a literal IP, check it here — DNS dial will also check,
+	// but this lets us fail fast with a clearer error.
+	host := u.Hostname()
+	if ip := net.ParseIP(host); ip != nil && isPrivateIP(ip) {
+		return errBlockedHost
+	}
+	return nil
+}
+
+// buildHTTPClient returns an SSRF-aware HTTP client with the given timeout.
+func buildHTTPClient(timeout time.Duration) *http.Client {
+	base := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	tr := &http.Transport{
+		DialContext:           safeDialContext(base),
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: tr,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			// Redirect target must also pass SSRF check.
+			return validateURL(req.URL.String())
+		},
+	}
+}
+
 func FetchPage(spec URLSpec, timeout time.Duration) PageResult {
 	result := PageResult{
 		PageType: spec.PageType,
 		URL:      spec.URL,
 	}
 
-	client := &http.Client{
-		Timeout: timeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("too many redirects")
-			}
-			return nil
-		},
+	if err := validateURL(spec.URL); err != nil {
+		result.Error = err.Error()
+		return result
 	}
+
+	client := buildHTTPClient(timeout)
 
 	req, err := http.NewRequest("GET", spec.URL, nil)
 	if err != nil {

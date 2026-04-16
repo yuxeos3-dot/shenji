@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"seo-system/internal/crawler"
@@ -12,10 +14,19 @@ import (
 
 func GetExternalLinks(c *gin.Context) {
 	siteID := c.Param("id")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "100"))
+	if page < 1 { page = 1 }
+	if perPage < 1 || perPage > 500 { perPage = 100 }
+	offset := (page - 1) * perPage
+
+	var total int
+	db.DB.QueryRow("SELECT COUNT(*) FROM external_links WHERE site_id = ?", siteID).Scan(&total)
+
 	rows, err := db.DB.Query(`SELECT id, site_id, url, anchor_text, source_url, rel_type, category, note, status_code, checked_at, created_at
-		FROM external_links WHERE site_id = ? ORDER BY id DESC`, siteID)
+		FROM external_links WHERE site_id = ? ORDER BY id DESC LIMIT ? OFFSET ?`, siteID, perPage, offset)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": []gin.H{}})
+		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"items": []gin.H{}, "total": 0}})
 		return
 	}
 	defer rows.Close()
@@ -37,8 +48,75 @@ func GetExternalLinks(c *gin.Context) {
 	if links == nil {
 		links = []gin.H{}
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": links})
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"items": links, "total": total, "page": page, "per_page": perPage}})
 }
+
+// ─── Shared Backlink Pool (公共外链库) ────────────────────────────────────────
+
+func ListExtlinkPool(c *gin.Context) {
+	rows, err := db.DB.Query("SELECT id, url, name, created_at FROM extlink_pool ORDER BY id DESC LIMIT 500")
+	if err != nil {
+		c.JSON(200, gin.H{"code": 0, "data": []gin.H{}})
+		return
+	}
+	defer rows.Close()
+	var list []gin.H
+	for rows.Next() {
+		var id int64
+		var url, name, cat string
+		rows.Scan(&id, &url, &name, &cat)
+		list = append(list, gin.H{"id": id, "url": url, "name": name, "created_at": cat})
+	}
+	if list == nil {
+		list = []gin.H{}
+	}
+	c.JSON(200, gin.H{"code": 0, "data": list})
+}
+
+func ImportExtlinkPool(c *gin.Context) {
+	var req struct {
+		Text string `json:"text" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"code": -1, "error": "text 必填"})
+		return
+	}
+	userID := c.GetInt64("user_id")
+	lines := strings.Split(req.Text, "\n")
+	count := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 2)
+		url := strings.TrimSpace(parts[0])
+		name := ""
+		if len(parts) > 1 {
+			name = strings.TrimSpace(parts[1])
+		}
+		if url == "" {
+			continue
+		}
+		// Skip duplicates
+		var exists int
+		db.DB.QueryRow("SELECT COUNT(*) FROM extlink_pool WHERE url=?", url).Scan(&exists)
+		if exists > 0 {
+			continue
+		}
+		if _, err := db.DB.Exec("INSERT INTO extlink_pool (url, name, created_by) VALUES (?, ?, ?)", url, name, userID); err == nil {
+			count++
+		}
+	}
+	c.JSON(200, gin.H{"code": 0, "data": gin.H{"imported": count}})
+}
+
+func DeleteExtlinkPoolItem(c *gin.Context) {
+	db.DB.Exec("DELETE FROM extlink_pool WHERE id=?", c.Param("id"))
+	c.JSON(200, gin.H{"code": 0, "data": "删除成功"})
+}
+
+// ─── Per-site External Links ─────────────────────────────────────────────────
 
 type ExternalLinkRequest struct {
 	SiteID     int64  `json:"site_id"`

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -13,6 +14,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
 
 func TriggerAudit(c *gin.Context) {
 	siteID := c.Param("id")
@@ -67,23 +75,27 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 		db.DB.Exec("UPDATE audit_tasks SET progress=? WHERE id=?", progress, taskID)
 	}
 
+	log.Printf("[audit %d] 开始巡检 site=%s", taskID, siteName)
+
 	// Step 1: Crawl standard pages
 	updateProgress(10)
+	log.Printf("[audit %d] 抓取标准页面...", taskID)
 	crawlPages := crawler.CrawlAllPages(site)
-	updateProgress(35)
+	updateProgress(30)
 
 	// Save crawled pages
 	for _, p := range crawlPages {
-		db.DB.Exec(
+		if _, err := db.DB.Exec(
 			"INSERT INTO audit_pages (task_id, page_type, url, status_code, ttfb_ms, html, html_size, error_msg) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 			taskID, p.PageType, p.URL, p.StatusCode, p.TTFB, p.HTML, p.HTMLSize, p.Error,
-		)
+		); err != nil {
+			log.Printf("[audit %d] insert audit_page failed url=%s: %v", taskID, p.URL, err)
+		}
 	}
-	updateProgress(45)
+	updateProgress(40)
 
 	// Step 2: Auto re-fetch all site_pages to ensure fresh HTML
-	updateProgress(40)
-	log.Printf("开始自动抓取站点[%s]的所有监控页面源码...", siteID)
+	log.Printf("[audit %d] 抓取站点监控页面...", taskID)
 	pageRows, err := db.DB.Query(
 		"SELECT id, name, url FROM site_pages WHERE site_id = ?", siteID,
 	)
@@ -105,15 +117,17 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 		for i, p := range pageList {
 			result := crawler.FetchPage(crawler.URLSpec{PageType: p.name, URL: p.url}, 30*time.Second)
 			now := time.Now().Format("2006-01-02 15:04:05")
-			db.DB.Exec(`UPDATE site_pages SET last_html=?, last_fetched_at=?, status_code=?, ttfb_ms=? WHERE id=?`,
-				result.HTML, now, result.StatusCode, result.TTFB, p.id)
+			if _, err := db.DB.Exec(`UPDATE site_pages SET last_html=?, last_fetched_at=?, status_code=?, ttfb_ms=? WHERE id=?`,
+				result.HTML, now, result.StatusCode, result.TTFB, p.id); err != nil {
+				log.Printf("[audit %d] update site_pages failed: %v", taskID, err)
+			}
 			progress := 40 + (i+1)*10/max(len(pageList), 1)
 			if progress > 50 {
 				progress = 50
 			}
 			updateProgress(progress)
 		}
-		log.Printf("站点[%s]共抓取 %d 个页面", siteID, len(pageList))
+		log.Printf("[audit %d] 共抓取 %d 个监控页面", taskID, len(pageList))
 	}
 
 	// Step 3: Fetch site_pages (now freshly fetched above)
@@ -178,33 +192,113 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 
 	updateProgress(60)
 
-	// Step 4: Build v6 prompt and call AI
-	prompt := ai.BuildV6AuditPrompt(site.Domain, sitePages, crawlPages, gscData, gaData, yandexData)
-	updateProgress(65)
+	// Step 4: Run the technical audit in batches (provider caps output at
+	// ~16k chars per call, so one call can't fit all 29 categories). Each
+	// batch returns its own chapters; we merge and renumber at the end.
+	allChapters := make([]ai.V6Chapter, 0, 8)
+	var lastModel string
+	var lastRaw string
+	batchTotal := len(ai.TechnicalBatches)
+	for i, batch := range ai.TechnicalBatches {
+		log.Printf("[audit %d] 技术审计批次 %d/%d：%s", taskID, i+1, batchTotal, batch.Name)
+		bp := ai.BuildTechPromptBatch(batch, site.Domain, sitePages, crawlPages, gscData, gaData, yandexData)
+		chs, raw, model, bErr := ai.CallAIChapters(bp)
+		lastModel = model
+		if raw != "" {
+			lastRaw = raw
+		}
+		if bErr != nil {
+			log.Printf("[audit %d] 批次 %d 失败: %v", taskID, i+1, bErr)
+			continue
+		}
+		log.Printf("[audit %d] 批次 %d 得到 %d 章节", taskID, i+1, len(chs))
+		allChapters = append(allChapters, chs...)
+		// Progress: spread 65 → 80 across batches.
+		updateProgress(65 + ((i + 1) * 15 / batchTotal))
+	}
 
-	analysisResult, model, err := ai.CallAI(prompt)
-	if err != nil {
+	if len(allChapters) == 0 {
+		// All batches failed — persist raw response and fail.
+		rawSnippet := lastRaw
+		if len(rawSnippet) > 100000 {
+			rawSnippet = rawSnippet[:100000]
+		}
+		db.DB.Exec(
+			`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, v6_report, raw_ai_response)
+			 VALUES (?, '[]', '[]', '[]', '[]', '', '', ?, '', ?)`,
+			taskID, lastModel, rawSnippet,
+		)
 		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
-			err.Error(), time.Now(), taskID)
-		telegram.SendNotification("审计失败", siteName+" 审计失败: "+err.Error())
+			"所有技术审计批次均失败", time.Now(), taskID)
+		log.Printf("[audit %d] 所有技术审计批次均失败", taskID)
+		telegram.SendNotification("审计失败", siteName+" 审计失败：AI 调用异常")
 		return
 	}
-	updateProgress(90)
 
-	// Step 5: Save results (including v6_report)
+	// Step 4b: White-hat SEO strategy chapter.
+	var strategyChapter *ai.V6Chapter
+	log.Printf("[audit %d] 调用策略 AI 生成白帽 SEO 建议...", taskID)
+	stratPrompt := ai.BuildStrategyPrompt(site.Domain, sitePages, crawlPages, gscData, gaData, yandexData)
+	if strategyCh, _, sErr := ai.CallAIStrategy(stratPrompt); sErr == nil && strategyCh != nil {
+		strategyChapter = strategyCh
+		log.Printf("[audit %d] 策略章节已生成（%d 条建议）", taskID, len(strategyCh.Issues))
+	} else {
+		log.Printf("[audit %d] 策略章节生成失败（不影响技术审计）: %v", taskID, sErr)
+	}
+	updateProgress(85)
+
+	// Compose final report (server-side totals, global ID renumber).
+	_, v6JSON := ai.ComposeV6Report(site.Domain, allChapters, strategyChapter)
+
+	// Build legacy fields for backwards compat (reading code still expects them).
+	analysisResult := &ai.AnalysisResult{
+		V6Report:       v6JSON,
+		Summary:        "",
+		Suggestions:    fmt.Sprintf("共 %d 章节", len(allChapters)+boolToInt(strategyChapter != nil)),
+		SEOIssues:      json.RawMessage("[]"),
+		CodeIssues:     json.RawMessage("[]"),
+		SecurityIssues: json.RawMessage("[]"),
+		PerfIssues:     json.RawMessage("[]"),
+		RawResponse:    lastRaw,
+	}
+	model := lastModel
+
+	// Step 5: Save results in a transaction (INSERT + UPDATE must be atomic).
 	seoJSON, _ := json.Marshal(analysisResult.SEOIssues)
 	codeJSON, _ := json.Marshal(analysisResult.CodeIssues)
 	secJSON, _ := json.Marshal(analysisResult.SecurityIssues)
 	perfJSON, _ := json.Marshal(analysisResult.PerfIssues)
 
-	db.DB.Exec(
+	tx, txErr := db.DB.Begin()
+	if txErr != nil {
+		log.Printf("[audit %d] begin tx failed: %v", taskID, txErr)
+		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
+			"数据库写入失败: "+txErr.Error(), time.Now(), taskID)
+		return
+	}
+	if _, err := tx.Exec(
 		`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, v6_report)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		taskID, string(seoJSON), string(codeJSON), string(secJSON), string(perfJSON),
 		analysisResult.Suggestions, analysisResult.Summary, model, analysisResult.V6Report,
-	)
+	); err != nil {
+		tx.Rollback()
+		log.Printf("[audit %d] insert audit_results failed: %v", taskID, err)
+		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
+			"审计结果写入失败: "+err.Error(), time.Now(), taskID)
+		return
+	}
+	if _, err := tx.Exec("UPDATE audit_tasks SET status='done', progress=100, finished_at=? WHERE id=?", time.Now(), taskID); err != nil {
+		tx.Rollback()
+		log.Printf("[audit %d] update audit_tasks failed: %v", taskID, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("[audit %d] commit tx failed: %v", taskID, err)
+		return
+	}
 
-	db.DB.Exec("UPDATE audit_tasks SET status='done', progress=100, finished_at=? WHERE id=?", time.Now(), taskID)
+	log.Printf("[audit %d] 完成: %s", taskID, analysisResult.Summary)
 	telegram.SendNotification("审计完成", siteName+" 审计完成: "+analysisResult.Summary)
 }
 
@@ -226,7 +320,7 @@ func DeleteAudit(c *gin.Context) {
 func ListAudits(c *gin.Context) {
 	siteID := c.Param("id")
 	rows, err := db.DB.Query(
-		"SELECT id, site_id, triggered_by, status, progress, error_msg, created_at, finished_at FROM audit_tasks WHERE site_id = ? ORDER BY id DESC",
+		"SELECT id, site_id, triggered_by, status, progress, error_msg, created_at, finished_at FROM audit_tasks WHERE site_id = ? ORDER BY id DESC LIMIT 200",
 		siteID,
 	)
 	if err != nil {
@@ -292,14 +386,20 @@ func GetAudit(c *gin.Context) {
 	}
 
 	// Get results if exists
-	var seoIssues, codeIssues, secIssues, perfIssues, suggestions, summary, aiModel, v6Report string
+	var seoIssues, codeIssues, secIssues, perfIssues, suggestions, summary, aiModel, v6Report, rawAI string
 	err = db.DB.QueryRow(
-		"SELECT seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, COALESCE(v6_report,'') FROM audit_results WHERE task_id = ?",
+		"SELECT seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, COALESCE(v6_report,''), COALESCE(raw_ai_response,'') FROM audit_results WHERE task_id = ?",
 		taskID,
-	).Scan(&seoIssues, &codeIssues, &secIssues, &perfIssues, &suggestions, &summary, &aiModel, &v6Report)
+	).Scan(&seoIssues, &codeIssues, &secIssues, &perfIssues, &suggestions, &summary, &aiModel, &v6Report, &rawAI)
 
 	var resultData interface{}
 	if err == nil {
+		// Only expose the raw AI response when v6_report is empty (i.e. parse
+		// failed) so the frontend can surface it for debugging.
+		rawForAPI := ""
+		if v6Report == "" && rawAI != "" {
+			rawForAPI = rawAI
+		}
 		resultData = gin.H{
 			"seo_issues":      json.RawMessage(seoIssues),
 			"code_issues":     json.RawMessage(codeIssues),
@@ -309,6 +409,7 @@ func GetAudit(c *gin.Context) {
 			"summary":         summary,
 			"ai_model":        aiModel,
 			"v6_report":       v6Report,
+			"raw_ai_response": rawForAPI,
 		}
 	}
 
@@ -377,7 +478,7 @@ func GetAuditPageByType(c *gin.Context) {
 }
 
 
-func max(a, b int) int {
+func max(a, b int) int { // nolint:unused - kept for clarity against Go builtin shadowing
 	if a > b {
 		return a
 	}
