@@ -215,7 +215,7 @@ async function rewriteTDK() {
       ElMessage.success(`已生成 ${tdkResults.value.length} 个版本`)
       history.value.unshift({ id: Date.now(), type: 'tdk', original: tdkForm.value.title || tdkForm.value.desc, version_count: tdkResults.value.length, results: tdkResults.value, created_at: new Date().toLocaleString() })
     }
-  } catch (e) { console.error(e) }
+  } catch (e) { console.error(e); ElMessage.error('TDK 生成失败') }
   rewriting.value.tdk = false
 }
 
@@ -235,7 +235,7 @@ async function rewriteContent() {
     })
     contentResults.value = res.data || []
     if (contentResults.value.length) ElMessage.success(`已生成 ${contentResults.value.length} 个版本`)
-  } catch (e) { console.error(e) }
+  } catch (e) { console.error(e); ElMessage.error('内容二创失败') }
   rewriting.value.content = false
 }
 

@@ -126,6 +126,7 @@ const perPage = 100
 const totalCount = ref(0)
 const summary = ref({ total_all: 0, total_dead: 0, total_redirect: 0, total_ok: 0 })
 let pollTimer = null
+let unmounted = false
 
 const displayResults = computed(() => {
   if (!search.value) return results.value
@@ -201,6 +202,7 @@ async function startCheck() {
 }
 
 async function pollProgress() {
+  if (unmounted) return
   try {
     const res = await apiClient.getDeadLinkProgress(selectedSiteId.value)
     const d = res.data
@@ -209,8 +211,8 @@ async function pollProgress() {
     if (d.status === 'done') {
       checking.value = false
       await loadResults()
-      ElMessage.success(`检测完成，共 ${results.value.length} 条链接，死链 ${deadLinks.value.length} 条`)
-    } else {
+      ElMessage.success(`检测完成，共 ${summary.value.total_all} 条链接，死链 ${summary.value.total_dead} 条`)
+    } else if (!unmounted) {
       pollTimer = setTimeout(pollProgress, 2000)
     }
   } catch {
@@ -223,7 +225,7 @@ onMounted(async () => {
   sites.value = res.data || []
   if (sites.value.length) { selectedSiteId.value = sites.value[0].id; loadResults() }
 })
-onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
+onUnmounted(() => { unmounted = true; if (pollTimer) clearTimeout(pollTimer) })
 </script>
 
 <style scoped>

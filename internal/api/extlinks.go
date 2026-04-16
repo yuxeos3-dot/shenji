@@ -29,7 +29,7 @@ func GetExternalLinks(c *gin.Context) {
 	rows, err := db.DB.Query(`SELECT id, site_id, url, anchor_text, source_url, rel_type, category, note, status_code, checked_at, created_at
 		FROM external_links WHERE site_id = ? ORDER BY id DESC LIMIT ? OFFSET ?`, siteID, perPage, offset)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"items": []gin.H{}, "total": 0}})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
 		return
 	}
 	defer rows.Close()
@@ -59,7 +59,7 @@ func GetExternalLinks(c *gin.Context) {
 func ListExtlinkPool(c *gin.Context) {
 	rows, err := db.DB.Query("SELECT id, url, name, created_at FROM extlink_pool ORDER BY id DESC LIMIT 500")
 	if err != nil {
-		c.JSON(200, gin.H{"code": 0, "data": []gin.H{}})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
 		return
 	}
 	defer rows.Close()
@@ -137,6 +137,13 @@ func CreateExternalLink(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "参数错误"})
 		return
 	}
+	if req.SiteID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "site_id 必填"})
+		return
+	}
+	if !canAccessSite(c, strconv.FormatInt(req.SiteID, 10)) {
+		return
+	}
 	if req.RelType == "" {
 		req.RelType = "dofollow"
 	}
@@ -152,6 +159,15 @@ func CreateExternalLink(c *gin.Context) {
 
 func UpdateExternalLink(c *gin.Context) {
 	id := c.Param("id")
+	// Verify ownership via site_id
+	var siteID string
+	if err := db.DB.QueryRow("SELECT site_id FROM external_links WHERE id=?", id).Scan(&siteID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "外链不存在"})
+		return
+	}
+	if !canAccessSite(c, siteID) {
+		return
+	}
 	var req ExternalLinkRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "参数错误"})
@@ -164,6 +180,15 @@ func UpdateExternalLink(c *gin.Context) {
 
 func DeleteExternalLink(c *gin.Context) {
 	id := c.Param("id")
+	// Verify ownership via site_id
+	var siteID string
+	if err := db.DB.QueryRow("SELECT site_id FROM external_links WHERE id=?", id).Scan(&siteID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "外链不存在"})
+		return
+	}
+	if !canAccessSite(c, siteID) {
+		return
+	}
 	db.DB.Exec("DELETE FROM external_links WHERE id = ?", id)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "删除成功"})
 }

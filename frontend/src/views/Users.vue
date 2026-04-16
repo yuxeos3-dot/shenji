@@ -91,7 +91,7 @@ const showDialog = ref(false)
 const editId = ref(null)
 const form = ref({ name:'', email:'', password:'', role:'member', telegram_id:'' })
 
-async function loadUsers() { try { const res = await api.listUsers(); users.value = res.data } catch (e) { console.error('加载用户失败', e) } }
+async function loadUsers() { try { const res = await api.listUsers(); users.value = res.data } catch (e) { console.error('加载用户失败', e); ElMessage.error('加载用户列表失败') } }
 function openAdd() { editId.value = null; form.value = { name:'', email:'', password:'', role:'member', telegram_id:'' }; showDialog.value = true }
 function openEdit(u) { editId.value = u.id; form.value = { name:u.name, email:u.email, role:u.role, telegram_id:u.telegram_id||'' }; showDialog.value = true }
 

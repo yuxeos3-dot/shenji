@@ -187,7 +187,7 @@ onMounted(async () => {
     if (res.data?.content) {
       polishedContent.value = res.data.content
     }
-  } catch (e) { console.error(e) }
+  } catch (e) { console.error(e); ElMessage.error('加载报告失败') }
 })
 
 function validate() {

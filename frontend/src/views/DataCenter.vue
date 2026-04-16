@@ -182,10 +182,10 @@ async function loadData() {
   gscData.value=g.data||[]; gaData.value=a.data||[]; bingData.value=b.data||[]; yandexData.value=y.data||[]
 }
 
-async function syncGSC(){syncing.value.gsc=true;try{await apiClient.syncGSC(route.params.id);ElMessage.success('GSC同步成功');loadData()}catch{}finally{syncing.value.gsc=false}}
-async function syncGA(){syncing.value.ga=true;try{await apiClient.syncGA(route.params.id);ElMessage.success('GA4同步成功');loadData()}catch{}finally{syncing.value.ga=false}}
-async function syncBing(){syncing.value.bing=true;try{await apiClient.syncBing(route.params.id);ElMessage.success('Bing同步成功');loadData()}catch{}finally{syncing.value.bing=false}}
-async function syncYandex(){syncing.value.yandex=true;try{await apiClient.syncYandex(route.params.id);ElMessage.success('Yandex同步成功');loadData()}catch{}finally{syncing.value.yandex=false}}
+async function syncGSC(){syncing.value.gsc=true;try{await apiClient.syncGSC(route.params.id);ElMessage.success('GSC同步成功');loadData()}catch(e){console.error(e);ElMessage.error('GSC同步失败')}finally{syncing.value.gsc=false}}
+async function syncGA(){syncing.value.ga=true;try{await apiClient.syncGA(route.params.id);ElMessage.success('GA4同步成功');loadData()}catch(e){console.error(e);ElMessage.error('GA4同步失败')}finally{syncing.value.ga=false}}
+async function syncBing(){syncing.value.bing=true;try{await apiClient.syncBing(route.params.id);ElMessage.success('Bing同步成功');loadData()}catch(e){console.error(e);ElMessage.error('Bing同步失败')}finally{syncing.value.bing=false}}
+async function syncYandex(){syncing.value.yandex=true;try{await apiClient.syncYandex(route.params.id);ElMessage.success('Yandex同步成功');loadData()}catch(e){console.error(e);ElMessage.error('Yandex同步失败')}finally{syncing.value.yandex=false}}
 
 onMounted(loadData)
 watch(()=>route.params.id,()=>{if(route.params.id)loadData()})

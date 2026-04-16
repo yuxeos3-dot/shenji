@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -58,7 +59,14 @@ func YandexCallback(c *gin.Context) {
 		RefreshToken string `json:"refresh_token"`
 		ExpiresIn    int    `json:"expires_in"`
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "解析Token响应失败"})
+		return
+	}
+	if result.AccessToken == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "Yandex Token 为空"})
+		return
+	}
 
 	db.DB.Exec(
 		"INSERT OR REPLACE INTO oauth_tokens (service, access_token, refresh_token, expires_at) VALUES ('yandex', ?, ?, ?)",
@@ -109,7 +117,10 @@ func getYandexUserID(token string) (string, error) {
 			ID  string `json:"id"`
 			UID string `json:"uid"`
 		}
-		json.NewDecoder(resp.Body).Decode(&info)
+		if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+			resp.Body.Close()
+			return "", fmt.Errorf("解析Yandex用户信息失败: %w", err)
+		}
 		loginID := info.ID
 		if loginID == "" {
 			loginID = info.UID
@@ -121,8 +132,7 @@ func getYandexUserID(token string) (string, error) {
 				var wu struct {
 					UserID int64 `json:"user_id"`
 				}
-				json.Unmarshal(data, &wu)
-				if wu.UserID > 0 {
+				if err := json.Unmarshal(data, &wu); err == nil && wu.UserID > 0 {
 					return fmt.Sprintf("%d", wu.UserID), nil
 				}
 			}
@@ -140,7 +150,9 @@ func getYandexUserID(token string) (string, error) {
 	var u struct {
 		UserID int64 `json:"user_id"`
 	}
-	json.Unmarshal(data, &u)
+	if err := json.Unmarshal(data, &u); err != nil {
+		return "", fmt.Errorf("解析Yandex Webmaster用户ID失败: %w", err)
+	}
 	if u.UserID == 0 {
 		return "", fmt.Errorf("Yandex用户ID为空")
 	}
@@ -262,7 +274,9 @@ func SyncYandexData(c *gin.Context) {
 				Value int    `json:"value"`
 			} `json:"indicators"`
 		}
-		json.Unmarshal(histData, &hist)
+		if err := json.Unmarshal(histData, &hist); err != nil {
+			log.Printf("[yandex] unmarshal history failed: %v", err)
+		}
 
 		clicksArr := hist.Indicators["TOTAL_CLICKS"]
 		showsArr := hist.Indicators["TOTAL_SHOWS"]
@@ -310,7 +324,9 @@ func SyncYandexData(c *gin.Context) {
 				Value int `json:"value"`
 			} `json:"indicators"`
 		}
-		json.Unmarshal(indexData, &idxResp)
+		if err := json.Unmarshal(indexData, &idxResp); err != nil {
+			log.Printf("[yandex] unmarshal index data failed: %v", err)
+		}
 		if docs, ok := idxResp.Indicators["SEARCHABLE"]; ok && len(docs) > 0 {
 			indexCount = docs[len(docs)-1].Value
 		}

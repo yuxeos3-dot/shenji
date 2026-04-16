@@ -6,10 +6,19 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"seo-system/internal/db"
 )
+
+// escapeMD escapes Telegram Markdown V1 special characters.
+func escapeMD(s string) string {
+	for _, ch := range []string{"_", "*", "`", "["} {
+		s = strings.ReplaceAll(s, ch, "\\"+ch)
+	}
+	return s
+}
 
 func SendNotification(title, message string) {
 	botToken := db.GetSetting("telegram_bot_token")
@@ -20,7 +29,7 @@ func SendNotification(title, message string) {
 		return
 	}
 
-	text := fmt.Sprintf("*%s*\n%s", title, message)
+	text := fmt.Sprintf("*%s*\n%s", escapeMD(title), escapeMD(message))
 	sendMessage(botToken, chatID, text)
 }
 
@@ -30,7 +39,7 @@ func SendToUser(telegramID, title, message string) {
 		return
 	}
 
-	text := fmt.Sprintf("*%s*\n%s", title, message)
+	text := fmt.Sprintf("*%s*\n%s", escapeMD(title), escapeMD(message))
 	sendMessage(botToken, telegramID, text)
 }
 

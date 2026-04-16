@@ -99,7 +99,7 @@ async function changePassword() {
     ElMessage.success('密码修改成功')
     showPasswordDialog.value = false
     pwdForm.value = { old_password: '', new_password: '' }
-  } catch (e) { console.error(e) }
+  } catch (e) { console.error(e); ElMessage.error('密码修改失败') }
 }
 </script>
 

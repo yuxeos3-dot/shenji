@@ -39,15 +39,17 @@ func CORS() gin.HandlerFunc {
 		if origin != "" && isOriginAllowed(origin) {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Vary", "Origin")
-		} else if len(allowedOrigins) == 0 {
-			// No whitelist: allow all (backwards compat for dev)
-			c.Header("Access-Control-Allow-Origin", "*")
+			c.Header("Access-Control-Allow-Credentials", "true")
+		} else if len(allowedOrigins) == 0 && origin != "" {
+			// No whitelist: reflect origin (dev mode) — avoid wildcard + credentials conflict
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Vary", "Origin")
+			c.Header("Access-Control-Allow-Credentials", "true")
 		}
 		// If origin is not allowed and whitelist is set, no ACAO header → browser blocks
 
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
-		c.Header("Access-Control-Allow-Credentials", "true")
 		c.Header("Access-Control-Max-Age", "86400")
 
 		if c.Request.Method == "OPTIONS" {
