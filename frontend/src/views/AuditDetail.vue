@@ -278,7 +278,7 @@ async function loadData() {
     if (task.value.status === 'running' || task.value.status === 'pending') {
       pollTimer = setTimeout(loadData, 3000)
     }
-  } catch {}
+  } catch (e) { console.error(e) }
 }
 
 onMounted(loadData)

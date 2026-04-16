@@ -187,7 +187,7 @@ onMounted(async () => {
     if (res.data?.content) {
       polishedContent.value = res.data.content
     }
-  } catch {}
+  } catch (e) { console.error(e) }
 })
 
 function validate() {
@@ -279,7 +279,7 @@ async function copyPolished() {
   try {
     await navigator.clipboard.writeText(polishedContent.value)
     ElMessage.success('已复制')
-  } catch {}
+  } catch (e) { console.error(e) }
 }
 </script>
 

@@ -223,7 +223,7 @@ async function loadData() {
       schedMode.value = 'daily'
       dailyHour.value = s.audit_daily_hour >= 0 ? s.audit_daily_hour : 9
     }
-  } catch {}
+  } catch (e) { console.error('加载站点数据失败', e) }
 
   // 有进行中任务则3秒后自动刷新
   const hasRunning = audits.value.some(a => a.status === 'running' || a.status === 'pending')
@@ -263,7 +263,7 @@ async function deleteAudit(a) {
     await api.deleteAudit(a.id)
     ElMessage.success('审计记录已删除')
     loadData()
-  } catch {}
+  } catch (e) { if (e !== 'cancel') console.error('删除审计失败', e) }
 }
 
 async function fetchAllPages() {
@@ -276,7 +276,7 @@ async function fetchAllPages() {
     try {
       await api.fetchSitePage(route.params.id, p.id)
       ok++
-    } catch { fail++ }
+    } catch (e) { fail++; console.error('抓取页面失败', p.url, e) }
     finally { p.fetching = false }
   }
   fetchingAll.value = false
@@ -296,7 +296,7 @@ async function addPage() {
     showAddPage.value = false
     newPage.value = { name: '', url: '' }
     loadData()
-  } catch {}
+  } catch (e) { console.error('添加页面失败', e) }
   finally { addingPage.value = false }
 }
 
@@ -305,7 +305,7 @@ async function deletePage(p) {
     await api.deleteSitePage(route.params.id, p.id)
     ElMessage.success('已删除')
     loadData()
-  } catch {}
+  } catch (e) { console.error('删除页面失败', e) }
 }
 
 async function fetchPage(p) {
@@ -314,7 +314,7 @@ async function fetchPage(p) {
     const res = await api.fetchSitePage(route.params.id, p.id)
     ElMessage.success(`抓取完成，状态码：${res.data.status_code}，耗时：${res.data.ttfb_ms}ms`)
     loadData()
-  } catch {}
+  } catch (e) { console.error('抓取页面失败', e) }
   finally { p.fetching = false }
 }
 
@@ -323,7 +323,7 @@ async function viewSource(p) {
     const res = await api.getSitePageSource(route.params.id, p.id)
     sourceData.value = res.data
     showSource.value = true
-  } catch {}
+  } catch (e) { console.error('查看源码失败', e) }
 }
 
 function copySource() {
@@ -341,13 +341,13 @@ async function saveSchedule() {
     }
     await api.updateSite(route.params.id, payload)
     ElMessage.success('巡检计划已保存')
-  } catch {}
+  } catch (e) { console.error('保存巡检计划失败', e) }
   finally { savingSched.value = false }
 }
 
 async function triggerAudit() {
   auditing.value = true
-  try { await api.triggerAudit(route.params.id); ElMessage.success('巡检已启动 — 将自动抓取最新源码后开始分析'); loadData() } catch {} finally { auditing.value = false }
+  try { await api.triggerAudit(route.params.id); ElMessage.success('巡检已启动 — 将自动抓取最新源码后开始分析'); loadData() } catch (e) { console.error('触发巡检失败', e) } finally { auditing.value = false }
 }
 </script>
 

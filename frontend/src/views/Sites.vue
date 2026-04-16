@@ -213,7 +213,7 @@ async function editSite(row) {
   }
   showDialog.value = true
 }
-async function loadSites() { loading.value = true; try { const res = await api.listSites(); sites.value = res.data } catch {} finally { loading.value = false } }
+async function loadSites() { loading.value = true; try { const res = await api.listSites(); sites.value = res.data } catch (e) { console.error('加载站点失败', e) } finally { loading.value = false } }
 async function saveSite() {
   if (!form.value.domain) { ElMessage.warning('请填写域名'); return }
   if (!form.value.domain.startsWith('http://') && !form.value.domain.startsWith('https://')) { ElMessage.warning('域名必须以 https:// 或 http:// 开头'); return }
@@ -221,17 +221,19 @@ async function saveSite() {
   try {
     if (editId.value) { await api.updateSite(editId.value, form.value); ElMessage.success('站点信息已更新') }
     else { await api.createSite(form.value); ElMessage.success('站点添加成功') }
-    showDialog.value = false; loadSites()
-  } catch {}
+    showDialog.value = false
+    form.value = { domain: '', name: '', gsc_site_url: '', ga_property_id: '', yandex_host_id: '', bing_site_url: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' }
+    loadSites()
+  } catch (e) { console.error('保存站点失败', e) }
 }
 async function deleteSite(row) {
   try {
     await ElMessageBox.confirm(`确定要删除站点「${row.name || row.domain}」吗？删除后不可恢复。`, '确认删除', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' })
     await api.deleteSite(row.id); ElMessage.success('站点已删除'); loadSites()
-  } catch {}
+  } catch (e) { if (e !== 'cancel') console.error('删除站点失败', e) }
 }
 async function triggerAudit(row) {
-  try { const res = await api.triggerAudit(row.id); ElMessage.success(`巡检已启动（任务ID：${res.data.task_id}）— 将自动抓取最新源码后开始分析`); loadSites() } catch {}
+  try { const res = await api.triggerAudit(row.id); ElMessage.success(`巡检已启动（任务ID：${res.data.task_id}）— 将自动抓取最新源码后开始分析`); loadSites() } catch (e) { console.error('触发巡检失败', e) }
 }
 onMounted(loadSites)
 </script>

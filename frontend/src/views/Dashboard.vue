@@ -81,11 +81,11 @@ const stats = computed(() => [
 ])
 
 async function loadOnline() {
-  try { const res = await api.getOnlineUsers(); online.value = res.data } catch {}
+  try { const res = await api.getOnlineUsers(); online.value = res.data } catch (e) { console.error('加载在线用户失败', e) }
 }
 
 onMounted(async () => {
-  try { const res = await api.listSites(); sites.value = res.data } catch {}
+  try { const res = await api.listSites(); sites.value = res.data } catch (e) { console.error('加载站点列表失败', e) }
   loadOnline()
   onlineTimer = setInterval(loadOnline, 30000) // refresh every 30s
 })
