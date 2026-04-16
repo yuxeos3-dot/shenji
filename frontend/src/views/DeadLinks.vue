@@ -76,7 +76,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in results" :key="r.id" :class="rowClass(r.status_code)">
+            <tr v-for="r in displayResults" :key="r.id" :class="rowClass(r.status_code)">
               <td>
                 <span :class="['status-dot', statusClass(r.status_code)]">{{ r.status_code || '?' }}</span>
               </td>
@@ -126,6 +126,12 @@ const perPage = 100
 const totalCount = ref(0)
 const summary = ref({ total_all: 0, total_dead: 0, total_redirect: 0, total_ok: 0 })
 let pollTimer = null
+
+const displayResults = computed(() => {
+  if (!search.value) return results.value
+  const q = search.value.toLowerCase()
+  return results.value.filter(r => r.url?.toLowerCase().includes(q))
+})
 
 function statusClass(code) {
   if (!code || code === 0) return 'dot-unknown'

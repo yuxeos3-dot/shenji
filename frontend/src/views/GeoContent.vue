@@ -169,7 +169,7 @@
         <div v-if="curArticle">
           <div style="margin-bottom:10px"><el-tag size="small">{{ curArticle.ai_model }}</el-tag><el-tag size="small" type="info" style="margin-left:6px">{{ curArticle.word_count }}字</el-tag><el-tag v-if="curArticle.keywords" size="small" type="warning" style="margin-left:6px">{{ curArticle.keywords }}</el-tag></div>
           <div v-if="curArticle.meta_description" style="background:#F0F9FF;border-left:3px solid #3B82F6;padding:8px 12px;margin-bottom:12px;font-size:13px;color:#1E40AF;border-radius:4px">{{ curArticle.meta_description }}</div>
-          <div style="font-size:14px;line-height:1.85;white-space:pre-wrap;max-height:60vh;overflow-y:auto;padding:12px;background:#FAFAFA;border-radius:8px;border:1px solid #eee" v-html="(curArticle.content||'').replace(/\n/g,'<br>')"></div>
+          <pre style="font-size:14px;line-height:1.85;white-space:pre-wrap;max-height:60vh;overflow-y:auto;padding:12px;background:#FAFAFA;border-radius:8px;border:1px solid #eee;font-family:inherit;margin:0">{{ curArticle.content }}</pre>
         </div>
       </el-dialog>
     </el-tab-pane>
