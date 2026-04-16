@@ -192,7 +192,7 @@ async function syncGSC() { syncing.value=true; try { await api.syncGSCData(siteI
 
 // Libs
 const titleLibs = ref([]); const showLibForm = ref(false); const libForm = ref({name:'',description:''}); const showTitles = ref(false); const curLib = ref(null); const curTitles = ref([]); const titlesPage = ref(1); const titlesTotal = ref(0); const showImport = ref(false); const importText = ref(''); const importing = ref(false)
-const gscLoadingIds = ref(new Set()); const showGSCImport = ref(false); const gscImportLimit = ref(100)
+const showGSCImport = ref(false); const gscImportLimit = ref(100)
 async function loadLibs() { try { titleLibs.value = (await api.geoListTitleLibs({site_id:siteId.value,content_type:'geo'})).data } catch {} }
 async function createLib() { await api.geoCreateTitleLib({name:libForm.value.name,description:libForm.value.description,site_id:siteId.value,content_type:'geo'}); showLibForm.value=false; libForm.value={name:'',description:''}; loadLibs(); ElMessage.success('创建成功') }
 async function deleteLib(r) { await ElMessageBox.confirm('删除「'+r.name+'」？'); await api.geoDeleteTitleLib(r.id,'geo'); loadLibs() }
