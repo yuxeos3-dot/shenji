@@ -232,6 +232,325 @@ func BuildStrategyPrompt(domain string, sitePages []SitePageForPrompt, crawlPage
 	return prompt
 }
 
+// ─── Batched technical audit ─────────────────────────────────────────────────
+//
+// ai.router.team caps output at ~16k chars per response regardless of
+// max_tokens. A full 50-issue audit needs ~35-45k chars, so we split into
+// multiple smaller calls, each producing only part of the categories. Each
+// batch returns pure chapters (no top-level stats/summary) which the caller
+// merges.
+
+// TechBatch defines one batch of the technical audit.
+type TechBatch struct {
+	Name       string // human-readable, for logs
+	Categories string // markdown body describing which 大类 to check this round
+}
+
+// TechnicalBatches splits the 24 + 5 附加类 into two halves so each batch's
+// output fits comfortably under the 16k-char output cap.
+var TechnicalBatches = []TechBatch{
+	{
+		Name: "技术审计A（基础 + 结构化 + 性能）",
+		Categories: `### 第1类 TDK 与基础 Meta
+- title 标签：长度(30-60 字)、是否含核心关键词、是否跨页面重复、是否含品牌词
+- description：长度(120-160 字)、是否有实质内容、是否与 title 重复
+- keywords、og:title/og:description/og:image、twitter:card、canonical
+
+### 第2类 H 标签结构
+- H1 是否唯一/存在/与 title 呼应/被 CSS 隐藏
+- H2-H6 层次是否合理、是否跳级、是否含目标关键词
+
+### 第3类 图片 SEO
+- img alt 完整性与有意义性、loading=lazy 是否误用于首屏、width/height、格式
+
+### 第4类 链接与内链
+- href 有效性、内链数量、重要页面是否在导航、nofollow 合理性、锚文本描述性、孤立页面
+
+### 第5类 结构化数据 Schema
+- ld+json 存在性、Schema 类型与页面匹配、必填字段完整性、AggregateRating、BreadcrumbList、Organization/WebSite
+
+### 第6类 robots.txt & Sitemap
+- robots.txt 存在性、是否误屏蔽、Sitemap 声明、Sitemap 可访问性、lastmod 真实性
+
+### 第7类 Core Web Vitals HTML 信号
+- LCP 元素 fetchpriority、首屏 preload、render-blocking CSS/JS、滥用 lazy、font-display、关键 CSS 内联
+
+### 第8类 URL 结构
+- 简洁语义化、多余参数、大小写、尾斜杠、分页 URL
+
+### 第9类 安全响应头
+- HSTS、X-Frame-Options/CSP、X-Content-Type-Options、Server/X-Powered-By 泄露
+
+### 第16类 资源压缩与缓存
+- gzip/br、cache-control、WebP/AVIF、CSS/JS minify、第三方脚本数
+
+### 附加类E 页面加载速度
+- 同步 JS 未 async/defer、第三方脚本数、preconnect/dns-prefetch、font-display:swap、@import 串行、大型 JS 整体引入、iframe 阻塞
+
+### 第24类 HTTPS 与安全
+- 混合内容、证书、内部链接 HTTPS、form action HTTPS`,
+	},
+	{
+		Name: "技术审计B（内容 + 移动 + 影视 + 附加）",
+		Categories: `### 第10类 内容质量
+- 首页 >200 字实质内容、详情页正文充实度、模板重复、关键词堆砌、用户价值
+
+### 第11类 移动端适配
+- viewport、字号 ≥16px、水平滚动、点击目标 ≥48px
+
+### 第12类 JavaScript SEO
+- noscript 降级、重要内容依赖 JS、纯 CSR、JSON-LD 动态注入、模板语法暴露
+
+### 第13类 重定向规范化
+- HTTP→HTTPS、www 统一、多跳链、分页第 1 页规范化
+
+### 第14类 爬虫陷阱
+- 无限分页、分面 URL 组合、Session ID、日历归档
+
+### 第15类 E-E-A-T 信号
+- 作者信息、关于我们/联系方式、DMCA/版权、外链权威来源、组织信息完整性
+
+### 第17类 国际化
+- hreflang、HTML lang、UTF-8、canonical 与 hreflang 关系
+
+### 第18类 RSS Feed 质量
+- 存在性/可访问性、域名一致性、更新时效、URL canonical
+
+### 第19类 内链分析
+- 导航覆盖核心分类、footer 重要链接、面包屑、分页 rel=next/prev、推荐模块
+
+### 第20类 分页 SEO
+- 分页 title 差异化、canonical、第 2+ 页是否误 noindex、参数暴露
+
+### 第21类 视频/媒体 SEO（影视站专项）
+- 视频标题关键词、VideoObject Schema、缩略图 schema、视频 Sitemap、播出平台信息
+
+### 第22类 404 与软 404
+- 404 返回正确状态码、友好提示、软 404、noindex 页面被 sitemap 收录
+
+### 第23类 重复内容
+- 多 URL 同内容、canonical 正确性、打印版/移动版 canonical、标签页重叠
+
+### 附加类A 隐藏文本与黑帽手法（Google 惩罚项）
+- position:-9999px、display:none 含关键词、同色文字、font-size:0、overflow:hidden 裁剪、clip 隐藏
+
+### 附加类B 关键词堆砌检测
+- meta keywords >200 字、正文密度异常、隐藏关键词列表、footer 堆砌
+
+### 附加类C 代码质量问题
+- HTML 嵌套合法性、重复 ID、内联 style 过度、注释泄露敏感信息、javascript:void(0)、form 无 action、空 alt/title、遗留 console.log、隐藏 input
+
+### 附加类D 安全漏洞风险
+- Server/X-Powered-By/X-Generator 版本、API 密钥/Token 硬编码、敏感目录、混合内容、Cookie 属性、CORS、管理员路径`,
+	},
+}
+
+// BuildTechPromptBatch builds a focused prompt for one technical batch.
+func BuildTechPromptBatch(batch TechBatch, domain string, sitePages []SitePageForPrompt,
+	crawlPages []crawler.PageResult, gsc *GSCDataForPrompt, ga *GADataForPrompt, yandex *YandexDataForPrompt) string {
+
+	now := time.Now().Format("2006-01-02 15:04:05")
+	var prompt strings.Builder
+	fmt.Fprintf(&prompt, `你是一位资深 SEO 技术审计专家。我们已为你预先抓取好所有页面 HTML 源码，你基于源码直接分析，不要声称需要更多资料。
+
+## 站点
+- 域名：%s
+- 审计时间：%s
+- 本次批次：%s
+
+## 本次只检查以下类别（其余类别会由其它调用覆盖，不要越界输出）
+
+%s
+
+---
+
+## 已抓取页面源码（用于证据提取）
+
+`, domain, now, batch.Name, batch.Categories)
+
+	if len(sitePages) > 0 {
+		prompt.WriteString("### 用户监控页面\n\n")
+		for _, p := range sitePages {
+			html := p.HTML
+			if len(html) > 15000 {
+				html = html[:15000] + "\n... [截断]"
+			}
+			fmt.Fprintf(&prompt, "#### %s\nURL: %s\n状态码: %d  TTFB: %dms  抓取时间: %s\n\n```html\n%s\n```\n\n---\n\n",
+				p.Name, p.URL, p.StatusCode, p.TTFB, p.LastFetchedAt, html)
+		}
+	}
+	if len(crawlPages) > 0 {
+		prompt.WriteString("### 系统抓取页面\n\n")
+		for _, p := range crawlPages {
+			if p.HTML == "" {
+				continue
+			}
+			html := p.HTML
+			if len(html) > 12000 {
+				html = html[:12000] + "\n... [截断]"
+			}
+			fmt.Fprintf(&prompt, "#### 类型: %s\nURL: %s  状态: %d  TTFB: %dms\n\n```html\n%s\n```\n\n---\n\n",
+				p.PageType, p.URL, p.StatusCode, p.TTFB, html)
+		}
+	}
+	if gsc != nil {
+		fmt.Fprintf(&prompt, "\n### GSC\n点击 %d 展示 %d CTR %.2f%% 排名 %.1f\n关键词: %s\n页面: %s\n\n",
+			gsc.Clicks, gsc.Impressions, gsc.CTR*100, gsc.Position, gsc.Keywords, gsc.Pages)
+	}
+	if ga != nil {
+		fmt.Fprintf(&prompt, "### GA\n会话 %d 用户 %d 浏览 %d 渠道 %s\n\n", ga.Sessions, ga.Users, ga.Pageviews, ga.Channels)
+	}
+	if yandex != nil {
+		fmt.Fprintf(&prompt, "### Yandex\n收录 %d 错误 %s\n\n", yandex.IndexCount, yandex.Errors)
+	}
+
+	prompt.WriteString(`---
+
+## 输出格式（非常重要）
+
+**只返回 JSON，不要 markdown 代码块标记。严禁在 JSON 前后出现任何解释文字。**
+
+输出结构极简：
+
+{"chapters":[{"title":"一、TDK与基础Meta","issues":[{"id":1,"severity":"严重","module":"TDK","title":"首页description缺失","scope":"首页","evidence_label":"首页 <head>","evidence_code":"<head>\n  <title>示例</title>\n</head>","current_status":"首页缺少 meta description","fix_suggestion":"在 <head> 中添加 <meta name=\"description\" content=\"...\">\n• 长度 120-160 字符\n• 每页唯一\n• 验收：用 GSC 覆盖率报告确认无缺失"}]}]}
+
+**严格字段要求：**
+- severity 只能是：致命/严重/中等/低
+- id 在本批次内连续从 1 开始（不用担心跨批次冲突，后端会重排）
+- title ≤ 20 字、scope ≤ 15 字、evidence_label ≤ 20 字
+- evidence_code：3-10 行真实源码，不得编造
+- current_status：**≤ 40 字**，只说缺什么/错什么，不解释原理不推断后果
+- fix_suggestion：**200-400 字详细**，必须含：① 可复制的 HTML/配置代码 ② 3-5 条关键参数 ③ 验收方式
+
+**完整性要求：本批次涉及的每一个大类都必须至少出现一次**（完全合规的大类在该章里放一条 severity=低 的"本类无明显问题"占位 issue）。`)
+	return prompt.String()
+}
+
+// CallAIChapters calls the AI with a batched prompt and returns just the
+// chapters array (no top-level stats). This is the preferred form for the
+// split-call architecture.
+func CallAIChapters(prompt string) ([]V6Chapter, string, string, error) {
+	apiURL := db.GetSetting("ai_api_url")
+	apiKey := db.GetSetting("ai_api_key")
+	model := db.GetSetting("ai_model")
+	if apiURL == "" {
+		apiURL = "https://ai.router.team/v1"
+	}
+	if model == "" {
+		model = "claude-sonnet-4-6"
+	}
+	maxTok := 16000
+	if v := db.GetSetting("ai_max_tokens"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 128000 {
+			maxTok = n
+		}
+	}
+
+	reqBody := map[string]interface{}{
+		"model":       model,
+		"messages":    []map[string]string{{"role": "user", "content": prompt}},
+		"max_tokens":  maxTok,
+		"temperature": 0.2,
+	}
+	jsonBody, _ := json.Marshal(reqBody)
+	req, _ := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	client := &http.Client{Timeout: 300 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", model, fmt.Errorf("AI 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
+	if err != nil {
+		return nil, "", model, err
+	}
+	if resp.StatusCode != 200 {
+		snippet := string(body)
+		if len(snippet) > 2000 {
+			snippet = snippet[:2000]
+		}
+		return nil, "", model, fmt.Errorf("AI 错误 HTTP %d: %s", resp.StatusCode, snippet)
+	}
+	var apiResp struct {
+		Choices []struct {
+			Message      struct{ Content string `json:"content"` } `json:"message"`
+			FinishReason string                                    `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, "", model, err
+	}
+	if len(apiResp.Choices) == 0 {
+		return nil, "", model, fmt.Errorf("AI 无返回")
+	}
+	raw := apiResp.Choices[0].Message.Content
+	content := extractJSON(raw)
+	content = repairJSON(content)
+
+	var wrapper struct {
+		Chapters []V6Chapter `json:"chapters"`
+	}
+	if err := json.Unmarshal([]byte(content), &wrapper); err == nil && len(wrapper.Chapters) > 0 {
+		// Drop trailing chapters with no issues (likely truncated).
+		for len(wrapper.Chapters) > 0 && len(wrapper.Chapters[len(wrapper.Chapters)-1].Issues) == 0 {
+			wrapper.Chapters = wrapper.Chapters[:len(wrapper.Chapters)-1]
+		}
+		return wrapper.Chapters, raw, model, nil
+	}
+	return nil, raw, model, fmt.Errorf("AI 返回无法解析为 chapters（预览: %.200s）", content)
+}
+
+// ComposeV6Report assembles a full V6Report from batched chapters and the
+// optional strategy chapter. Totals/severity counts are computed server-side.
+func ComposeV6Report(domain string, chapters []V6Chapter, strategy *V6Chapter) (*V6Report, string) {
+	out := &V6Report{
+		Domain:      domain,
+		GeneratedAt: time.Now().Format("2006-01-02 15:04:05"),
+		Chapters:    chapters,
+	}
+	if strategy != nil && len(strategy.Issues) > 0 {
+		out.Chapters = append(out.Chapters, *strategy)
+	}
+
+	// Renumber issue IDs globally for display consistency.
+	gid := 1
+	for ci := range out.Chapters {
+		for ii := range out.Chapters[ci].Issues {
+			out.Chapters[ci].Issues[ii].ID = gid
+			gid++
+		}
+	}
+
+	// Recompute totals + severity buckets + build a server-side summary.
+	var severities []string
+	for _, ch := range out.Chapters {
+		for _, iss := range ch.Issues {
+			out.TotalIssues++
+			switch iss.Severity {
+			case "致命":
+				out.Fatal++
+			case "严重":
+				out.Serious++
+			case "中等":
+				out.Medium++
+			case "低":
+				out.Low++
+			}
+			severities = append(severities, iss.Severity)
+		}
+	}
+
+	out.Summary = fmt.Sprintf("共检查 %d 个章节，发现 %d 个问题（致命 %d、严重 %d、中等 %d、低 %d）。建议优先处理致命/严重级别，3 个月内逐步修复全部问题。",
+		len(out.Chapters), out.TotalIssues, out.Fatal, out.Serious, out.Medium, out.Low)
+	_ = severities
+
+	js, _ := json.Marshal(out)
+	return out, string(js)
+}
+
 // ─── V6 Prompt Builder ────────────────────────────────────────────────────────
 
 func BuildV6AuditPrompt(domain string, sitePages []SitePageForPrompt, crawlPages []crawler.PageResult,

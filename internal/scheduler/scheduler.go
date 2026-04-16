@@ -352,40 +352,65 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	}
 	updateProgress(60)
 
-	// Step 4: use v6 prompt — same as manual trigger path
-	prompt := ai.BuildV6AuditPrompt(config.Domain, sitePages, pages, gscData, gaData, yandexData)
-	updateProgress(65)
+	// Step 4: batched technical audit (same logic as manual trigger)
+	allChapters := make([]ai.V6Chapter, 0, 8)
+	var lastModel string
+	var lastRaw string
+	batchTotal := len(ai.TechnicalBatches)
+	for i, batch := range ai.TechnicalBatches {
+		log.Printf("[audit %d] scheduler 批次 %d/%d：%s", taskID, i+1, batchTotal, batch.Name)
+		bp := ai.BuildTechPromptBatch(batch, config.Domain, sitePages, pages, gscData, gaData, yandexData)
+		chs, raw, model, bErr := ai.CallAIChapters(bp)
+		lastModel = model
+		if raw != "" {
+			lastRaw = raw
+		}
+		if bErr != nil {
+			log.Printf("[audit %d] scheduler 批次 %d 失败: %v", taskID, i+1, bErr)
+			continue
+		}
+		allChapters = append(allChapters, chs...)
+		updateProgress(65 + ((i + 1) * 15 / batchTotal))
+	}
+	model := lastModel
 
-	analysisResult, model, err := ai.CallAI(prompt)
-	if err != nil {
-		rawSnippet := ""
-		if analysisResult != nil {
-			rawSnippet = analysisResult.RawResponse
-			if len(rawSnippet) > 100000 {
-				rawSnippet = rawSnippet[:100000]
-			}
+	if len(allChapters) == 0 {
+		snippet := lastRaw
+		if len(snippet) > 100000 {
+			snippet = snippet[:100000]
 		}
 		db.DB.Exec(
 			`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, v6_report, raw_ai_response)
 			 VALUES (?, '[]', '[]', '[]', '[]', '', '', ?, '', ?)`,
-			taskID, model, rawSnippet,
+			taskID, model, snippet,
 		)
-		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
-			err.Error(), time.Now(), taskID)
-		telegram.SendNotification("巡检失败", siteName+": "+err.Error())
+		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg='所有技术审计批次均失败', finished_at=? WHERE id=?",
+			time.Now(), taskID)
+		telegram.SendNotification("巡检失败", siteName+": 所有技术审计批次均失败")
 		return
 	}
-	updateProgress(80)
 
 	// Step 4b: strategy chapter (independent call, failure not fatal)
+	var strategyChapter *ai.V6Chapter
 	stratPrompt := ai.BuildStrategyPrompt(config.Domain, sitePages, pages, gscData, gaData, yandexData)
 	if strategyCh, _, sErr := ai.CallAIStrategy(stratPrompt); sErr == nil && strategyCh != nil {
-		analysisResult.V6Report = ai.MergeStrategyChapter(analysisResult.V6Report, strategyCh)
-		log.Printf("[audit %d] scheduler 策略章节已合并（%d 条）", taskID, len(strategyCh.Issues))
+		strategyChapter = strategyCh
+		log.Printf("[audit %d] scheduler 策略章节已生成（%d 条）", taskID, len(strategyCh.Issues))
 	} else {
 		log.Printf("[audit %d] scheduler 策略章节失败（忽略）: %v", taskID, sErr)
 	}
 	updateProgress(85)
+
+	_, v6JSON := ai.ComposeV6Report(config.Domain, allChapters, strategyChapter)
+	analysisResult := &ai.AnalysisResult{
+		V6Report:       v6JSON,
+		Summary:        "",
+		Suggestions:    "",
+		SEOIssues:      json.RawMessage("[]"),
+		CodeIssues:     json.RawMessage("[]"),
+		SecurityIssues: json.RawMessage("[]"),
+		PerfIssues:     json.RawMessage("[]"),
+	}
 
 	// Step 5: save results (including v6_report) atomically
 	seoJSON, _ := json.Marshal(analysisResult.SEOIssues)

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -13,6 +14,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
 
 func TriggerAudit(c *gin.Context) {
 	siteID := c.Param("id")
@@ -184,49 +192,76 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 
 	updateProgress(60)
 
-	// Step 4: Build v6 prompt and call AI
-	log.Printf("[audit %d] 构建 v6 prompt (监控页面 %d)", taskID, len(sitePages))
-	prompt := ai.BuildV6AuditPrompt(site.Domain, sitePages, crawlPages, gscData, gaData, yandexData)
-	updateProgress(65)
+	// Step 4: Run the technical audit in batches (provider caps output at
+	// ~16k chars per call, so one call can't fit all 29 categories). Each
+	// batch returns its own chapters; we merge and renumber at the end.
+	allChapters := make([]ai.V6Chapter, 0, 8)
+	var lastModel string
+	var lastRaw string
+	batchTotal := len(ai.TechnicalBatches)
+	for i, batch := range ai.TechnicalBatches {
+		log.Printf("[audit %d] 技术审计批次 %d/%d：%s", taskID, i+1, batchTotal, batch.Name)
+		bp := ai.BuildTechPromptBatch(batch, site.Domain, sitePages, crawlPages, gscData, gaData, yandexData)
+		chs, raw, model, bErr := ai.CallAIChapters(bp)
+		lastModel = model
+		if raw != "" {
+			lastRaw = raw
+		}
+		if bErr != nil {
+			log.Printf("[audit %d] 批次 %d 失败: %v", taskID, i+1, bErr)
+			continue
+		}
+		log.Printf("[audit %d] 批次 %d 得到 %d 章节", taskID, i+1, len(chs))
+		allChapters = append(allChapters, chs...)
+		// Progress: spread 65 → 80 across batches.
+		updateProgress(65 + ((i + 1) * 15 / batchTotal))
+	}
 
-	log.Printf("[audit %d] 调用 AI (prompt %d chars)...", taskID, len(prompt))
-	analysisResult, model, err := ai.CallAI(prompt)
-	if err != nil {
-		// Persist the raw AI response (if any) so we can debug parse failures
-		// without needing to re-run the expensive audit.
-		rawSnippet := ""
-		if analysisResult != nil {
-			rawSnippet = analysisResult.RawResponse
-			if len(rawSnippet) > 100000 {
-				rawSnippet = rawSnippet[:100000]
-			}
+	if len(allChapters) == 0 {
+		// All batches failed — persist raw response and fail.
+		rawSnippet := lastRaw
+		if len(rawSnippet) > 100000 {
+			rawSnippet = rawSnippet[:100000]
 		}
 		db.DB.Exec(
 			`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, v6_report, raw_ai_response)
 			 VALUES (?, '[]', '[]', '[]', '[]', '', '', ?, '', ?)`,
-			taskID, model, rawSnippet,
+			taskID, lastModel, rawSnippet,
 		)
 		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
-			err.Error(), time.Now(), taskID)
-		log.Printf("[audit %d] AI 调用失败: %v", taskID, err)
-		telegram.SendNotification("审计失败", siteName+" 审计失败: "+err.Error())
+			"所有技术审计批次均失败", time.Now(), taskID)
+		log.Printf("[audit %d] 所有技术审计批次均失败", taskID)
+		telegram.SendNotification("审计失败", siteName+" 审计失败：AI 调用异常")
 		return
 	}
-	updateProgress(80)
 
-	// Step 4b: Independently generate the white-hat SEO strategy chapter.
-	// This always runs (even if technical audit was partially truncated), and
-	// its output is merged into v6_report. Failure here does NOT fail the
-	// audit — we just log and continue.
-	log.Printf("[audit %d] 调用策略 AI 生成深度白帽 SEO 建议章节...", taskID)
+	// Step 4b: White-hat SEO strategy chapter.
+	var strategyChapter *ai.V6Chapter
+	log.Printf("[audit %d] 调用策略 AI 生成白帽 SEO 建议...", taskID)
 	stratPrompt := ai.BuildStrategyPrompt(site.Domain, sitePages, crawlPages, gscData, gaData, yandexData)
 	if strategyCh, _, sErr := ai.CallAIStrategy(stratPrompt); sErr == nil && strategyCh != nil {
-		analysisResult.V6Report = ai.MergeStrategyChapter(analysisResult.V6Report, strategyCh)
-		log.Printf("[audit %d] 策略章节已合并（%d 条建议）", taskID, len(strategyCh.Issues))
+		strategyChapter = strategyCh
+		log.Printf("[audit %d] 策略章节已生成（%d 条建议）", taskID, len(strategyCh.Issues))
 	} else {
-		log.Printf("[audit %d] 策略章节生成失败（已忽略，不影响技术审计）: %v", taskID, sErr)
+		log.Printf("[audit %d] 策略章节生成失败（不影响技术审计）: %v", taskID, sErr)
 	}
 	updateProgress(85)
+
+	// Compose final report (server-side totals, global ID renumber).
+	_, v6JSON := ai.ComposeV6Report(site.Domain, allChapters, strategyChapter)
+
+	// Build legacy fields for backwards compat (reading code still expects them).
+	analysisResult := &ai.AnalysisResult{
+		V6Report:       v6JSON,
+		Summary:        "",
+		Suggestions:    fmt.Sprintf("共 %d 章节", len(allChapters)+boolToInt(strategyChapter != nil)),
+		SEOIssues:      json.RawMessage("[]"),
+		CodeIssues:     json.RawMessage("[]"),
+		SecurityIssues: json.RawMessage("[]"),
+		PerfIssues:     json.RawMessage("[]"),
+		RawResponse:    lastRaw,
+	}
+	model := lastModel
 
 	// Step 5: Save results in a transaction (INSERT + UPDATE must be atomic).
 	seoJSON, _ := json.Marshal(analysisResult.SEOIssues)
