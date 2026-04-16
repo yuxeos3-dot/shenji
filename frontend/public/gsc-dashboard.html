@@ -410,7 +410,7 @@ th.right{text-align:right}
       <button class="range-btn active" onclick="setRange(this,7)">近 7 天</button>
       <button class="range-btn" onclick="setRange(this,28)">近 28 天</button>
       <button class="range-btn" onclick="setRange(this,90)">近 90 天</button>
-      <button class="refresh-btn" onclick="loadOverview()">↻ 刷新</button>
+      <button class="refresh-btn" onclick="Object.keys(_cache).forEach(k=>delete _cache[k]);loadOverview()">↻ 刷新</button>
       <span class="sync-time" id="sync-time"></span>
     </div>
     <div class="summary-strip">
@@ -492,6 +492,7 @@ const YAPI='https://api.webmaster.yandex.net/v4';
 
 let gToken=null, yToken=null, yUserId=null;
 let allSites=[], yandexSites=[], selectedDays=7, detailData={}, charts={};
+const _cache={}; // cache[days] = {sites, yandex, ts}
 
 // ═══ GOOGLE AUTH ═══
 function startGoogleOAuth(){
@@ -646,30 +647,38 @@ async function loadOverview(){
   showLoad('SCANNING SITES...');
   document.getElementById('err-container').innerHTML='';
   try{
-    // Fetch GSC sites
-    const res=await gf(GAPI+'/sites');
-    const entries=res.siteEntry||[];
+    const{sd,ed}=getRange(selectedDays);
+    // Fetch GSC sites list + Yandex sites in parallel
+    const[gscRes,yHosts]=await Promise.all([
+      gf(GAPI+'/sites'),
+      (yToken&&yUserId)?fetchYandexSites():Promise.resolve([])
+    ]);
+    const entries=gscRes.siteEntry||[];
     if(!entries.length){hideLoad();document.getElementById('sites-grid').innerHTML='<div class="empty"><div class="empty-icon">📡</div><div class="empty-t">NO SITES</div><div class="empty-s">该账号下没有绑定任何 GSC 站点</div></div>';return;}
     const _ss=document.getElementById('s-sites');if(_ss)_ss.textContent=entries.length;
     const _oc=document.getElementById('ov-count');if(_oc)_oc.textContent=entries.length+' 个站点';
-    updateLoad('FETCHING GSC DATA...');
-    const{sd,ed}=getRange(selectedDays);
-    const results=await Promise.allSettled(entries.map(e=>fetchSiteOverview(e.siteUrl,sd,ed)));
-    allSites=results.map((r,i)=>Object.assign({url:entries[i].siteUrl,perm:entries[i].permissionLevel},r.status==='fulfilled'?r.value:{err:r.reason?.message}));
+    updateLoad('FETCHING DATA ('+entries.length+' sites)...');
 
-    // Fetch Yandex if connected
-    if(yToken&&yUserId){
-      updateLoad('FETCHING YANDEX DATA...');
-      const yHosts=await fetchYandexSites();
+    // Fetch GSC data for all sites + Yandex data in parallel
+    const[gscResults,yResults]=await Promise.all([
+      Promise.allSettled(entries.map(e=>fetchSiteOverview(e.siteUrl,sd,ed))),
+      (yToken&&yUserId&&yHosts.length)?Promise.allSettled(yHosts.map(h=>fetchYandexSiteData(h.host_id,sd,ed))):Promise.resolve([])
+    ]);
+
+    allSites=gscResults.map((r,i)=>Object.assign({url:entries[i].siteUrl,perm:entries[i].permissionLevel},r.status==='fulfilled'?r.value:{err:r.reason?.message}));
+
+    // Attach Yandex data
+    if(yToken&&yUserId&&yHosts.length){
       yandexSites=yHosts;
-      const yResults=await Promise.allSettled(yHosts.map(h=>fetchYandexSiteData(h.host_id,sd,ed)));
-      yHosts.forEach((h,i)=>{h._data=yResults[i].status==='fulfilled'?yResults[i].value:{err:yResults[i].reason?.message};});
-      // Attach Yandex data to GSC sites
+      yHosts.forEach((h,i)=>{h._data=yResults[i]&&yResults[i].status==='fulfilled'?yResults[i].value:{err:yResults[i]?.reason?.message};});
       allSites.forEach(site=>{
         const yHost=yHosts.find(h=>matchYandexToGSC(h,site.url));
         site.yandex=yHost?yHost._data:null;
       });
     }
+
+    // Cache results for 5 minutes
+    _cache[selectedDays]={sites:allSites,yandex:yandexSites,ts:Date.now()};
 
     renderStrip(allSites);renderCards(allSites);
     const t=new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
@@ -778,7 +787,11 @@ function buildSparkSVG(data){
     '<polyline points="'+pts+'" fill="none" stroke="#00e6ff" stroke-width="1.5" stroke-linejoin="round"/></svg>';
 }
 function filterCards(v){renderCards(allSites,v);}
-function setRange(btn,d){document.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');selectedDays=d;loadOverview();}
+function setRange(btn,d){document.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');selectedDays=d;
+  const cached=_cache[d];
+  if(cached&&(Date.now()-cached.ts)<5*60*1000){allSites=cached.sites;yandexSites=cached.yandex||[];renderStrip(allSites);renderCards(allSites);const _st=document.getElementById('sync-time');if(_st)_st.textContent='缓存 '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});return;}
+  loadOverview();
+}
 
 // ═══ DETAIL ═══
 async function openDetail(url){
