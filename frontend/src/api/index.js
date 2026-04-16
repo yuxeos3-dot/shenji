@@ -118,7 +118,7 @@ export default {
   geoListTitleLibs: () => api.get('/v1/geo/title-libs'),
   geoCreateTitleLib: (data) => api.post('/v1/geo/title-libs', data),
   geoDeleteTitleLib: (id) => api.delete(`/v1/geo/title-libs/${id}`),
-  geoListTitles: (libId) => api.get(`/v1/geo/title-libs/${libId}/titles`),
+  geoListTitles: (libId, params) => api.get(`/v1/geo/title-libs/${libId}/titles`, { params }),
   geoAddTitles: (libId, data) => api.post(`/v1/geo/title-libs/${libId}/titles`, data),
   geoImportTitles: (libId, data) => api.post(`/v1/geo/title-libs/${libId}/import`, data),
   geoImportFromGSC: (libId, data) => api.post(`/v1/geo/title-libs/${libId}/import-gsc`, data),

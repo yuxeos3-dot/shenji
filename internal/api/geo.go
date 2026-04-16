@@ -129,7 +129,16 @@ func GeoDeleteTitleLib(c *gin.Context) {
 
 func GeoListTitles(c *gin.Context) {
 	libID := c.Param("id")
-	rows, err := db.DB.Query("SELECT id, lib_id, title, keyword, is_used, used_at, created_at FROM geo_titles WHERE lib_id = ? ORDER BY id", libID)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "100"))
+	if page < 1 { page = 1 }
+	if perPage < 1 || perPage > 500 { perPage = 100 }
+	offset := (page - 1) * perPage
+
+	var total int
+	db.DB.QueryRow("SELECT COUNT(*) FROM geo_titles WHERE lib_id = ?", libID).Scan(&total)
+
+	rows, err := db.DB.Query("SELECT id, lib_id, title, keyword, is_used, used_at, created_at FROM geo_titles WHERE lib_id = ? ORDER BY id LIMIT ? OFFSET ?", libID, perPage, offset)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "查询失败"})
 		return
@@ -146,7 +155,7 @@ func GeoListTitles(c *gin.Context) {
 	if titles == nil {
 		titles = []gin.H{}
 	}
-	c.JSON(200, gin.H{"code": 0, "data": titles})
+	c.JSON(200, gin.H{"code": 0, "data": gin.H{"items": titles, "total": total, "page": page, "per_page": perPage}})
 }
 
 func GeoAddTitles(c *gin.Context) {

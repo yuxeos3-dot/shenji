@@ -54,12 +54,15 @@
         </el-form>
         <template #footer><el-button @click="showLibForm=false">取消</el-button><el-button type="primary" @click="createLib">创建</el-button></template>
       </el-dialog>
-      <el-dialog v-model="showTitles" :title="'关键词列表 — '+curLib?.name" width="700px">
+      <el-dialog v-model="showTitles" :title="'关键词列表 — '+curLib?.name+' (共'+titlesTotal+'条)'" width="700px">
         <el-table :data="curTitles" max-height="400" stripe size="small">
           <el-table-column prop="title" label="关键词" /><el-table-column prop="keyword" label="附加词" width="140" />
           <el-table-column label="已用" width="60"><template #default="{row}">{{ row.is_used?'✅':'—' }}</template></el-table-column>
           <el-table-column label="" width="60"><template #default="{row}"><el-button size="small" type="danger" text @click="delTitle(row)">删</el-button></template></el-table-column>
         </el-table>
+        <div style="margin-top:10px;text-align:center" v-if="titlesTotal>100">
+          <el-pagination v-model:current-page="titlesPage" :page-size="100" :total="titlesTotal" layout="prev,pager,next,total" background @current-change="loadTitlesPage" />
+        </div>
       </el-dialog>
       <el-dialog v-model="showImport" title="手动导入关键词" width="560px">
         <p style="font-size:12px;color:#888;margin-bottom:8px">每行一条，格式：<code>关键词|附加词</code> 或只填关键词</p>
@@ -190,12 +193,13 @@ async function loadGSC() { if (!gscSiteId.value) return; gscLoading.value = true
 async function syncGSC() { syncing.value = true; try { await api.syncGSCData(gscSiteId.value); ElMessage.success('同步成功'); loadGSC() } catch(e) { ElMessage.error(e?.response?.data?.error||'同步失败') } finally { syncing.value = false } }
 
 // Keyword Libraries
-const titleLibs = ref([]); const showLibForm = ref(false); const libForm = ref({name:'',description:''}); const showTitles = ref(false); const curLib = ref(null); const curTitles = ref([]); const showImport = ref(false); const importText = ref(''); const importing = ref(false)
+const titleLibs = ref([]); const showLibForm = ref(false); const libForm = ref({name:'',description:''}); const showTitles = ref(false); const curLib = ref(null); const curTitles = ref([]); const titlesPage = ref(1); const titlesTotal = ref(0); const showImport = ref(false); const importText = ref(''); const importing = ref(false)
 const showGSCImport = ref(false); const gscImportSiteId = ref(null); const gscImportLimit = ref(100)
 async function loadLibs() { try { titleLibs.value = (await api.geoListTitleLibs()).data } catch {} }
 async function createLib() { await api.geoCreateTitleLib(libForm.value); showLibForm.value=false; libForm.value={name:'',description:''}; loadLibs(); ElMessage.success('创建成功') }
 async function deleteLib(r) { await ElMessageBox.confirm('删除「'+r.name+'」及所有关键词？'); await api.geoDeleteTitleLib(r.id); loadLibs() }
-async function openTitles(r) { curLib.value=r; curTitles.value=(await api.geoListTitles(r.id)).data; showTitles.value=true }
+async function openTitles(r) { curLib.value=r; titlesPage.value=1; await loadTitlesPage(); showTitles.value=true }
+async function loadTitlesPage() { const res=await api.geoListTitles(curLib.value.id,{page:titlesPage.value,per_page:100}); curTitles.value=res.data.items||[]; titlesTotal.value=res.data.total||0 }
 async function delTitle(r) { await api.geoDeleteTitle(r.id); curTitles.value=curTitles.value.filter(t=>t.id!==r.id); loadLibs() }
 function openImport(r) { curLib.value=r; importText.value=''; showImport.value=true }
 async function doImport() { importing.value=true; try { const res=await api.geoImportTitles(curLib.value.id,{text:importText.value}); ElMessage.success('导入'+res.data.imported+'条'); showImport.value=false; loadLibs() } finally { importing.value=false } }
