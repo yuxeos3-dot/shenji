@@ -282,13 +282,13 @@ onMounted(async () => {
       intervalHours.value = parseInt(settings.value.auto_audit_interval_hours) || 24
       scheduleMode.value = 'interval'
     }
-  } catch {}
+  } catch (e) { console.error(e) }
   // Load user AI config
   try {
     const aiRes = await api.getMyAIConfig()
     const slots = aiRes.data?.slots || []
     for (let i = 0; i < 3; i++) aiSlots.value[i] = slots[i] || {api_url:'',api_key:'',model:''}
-  } catch {}
+  } catch (e) { console.error(e) }
 })
 
 // Sync cron expression based on mode
@@ -304,7 +304,7 @@ watch([scheduleMode, intervalHours, dailyHour], () => {
 
 async function save() {
   saving.value = true
-  try { await api.saveSettings(settings.value); ElMessage.success('保存成功') } catch {}
+  try { await api.saveSettings(settings.value); ElMessage.success('保存成功') } catch (e) { console.error(e) }
   finally { saving.value = false }
 }
 
@@ -341,11 +341,11 @@ async function saveSchedule() {
   await save()
 }
 
-async function testAI() { testing.value.ai = true; try { const res = await api.testAI(); ElMessage.success(res.data) } catch {} finally { testing.value.ai = false } }
-async function testTG() { testing.value.tg = true; try { const res = await api.testTelegram(); ElMessage.success(res.data) } catch {} finally { testing.value.tg = false } }
-async function authGSC() { try { const res = await api.getGSCAuthURL(); window.open(res.data.url, '_blank') } catch {} }
-async function authGA() { try { const res = await api.getGAAuthURL(); window.open(res.data.url, '_blank') } catch {} }
-async function authYandex() { try { const res = await api.getYandexAuthURL(); window.open(res.data.url, '_blank') } catch {} }
+async function testAI() { testing.value.ai = true; try { const res = await api.testAI(); ElMessage.success(res.data) } catch (e) { console.error(e) } finally { testing.value.ai = false } }
+async function testTG() { testing.value.tg = true; try { const res = await api.testTelegram(); ElMessage.success(res.data) } catch (e) { console.error(e) } finally { testing.value.tg = false } }
+async function authGSC() { try { const res = await api.getGSCAuthURL(); window.open(res.data.url, '_blank') } catch (e) { console.error(e) } }
+async function authGA() { try { const res = await api.getGAAuthURL(); window.open(res.data.url, '_blank') } catch (e) { console.error(e) } }
+async function authYandex() { try { const res = await api.getYandexAuthURL(); window.open(res.data.url, '_blank') } catch (e) { console.error(e) } }
 </script>
 
 <style scoped>

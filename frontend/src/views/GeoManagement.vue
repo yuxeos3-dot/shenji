@@ -197,13 +197,13 @@ async function loadData() {
     dateOptions.value = rawGscData.value.map(d => d.date)
     if (dateOptions.value.length) selectedDate.value = dateOptions.value[0]
     else selectedDate.value = null
-  } catch {}
+  } catch (e) { console.error(e) }
   loading.value = false
 }
 
 async function syncGSC() {
   syncing.value = true
-  try { await apiClient.syncGSC(selectedSiteId.value); ElMessage.success('GSC同步成功'); loadData() } catch {}
+  try { await apiClient.syncGSC(selectedSiteId.value); ElMessage.success('GSC同步成功'); loadData() } catch (e) { console.error(e) }
   finally { syncing.value = false }
 }
 </script>

@@ -165,7 +165,7 @@ async function loadResults() {
       totalCount.value = results.value.length
     }
     if (results.value.length) lastCheckedAt.value = results.value[0].checked_at
-  } catch {}
+  } catch (e) { console.error(e) }
   loading.value = false
 }
 

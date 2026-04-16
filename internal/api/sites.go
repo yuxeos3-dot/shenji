@@ -115,6 +115,9 @@ func CreateSite(c *gin.Context) {
 
 func GetSite(c *gin.Context) {
 	id := c.Param("id")
+	if !canAccessSite(c, id) {
+		return
+	}
 	var site struct {
 		ID                   int64  `json:"id"`
 		Domain               string `json:"domain"`
@@ -154,6 +157,9 @@ func GetSite(c *gin.Context) {
 
 func UpdateSite(c *gin.Context) {
 	id := c.Param("id")
+	if !canAccessSite(c, id) {
+		return
+	}
 	var req CreateSiteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "参数错误"})
@@ -182,18 +188,27 @@ func UpdateSite(c *gin.Context) {
 
 func DeleteSite(c *gin.Context) {
 	id := c.Param("id")
+	if !canAccessSite(c, id) {
+		return
+	}
 
-	// Cascade delete all related data
-	db.DB.Exec("DELETE FROM dead_link_results WHERE site_id = ?", id)
-	db.DB.Exec("DELETE FROM external_links WHERE site_id = ?", id)
-	db.DB.Exec("DELETE FROM site_pages WHERE site_id = ?", id)
-	db.DB.Exec("DELETE FROM gsc_data WHERE site_id = ?", id)
-	db.DB.Exec("DELETE FROM ga_data WHERE site_id = ?", id)
-	db.DB.Exec("DELETE FROM yandex_data WHERE site_id = ?", id)
+	// Cascade delete all related data in a transaction
+	tx, err := db.DB.Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
+		return
+	}
+
+	tx.Exec("DELETE FROM dead_link_results WHERE site_id = ?", id)
+	tx.Exec("DELETE FROM external_links WHERE site_id = ?", id)
+	tx.Exec("DELETE FROM site_pages WHERE site_id = ?", id)
+	tx.Exec("DELETE FROM gsc_data WHERE site_id = ?", id)
+	tx.Exec("DELETE FROM ga_data WHERE site_id = ?", id)
+	tx.Exec("DELETE FROM yandex_data WHERE site_id = ?", id)
 
 	// Delete audit tasks and their results/pages
-	taskRows, err := db.DB.Query("SELECT id FROM audit_tasks WHERE site_id = ?", id)
-	if err == nil {
+	taskRows, qErr := db.DB.Query("SELECT id FROM audit_tasks WHERE site_id = ?", id)
+	if qErr == nil {
 		var taskIDs []int64
 		for taskRows.Next() {
 			var tid int64
@@ -203,14 +218,15 @@ func DeleteSite(c *gin.Context) {
 		}
 		taskRows.Close()
 		for _, tid := range taskIDs {
-			db.DB.Exec("DELETE FROM audit_results WHERE task_id = ?", tid)
-			db.DB.Exec("DELETE FROM audit_pages WHERE task_id = ?", tid)
+			tx.Exec("DELETE FROM audit_results WHERE task_id = ?", tid)
+			tx.Exec("DELETE FROM audit_pages WHERE task_id = ?", tid)
 		}
-		db.DB.Exec("DELETE FROM audit_tasks WHERE site_id = ?", id)
+		tx.Exec("DELETE FROM audit_tasks WHERE site_id = ?", id)
 	}
 
-	_, err = db.DB.Exec("DELETE FROM sites WHERE id = ?", id)
-	if err != nil {
+	tx.Exec("DELETE FROM sites WHERE id = ?", id)
+
+	if err := tx.Commit(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 		return
 	}

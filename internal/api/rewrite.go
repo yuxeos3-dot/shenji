@@ -35,6 +35,20 @@ func RewriteContent(c *gin.Context) {
 		return
 	}
 
+	// Input validation — prevent excessively large payloads from reaching the AI
+	if len(req.Keywords) > 1000 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "关键词过长（最多1000字符）"})
+		return
+	}
+	if len(req.Original) > 50000 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "原始内容过长（最多50000字符）"})
+		return
+	}
+	if len(req.Title) > 500 || len(req.Desc) > 2000 || len(req.Extra) > 2000 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "输入字段过长"})
+		return
+	}
+
 	var prompt string
 	if req.Mode == "tdk" {
 		prompt = buildTDKPrompt(req)

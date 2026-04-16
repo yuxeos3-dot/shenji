@@ -72,7 +72,7 @@ async function loadReports() {
     if (filterUser.value) params.user_id = filterUser.value
     const res = await api.listReports(params)
     reports.value = res.data
-  } catch {}
+  } catch (e) { console.error(e) }
 }
 
 function viewReport(r) { sel.value = r; showDetail.value = true }
@@ -80,7 +80,7 @@ function parseTasks(v) { if (!v) return []; try { const a = typeof v === 'string
 
 onMounted(async () => {
   if (userStore.isAdmin()) {
-    try { users.value = (await api.listUsers()).data } catch {}
+    try { users.value = (await api.listUsers()).data } catch (e) { console.error(e) }
   }
   loadReports()
 })
