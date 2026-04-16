@@ -1,11 +1,6 @@
-import axios, { type AxiosRequestConfig } from 'axios'
+import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '../router'
-
-function getCookie(name: string): string {
-  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'))
-  return match ? decodeURIComponent(match[2]) : ''
-}
 
 export interface ApiResponse<T = any> {
   code: number
@@ -16,13 +11,12 @@ export interface ApiResponse<T = any> {
 const instance = axios.create({
   baseURL: '/api',
   timeout: 120000,
-  withCredentials: true,
 })
 
 instance.interceptors.request.use(config => {
-  const csrf = getCookie('csrf_token')
-  if (csrf) {
-    config.headers['X-CSRF-Token'] = csrf
+  const token = localStorage.getItem('token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
   }
   return config
 })
@@ -38,7 +32,7 @@ instance.interceptors.response.use(
   },
   error => {
     if (error.response?.status === 401) {
-      document.cookie = 'csrf_token=; path=/; max-age=0'
+      localStorage.removeItem('token')
       router.push('/login')
     }
     ElMessage.error(error.response?.data?.error || '网络错误')

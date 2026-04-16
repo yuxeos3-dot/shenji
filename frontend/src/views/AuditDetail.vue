@@ -68,8 +68,9 @@ async function copyRaw() {
 async function downloadReport() {
   downloading.value = true
   try {
+    const token = localStorage.getItem('token')
     const resp = await fetch(`/api/v1/audits/${route.params.taskId}/report/download`, {
-      credentials: 'include'
+      headers: { Authorization: `Bearer ${token}` }
     })
     if (!resp.ok) { const d = await resp.json(); ElMessage.error(d.error || '下载失败'); return }
     const blob = await resp.blob()

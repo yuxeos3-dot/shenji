@@ -55,14 +55,10 @@ func Login(c *gin.Context) {
 		_ = err
 	}
 
-	// Set httpOnly JWT cookie + CSRF cookie
-	csrfToken := middleware.GenerateCSRFToken()
-	middleware.SetAuthCookies(c, token, csrfToken)
-
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"data": gin.H{
-			"csrf_token": csrfToken,
+			"token": token,
 			"user": gin.H{
 				"id":    id,
 				"name":  name,
@@ -74,7 +70,6 @@ func Login(c *gin.Context) {
 }
 
 func Logout(c *gin.Context) {
-	middleware.ClearAuthCookies(c)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "已注销"})
 }
 

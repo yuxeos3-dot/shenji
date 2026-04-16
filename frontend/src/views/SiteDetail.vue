@@ -115,7 +115,8 @@ async function downloadReport(taskId) {
   const audit = audits.value.find(a => a.id === taskId)
   if (audit) audit.downloading = true
   try {
-    const resp = await fetch(`/api/v1/audits/${taskId}/report/download`, { credentials: 'include' })
+    const token = localStorage.getItem('token')
+    const resp = await fetch(`/api/v1/audits/${taskId}/report/download`, { headers: { Authorization: `Bearer ${token}` } })
     if (!resp.ok) { const data = await resp.json(); ElMessage.error(data.error || '下载失败'); return }
     const blob = await resp.blob()
     const url = URL.createObjectURL(blob)

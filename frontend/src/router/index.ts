@@ -1,10 +1,5 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
-function getCookie(name: string): string {
-  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'))
-  return match ? decodeURIComponent(match[2]) : ''
-}
-
 const routes: RouteRecordRaw[] = [
   { path: '/login', name: 'Login', component: () => import('../views/Login.vue') },
   {
@@ -36,8 +31,8 @@ const router = createRouter({
 })
 
 router.beforeEach((to, _from, next) => {
-  const loggedIn = !!getCookie('csrf_token')
-  if (to.path !== '/login' && !loggedIn) {
+  const token = localStorage.getItem('token')
+  if (to.path !== '/login' && !token) {
     next('/login')
   } else {
     next()

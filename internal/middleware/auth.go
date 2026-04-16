@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -30,56 +28,6 @@ func GetJWTSecret() []byte {
 	return jwtSecret
 }
 
-// GenerateCSRFToken creates a random CSRF token for double-submit cookie pattern.
-func GenerateCSRFToken() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		log.Printf("crypto/rand failed: %v", err)
-		return hex.EncodeToString(b)
-	}
-	return hex.EncodeToString(b)
-}
-
-func cookieSecure() bool {
-	return os.Getenv("COOKIE_SECURE") == "true"
-}
-
-// SetAuthCookies sets the httpOnly JWT cookie and the readable CSRF cookie.
-func SetAuthCookies(c *gin.Context, token, csrfToken string) {
-	secure := cookieSecure()
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     "jwt",
-		Value:    token,
-		Path:     "/",
-		MaxAge:   86400,
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-	})
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     "csrf_token",
-		Value:    csrfToken,
-		Path:     "/",
-		MaxAge:   86400,
-		HttpOnly: false,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-	})
-}
-
-// ClearAuthCookies removes the auth cookies on logout.
-func ClearAuthCookies(c *gin.Context) {
-	secure := cookieSecure()
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name: "jwt", Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode,
-	})
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name: "csrf_token", Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: false, Secure: secure, SameSite: http.SameSiteLaxMode,
-	})
-}
-
 type Claims struct {
 	UserID int64  `json:"user_id"`
 	Email  string `json:"email"`
@@ -103,26 +51,16 @@ func GenerateToken(userID int64, email, role string) (string, error) {
 
 func AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var tokenStr string
-		viaCookie := false
-
-		// Try httpOnly cookie first, fall back to Authorization header.
-		if cookie, err := c.Cookie("jwt"); err == nil && cookie != "" {
-			tokenStr = cookie
-			viaCookie = true
-		} else {
-			authHeader := c.GetHeader("Authorization")
-			if authHeader == "" {
-				c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": "未登录"})
-				c.Abort()
-				return
-			}
-			tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": "未登录"})
+			c.Abort()
+			return
 		}
 
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 		claims := &Claims{}
 		token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
-			// Enforce HMAC signing method to prevent alg=none / RSA confusion attacks
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, jwt.ErrSignatureInvalid
 			}
@@ -133,17 +71,6 @@ func AuthRequired() gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": "Token无效或已过期"})
 			c.Abort()
 			return
-		}
-
-		// CSRF check for state-changing requests when authenticated via cookie.
-		if viaCookie && c.Request.Method != "GET" && c.Request.Method != "HEAD" && c.Request.Method != "OPTIONS" {
-			csrfHeader := c.GetHeader("X-CSRF-Token")
-			csrfCookie, _ := c.Cookie("csrf_token")
-			if csrfHeader == "" || csrfCookie == "" || csrfHeader != csrfCookie {
-				c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "CSRF token 无效"})
-				c.Abort()
-				return
-			}
 		}
 
 		c.Set("user_id", claims.UserID)
@@ -166,6 +93,47 @@ func AdminRequired() gin.HandlerFunc {
 			return
 		}
 		c.Next()
+	}
+}
+
+// ─── IP Whitelist ────────────────────────────────────────────────────────────
+
+// allowedIPs caches the parsed IP_WHITELIST env var.
+var allowedIPs []string
+
+func init() {
+	if raw := os.Getenv("IP_WHITELIST"); raw != "" {
+		for _, ip := range strings.Split(raw, ",") {
+			ip = strings.TrimSpace(ip)
+			if ip != "" {
+				allowedIPs = append(allowedIPs, ip)
+			}
+		}
+		if len(allowedIPs) > 0 {
+			log.Printf("IP whitelist enabled: %v", allowedIPs)
+		}
+	}
+}
+
+// IPWhitelist blocks requests from IPs not in the whitelist.
+// If IP_WHITELIST env is empty, all IPs are allowed (dev mode).
+func IPWhitelist() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if len(allowedIPs) == 0 {
+			c.Next()
+			return
+		}
+
+		clientIP := c.ClientIP()
+		for _, ip := range allowedIPs {
+			if clientIP == ip {
+				c.Next()
+				return
+			}
+		}
+
+		c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "IP 不在白名单中"})
+		c.Abort()
 	}
 }
 
@@ -202,6 +170,7 @@ func GetOnlineUsers() []OnlineEntry {
 	})
 	return result
 }
+
 // ─── Per-user rate limiter for heavy endpoints ───────────────────────────────
 
 type userRateLimiter struct {
@@ -243,7 +212,6 @@ func (r *userRateLimiter) cleanup() {
 }
 
 // UserRateLimit limits per-user requests to maxPerMinute within a 1-minute window.
-// Must be placed after AuthRequired so user_id is available.
 func UserRateLimit(maxPerMinute int) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetInt64("user_id")
@@ -278,7 +246,6 @@ func UserRateLimit(maxPerMinute int) gin.HandlerFunc {
 
 // ─── Per-IP login rate limiter ───────────────────────────────────────────────
 
-// Bounded map; janitor goroutine prunes stale IPs every 10 minutes.
 type rateLimiter struct {
 	mu       sync.Mutex
 	attempts map[string][]time.Time
@@ -289,7 +256,6 @@ var loginLimiter = &rateLimiter{
 }
 
 func init() {
-	// Periodic cleanup to prevent unbounded growth.
 	go func() {
 		t := time.NewTicker(10 * time.Minute)
 		defer t.Stop()

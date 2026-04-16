@@ -2,11 +2,6 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '../api'
 
-function getCookie(name: string): string {
-  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'))
-  return match ? decodeURIComponent(match[2]) : ''
-}
-
 export interface User {
   id: number
   name: string
@@ -17,19 +12,18 @@ export interface User {
 
 export const useUserStore = defineStore('user', () => {
   const user = ref<User | null>(null)
-
-  function isLoggedIn(): boolean {
-    return !!getCookie('csrf_token')
-  }
+  const token = ref(localStorage.getItem('token') || '')
 
   async function login(email: string, password: string) {
     const res = await api.login({ email, password })
+    token.value = res.data.token
     user.value = res.data.user
+    localStorage.setItem('token', res.data.token)
     return res
   }
 
   async function fetchUser() {
-    if (!isLoggedIn()) return
+    if (!token.value) return
     try {
       const res = await api.getMe()
       user.value = res.data
@@ -39,11 +33,12 @@ export const useUserStore = defineStore('user', () => {
   }
 
   function logout() {
+    token.value = ''
     user.value = null
-    document.cookie = 'csrf_token=; path=/; max-age=0'
+    localStorage.removeItem('token')
   }
 
   const isAdmin = (): boolean => user.value?.role === 'admin'
 
-  return { user, login, fetchUser, logout, isAdmin, isLoggedIn }
+  return { user, token, login, fetchUser, logout, isAdmin }
 })

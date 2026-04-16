@@ -29,6 +29,7 @@ func main() {
 
 	// Middleware
 	r.Use(middleware.CORS())
+	r.Use(middleware.IPWhitelist())
 
 	// Auth routes (no auth required)
 	r.POST("/api/auth/login", middleware.LoginRateLimit(), api.Login)
