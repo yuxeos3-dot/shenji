@@ -537,18 +537,34 @@ async function loadUser(){
 }
 
 
-// ═══ YANDEX API — via CORS proxy ═══
-const YCORS = 'https://corsproxy.io/?url=';
+// ═══ YANDEX API — via CORS proxy (3 proxies, auto-failover) ═══
+const YCORS_LIST = [
+  'https://corsproxy.io/?url=',
+  'https://api.allorigins.win/raw?url=',
+  'https://thingproxy.freeboard.io/fetch/'
+];
+let ycorsIndex = 0;
 async function yf(path, opts){
-  const url = YCORS + encodeURIComponent(YAPI + path);
-  const res = await fetch(url, Object.assign({}, opts, {
-    headers: Object.assign(
-      { 'Authorization': 'OAuth ' + yToken, 'Content-Type': 'application/json' },
-      (opts && opts.headers) || {}
-    )
-  }));
-  if(!res.ok){ const e = await res.json().catch(()=>({})); throw new Error(e.error_description || e.error || 'HTTP ' + res.status); }
-  return res.json();
+  let lastErr = null;
+  for(let attempt = 0; attempt < YCORS_LIST.length; attempt++){
+    const proxy = YCORS_LIST[(ycorsIndex + attempt) % YCORS_LIST.length];
+    const url = proxy + encodeURIComponent(YAPI + path);
+    try {
+      const res = await fetch(url, Object.assign({}, opts, {
+        headers: Object.assign(
+          { 'Authorization': 'OAuth ' + yToken, 'Content-Type': 'application/json' },
+          (opts && opts.headers) || {}
+        )
+      }));
+      if(!res.ok){ const e = await res.json().catch(()=>({})); throw new Error(e.error_description || e.error || 'HTTP ' + res.status); }
+      ycorsIndex = (ycorsIndex + attempt) % YCORS_LIST.length; // remember working proxy
+      return res.json();
+    } catch(e) {
+      lastErr = e;
+      console.warn('CORS proxy failed ('+proxy.split('/')[2]+'):', e.message, '→ trying next');
+    }
+  }
+  throw lastErr || new Error('All CORS proxies failed');
 }
 async function loadYandexUser(){
   try{
