@@ -155,10 +155,6 @@
 </div>
 </template>
 
-<script lang="ts">
-export default { name: 'DataManagement' }
-</script>
-
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
