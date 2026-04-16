@@ -111,6 +111,7 @@ func main() {
 		// Reports
 		v1.GET("/reports", api.ListReports)
 		v1.POST("/reports", api.SubmitReport)
+		v1.POST("/reports/polish", api.PolishReport)
 		v1.GET("/reports/:date", api.GetReportByDate)
 		v1.GET("/reports/export", api.ExportReports)
 

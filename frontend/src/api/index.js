@@ -102,6 +102,7 @@ export default {
   // Reports
   listReports: (params) => api.get('/v1/reports', { params }),
   submitReport: (data) => api.post('/v1/reports', data),
+  polishReport: (data) => api.post('/v1/reports/polish', data),
   getReport: (date) => api.get(`/v1/reports/${date}`),
   exportReports: (params) => api.get('/v1/reports/export', { params }),
 
