@@ -311,6 +311,7 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	var sitePages []ai.SitePageForPrompt
 	pageRows, err := db.DB.Query("SELECT id, name, url FROM site_pages WHERE site_id = ?", siteID)
 	if err == nil {
+		defer pageRows.Close()
 		type pageInfo struct {
 			id   int64
 			name string
@@ -323,7 +324,6 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 				pageList = append(pageList, p)
 			}
 		}
-		pageRows.Close()
 		for _, p := range pageList {
 			fp := crawler.FetchPage(crawler.URLSpec{PageType: p.name, URL: p.url}, 30*time.Second)
 			now := time.Now().UTC().Format("2006-01-02 15:04:05")

@@ -120,6 +120,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 		"SELECT id, name, url FROM site_pages WHERE site_id = ?", siteID,
 	)
 	if err == nil {
+		defer pageRows.Close()
 		type pageInfo struct {
 			id   int64
 			name string
@@ -132,7 +133,6 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 				pageList = append(pageList, p)
 			}
 		}
-		pageRows.Close()
 
 		for i, p := range pageList {
 			result := crawler.FetchPage(crawler.URLSpec{PageType: p.name, URL: p.url}, 30*time.Second)
