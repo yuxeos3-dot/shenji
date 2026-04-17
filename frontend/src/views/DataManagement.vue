@@ -155,6 +155,12 @@
 </div>
 </template>
 
+<script>
+// Named export so <KeepAlive include="DataManagement"> in Layout.vue can
+// match and preserve this view's state across route changes.
+export default { name: 'DataManagement' }
+</script>
+
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
