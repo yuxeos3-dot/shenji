@@ -528,11 +528,12 @@ func runKeywordWorkflow(jobID, userID int64, req StartKeywordWorkflowRequest) {
 		}
 	}()
 
-	// Load optional knowledge base context if user picked one.
+	// Knowledge base tables were dropped as part of the wizard refactor;
+	// any domain context now lives in the wizard's "extra_requirements"
+	// field or inline in the user's custom prompt. Kept as an empty
+	// string so downstream prompt templates that still reference
+	// {{knowledge}} don't blow up.
 	knowledgeText := ""
-	if req.KnowledgeID > 0 {
-		db.DB.QueryRow(`SELECT content FROM geo_knowledge WHERE id = ?`, req.KnowledgeID).Scan(&knowledgeText)
-	}
 
 	// Site's registered pages for internal link anchoring. This is
 	// what the user asked for: "内链就用我们添加站点的页面链接".

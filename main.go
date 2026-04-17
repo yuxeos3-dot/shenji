@@ -379,23 +379,11 @@ func main() {
 			geo.POST("/title-libs/:id/import-gsc", api.RequirePermission("geo.keywords"), api.GeoImportFromGSC)
 			geo.DELETE("/titles/:id", api.RequirePermission("geo.keywords"), api.GeoDeleteTitle)
 
-			geo.GET("/prompts", api.RequirePermission("geo.view"), api.GeoListPrompts)
-			geo.POST("/prompts", api.RequirePermission("geo.prompts"), api.GeoCreatePrompt)
-			geo.PUT("/prompts/:id", api.RequirePermission("geo.prompts"), api.GeoUpdatePrompt)
-			geo.DELETE("/prompts/:id", api.RequirePermission("geo.prompts"), api.GeoDeletePrompt)
-
-			geo.GET("/knowledge", api.RequirePermission("geo.view"), api.GeoListKnowledge)
-			geo.POST("/knowledge", api.RequirePermission("geo.knowledge"), api.GeoCreateKnowledge)
-			geo.PUT("/knowledge/:id", api.RequirePermission("geo.knowledge"), api.GeoUpdateKnowledge)
-			geo.DELETE("/knowledge/:id", api.RequirePermission("geo.knowledge"), api.GeoDeleteKnowledge)
-
-			geo.GET("/tasks", api.RequirePermission("geo.view"), api.GeoListTasks)
-			geo.POST("/tasks", api.RequirePermission("geo.tasks"), api.GeoCreateTask)
-			geo.PUT("/tasks/:id", api.RequirePermission("geo.tasks"), api.GeoUpdateTask)
-			geo.DELETE("/tasks/:id", api.RequirePermission("geo.tasks"), api.GeoDeleteTask)
-			geo.POST("/tasks/:id/start", api.RequirePermission("geo.tasks"), api.GeoStartTask)
-			geo.POST("/tasks/:id/stop", api.RequirePermission("geo.tasks"), api.GeoStopTask)
-			geo.POST("/tasks/:id/run", api.RequirePermission("geo.tasks_run"), api.GeoRunTask)
+			// NOTE: /prompts /knowledge /tasks endpoints were removed in
+			// the wizard refactor. Prompts are now per-generation
+			// (custom_prompt on geo_workflow_jobs). Knowledge bases and
+			// batch tasks are gone — users manage keywords and click AI
+			// generate row-by-row via the 4-step wizard.
 
 			geo.GET("/articles", api.RequirePermission("geo.articles"), api.GeoListArticles)
 			geo.GET("/articles/:id", api.RequirePermission("geo.articles"), api.GeoGetArticle)
@@ -407,9 +395,6 @@ func main() {
 			// Per-keyword async AI writing workflow (both GEO + ExtLink
 			// share this backend; differentiate via content_type in the
 			// request body). Returns job id immediately, frontend polls.
-			// Uses a dedicated perm (geo.workflow) separate from the
-			// batch-task runner (geo.tasks_run) because teams often want
-			// to grant one without the other.
 			geo.POST("/keyword/workflow/start", api.RequirePermission("geo.workflow"), api.GeoStartKeywordWorkflow)
 			geo.GET("/keyword/workflow/jobs", api.RequirePermission("geo.view"), api.GeoListWorkflowJobs)
 			geo.GET("/keyword/workflow/:id", api.RequirePermission("geo.view"), api.GeoGetWorkflowJob)

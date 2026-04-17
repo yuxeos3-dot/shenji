@@ -45,12 +45,8 @@ var PermissionTree = []PermNode{
 	}},
 	{Code: "geo", Label: "GEO 管理", Children: []PermNode{
 		{Code: "geo.view", Label: "查看 GEO 模块"},
-		{Code: "geo.keywords", Label: "管理关键词库"},
-		{Code: "geo.prompts", Label: "管理 Prompt 模板"},
-		{Code: "geo.knowledge", Label: "管理知识库"},
-		{Code: "geo.tasks", Label: "管理批量生成任务"},
-		{Code: "geo.tasks_run", Label: "执行批量生成（调用 AI）"},
-		{Code: "geo.workflow", Label: "关键词 AI 写作工作流（逐词生成 + TDK + FAQ）"},
+		{Code: "geo.keywords", Label: "管理关键词 / 话题库"},
+		{Code: "geo.workflow", Label: "关键词 AI 写作（4 步向导）"},
 		{Code: "geo.articles", Label: "查看文章"},
 		{Code: "geo.articles_review", Label: "审核文章"},
 		{Code: "geo.articles_publish", Label: "发布文章"},
@@ -132,8 +128,9 @@ var PermissionTree = []PermNode{
 //	reports.write   → reports.daily.write + reports.weekly.write + reports.monthly.write
 //	reports.polish  → reports.daily.polish + reports.weekly.polish + reports.monthly.polish
 //	reports.export  → reports.daily.export
-//	geo.tasks_run   → geo.tasks_run + geo.workflow (auto-grant new workflow perm
-//	                  to anyone who already had batch-generate rights)
+//	geo.tasks_run   → geo.workflow (batch generation removed; migrate old
+//	                  task-runner perm to the new per-keyword wizard perm)
+//	geo.prompts / geo.knowledge / geo.tasks → dropped (stripped from lists)
 //	coord.verify    → coord.verify + coord.pre_audit + coord.reject + coord.test_pages
 //	                  (if a user could verify before, they need the whole
 //	                  verify-phase toolbox now that it's split)
@@ -142,13 +139,13 @@ var PermissionTree = []PermNode{
 // new codes) are not re-processed; also dedup on write. Safe to leave in
 // place across restarts.
 //
-// We set a settings flag `perm_migrated_v2` on success so subsequent boots
+// We set a settings flag `perm_migrated_v3` on success so subsequent boots
 // skip the scan entirely. The flag lookup is one tiny SQL call; if it's
 // set we return immediately.
 func MigrateLegacyPermissions() {
 	// Skip if already done.
 	var done string
-	db.DB.QueryRow(`SELECT COALESCE(value,'') FROM settings WHERE key='perm_migrated_v2'`).Scan(&done)
+	db.DB.QueryRow(`SELECT COALESCE(value,'') FROM settings WHERE key='perm_migrated_v3'`).Scan(&done)
 	if done == "1" {
 		return
 	}
@@ -159,7 +156,7 @@ func MigrateLegacyPermissions() {
 		"reports.write":  {"reports.daily.write", "reports.weekly.write", "reports.monthly.write"},
 		"reports.polish": {"reports.daily.polish", "reports.weekly.polish", "reports.monthly.polish"},
 		"reports.export": {"reports.daily.export"},
-		"geo.tasks_run":  {"geo.tasks_run", "geo.workflow"},
+		"geo.tasks_run":  {"geo.workflow"},
 		"coord.verify":   {"coord.verify", "coord.pre_audit", "coord.reject", "coord.test_pages"},
 	}
 	// Old codes that get fully replaced (removed after expansion).
@@ -168,6 +165,11 @@ func MigrateLegacyPermissions() {
 		"reports.write":  true,
 		"reports.polish": true,
 		"reports.export": true,
+		// 4-step wizard refactor dropped batch-task / per-template flows.
+		"geo.tasks_run":  true,
+		"geo.tasks":      true,
+		"geo.prompts":    true,
+		"geo.knowledge":  true,
 	}
 
 	rows, err := db.DB.Query(`SELECT id, COALESCE(permissions,'') FROM users WHERE permissions IS NOT NULL AND permissions <> ''`)
@@ -202,6 +204,7 @@ func MigrateLegacyPermissions() {
 		seen := map[string]bool{}
 		next := make([]string, 0, len(list)+8)
 		for _, code := range list {
+			// Expand legacy codes into their replacements.
 			if adds, ok := expansions[code]; ok {
 				changed = true
 				for _, a := range adds {
@@ -210,9 +213,12 @@ func MigrateLegacyPermissions() {
 						next = append(next, a)
 					}
 				}
-				if obsolete[code] {
-					continue // drop the legacy code itself
-				}
+			}
+			// Obsolete codes (including those that had no expansion) get
+			// dropped so the user's list no longer references dead perms.
+			if obsolete[code] {
+				changed = true
+				continue
 			}
 			if !seen[code] {
 				seen[code] = true
@@ -230,7 +236,7 @@ func MigrateLegacyPermissions() {
 		migrated++
 	}
 	// Set completion flag whether or not any user needed migrating.
-	db.DB.Exec(`INSERT INTO settings(key, value) VALUES('perm_migrated_v2','1')
+	db.DB.Exec(`INSERT INTO settings(key, value) VALUES('perm_migrated_v3','1')
 		ON CONFLICT(key) DO UPDATE SET value='1'`)
 	if migrated > 0 {
 		log.Printf("[perm-migration] migrated %d user(s) to v2 permission codes", migrated)

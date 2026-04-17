@@ -688,6 +688,18 @@ func Init() {
 		`ALTER TABLE geo_workflow_jobs ADD COLUMN extra_requirements TEXT DEFAULT ''`,
 		`ALTER TABLE geo_workflow_jobs ADD COLUMN reference_url TEXT DEFAULT ''`,
 		`ALTER TABLE geo_workflow_jobs ADD COLUMN custom_prompt TEXT DEFAULT ''`,
+
+		// ─── Deprecated tables (4-step wizard superseded them) ────────────
+		// The 每关键词 AI 生成 向导 replaces the old Prompt 模板 / 知识库 /
+		// 生成任务 tabs. Prompts are now per-generation (custom_prompt on
+		// geo_workflow_jobs). Knowledge bases and batch tasks are gone —
+		// users manage keywords and click AI generate row-by-row.
+		// Drop these tables outright; the article rows keep their
+		// orphaned task_id column but it's now just historical and
+		// unreferenced (no FK enforcement in SQLite).
+		`DROP TABLE IF EXISTS geo_tasks`,
+		`DROP TABLE IF EXISTS geo_prompts`,
+		`DROP TABLE IF EXISTS geo_knowledge`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {
