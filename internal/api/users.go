@@ -11,24 +11,36 @@ import (
 )
 
 type CreateUserRequest struct {
-	Name     string `json:"name" binding:"required"`
-	Email    string `json:"email" binding:"required,email"`
+	Name  string `json:"name" binding:"required"`
+	Email string `json:"email" binding:"required,email"`
 	// min=12 matches ValidatePassword below; the binding tag fails fast with
 	// a uniform rule so we never end up telling the user "密码至少 8 位" in
 	// one place and "12 位" in another.
-	Password string `json:"password" binding:"required,min=12"`
-	Role     string `json:"role"`
+	Password     string `json:"password" binding:"required,min=12"`
+	Role         string `json:"role"`
+	DepartmentID int64  `json:"department_id"`
+	GroupID      int64  `json:"group_id"`
 }
 
 type UpdateUserRequest struct {
-	Name       string `json:"name"`
-	Email      string `json:"email"`
-	Role       string `json:"role"`
-	TelegramID string `json:"telegram_id"`
+	Name         string `json:"name"`
+	Email        string `json:"email"`
+	Role         string `json:"role"`
+	TelegramID   string `json:"telegram_id"`
+	DepartmentID *int64 `json:"department_id"` // pointer so "0" is distinguishable from "not sent"
+	GroupID      *int64 `json:"group_id"`
 }
 
 func ListUsers(c *gin.Context) {
-	rows, err := db.DB.Query("SELECT id, name, email, role, telegram_id, created_at, last_login FROM users ORDER BY id")
+	rows, err := db.DB.Query(`
+		SELECT u.id, u.name, u.email, u.role, u.telegram_id, u.created_at, u.last_login,
+		       COALESCE(u.department_id, 0), COALESCE(u.group_id, 0),
+		       COALESCE(d.name, ''), COALESCE(g.name, '')
+		FROM users u
+		LEFT JOIN departments d ON d.id = u.department_id
+		LEFT JOIN dept_groups g ON g.id = u.group_id
+		ORDER BY u.id
+	`)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
 		return
@@ -37,21 +49,26 @@ func ListUsers(c *gin.Context) {
 
 	var users []gin.H
 	for rows.Next() {
-		var id int64
-		var name, email, role, telegramID string
+		var id, deptID, groupID int64
+		var name, email, role, telegramID, deptName, groupName string
 		var createdAt string
 		var lastLogin *string
-		if err := rows.Scan(&id, &name, &email, &role, &telegramID, &createdAt, &lastLogin); err != nil {
+		if err := rows.Scan(&id, &name, &email, &role, &telegramID, &createdAt, &lastLogin,
+			&deptID, &groupID, &deptName, &groupName); err != nil {
 			continue
 		}
 		users = append(users, gin.H{
-			"id":          id,
-			"name":        name,
-			"email":       email,
-			"role":        role,
-			"telegram_id": telegramID,
-			"created_at":  createdAt,
-			"last_login":  lastLogin,
+			"id":              id,
+			"name":            name,
+			"email":           email,
+			"role":            role,
+			"telegram_id":     telegramID,
+			"created_at":      createdAt,
+			"last_login":      lastLogin,
+			"department_id":   deptID,
+			"group_id":        groupID,
+			"department_name": deptName,
+			"group_name":      groupName,
 		})
 	}
 
@@ -77,6 +94,14 @@ func CreateUser(c *gin.Context) {
 		req.Role = "member"
 	}
 
+	// Validate the dept/group pair. group_id > 0 requires that the group
+	// actually belongs to the given department_id — otherwise we'd end
+	// up with misattributed reports later.
+	if err := validateDeptGroupPair(req.DepartmentID, req.GroupID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
+		return
+	}
+
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "密码加密失败"})
@@ -84,8 +109,9 @@ func CreateUser(c *gin.Context) {
 	}
 
 	result, err := db.DB.Exec(
-		"INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
-		req.Name, req.Email, string(hash), req.Role,
+		`INSERT INTO users (name, email, password, role, department_id, group_id)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		req.Name, req.Email, string(hash), req.Role, req.DepartmentID, req.GroupID,
 	)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "创建失败，邮箱可能已存在"})
@@ -97,6 +123,36 @@ func CreateUser(c *gin.Context) {
 	WriteAuditLog(c, "create_user", "user", fmt.Sprintf("%d", id), req.Email)
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"id": id}})
+}
+
+// validateDeptGroupPair ensures the provided (department, group) pair is
+// consistent. Both 0 = unassigned is fine; group without department is
+// not; group under the wrong department is not.
+func validateDeptGroupPair(deptID, groupID int64) error {
+	if deptID == 0 && groupID == 0 {
+		return nil
+	}
+	if deptID > 0 {
+		var exists int
+		db.DB.QueryRow(`SELECT 1 FROM departments WHERE id = ?`, deptID).Scan(&exists)
+		if exists != 1 {
+			return fmt.Errorf("指定的部门不存在")
+		}
+	}
+	if groupID > 0 {
+		if deptID == 0 {
+			return fmt.Errorf("选择组必须先选部门")
+		}
+		var gDept int64
+		db.DB.QueryRow(`SELECT department_id FROM dept_groups WHERE id = ?`, groupID).Scan(&gDept)
+		if gDept == 0 {
+			return fmt.Errorf("指定的组不存在")
+		}
+		if gDept != deptID {
+			return fmt.Errorf("所选组不属于该部门")
+		}
+	}
+	return nil
 }
 
 func UpdateUser(c *gin.Context) {
@@ -123,6 +179,44 @@ func UpdateUser(c *gin.Context) {
 				c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "不能降级最后一个管理员"})
 				return
 			}
+		}
+	}
+
+	// If department or group is being changed, validate the pair.
+	// The pointer trick on the request type lets us tell "not sent"
+	// from "sent as 0" (unassigning).
+	if req.DepartmentID != nil || req.GroupID != nil {
+		// Load current values to fill in whichever side the caller
+		// didn't send — so a partial update ("just change the group")
+		// still gets validated against the existing department.
+		var curDept, curGroup int64
+		db.DB.QueryRow(
+			"SELECT COALESCE(department_id, 0), COALESCE(group_id, 0) FROM users WHERE id = ?", id,
+		).Scan(&curDept, &curGroup)
+		newDept := curDept
+		newGroup := curGroup
+		if req.DepartmentID != nil {
+			newDept = *req.DepartmentID
+		}
+		if req.GroupID != nil {
+			newGroup = *req.GroupID
+		}
+		// If the caller changed department but didn't explicitly
+		// specify a group, reset group to 0 — a group under the old
+		// department would be invalid under the new one.
+		if req.DepartmentID != nil && req.GroupID == nil && newDept != curDept {
+			newGroup = 0
+		}
+		if err := validateDeptGroupPair(newDept, newGroup); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
+			return
+		}
+		if _, err := db.DB.Exec(
+			"UPDATE users SET department_id = ?, group_id = ? WHERE id = ?",
+			newDept, newGroup, id,
+		); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "更新部门/组失败"})
+			return
 		}
 	}
 

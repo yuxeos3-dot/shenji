@@ -1,5 +1,45 @@
 <template>
   <div>
+    <!-- Department + group management panel.
+         Admins use this to maintain the two-level org chart. Users
+         attach to a (department, group) pair in the form below. -->
+    <div class="panel dept-panel">
+      <div class="panel-head">
+        <div class="panel-title">🏢 部门与组管理</div>
+        <div class="panel-actions">
+          <button class="btn btn-sm" @click="openAddDept">+ 添加部门</button>
+          <button class="btn btn-sm" @click="openAddGroup" :disabled="!departments.length">+ 添加组</button>
+        </div>
+      </div>
+      <div v-if="!departments.length" class="empty-cell" style="padding:22px">
+        暂无部门。点击「+ 添加部门」开始建立组织结构。
+      </div>
+      <div v-else class="dept-list">
+        <div v-for="d in departments" :key="d.id" class="dept-card">
+          <div class="dept-card-head">
+            <div class="dept-name">
+              <span class="dept-icon">🏢</span>
+              {{ d.name }}
+              <span class="dept-count">{{ d.user_count }} 人 · {{ d.group_count }} 组</span>
+            </div>
+            <div class="dept-actions">
+              <button class="btn btn-xs" @click="openEditDept(d)">✏</button>
+              <button class="btn btn-xs btn-danger-xs" @click="deleteDept(d)">🗑</button>
+            </div>
+          </div>
+          <div v-if="groupsByDept[d.id]?.length" class="group-chip-row">
+            <div v-for="g in groupsByDept[d.id]" :key="g.id" class="group-chip">
+              <span class="group-name">{{ g.name }}</span>
+              <span class="group-count">{{ g.user_count }} 人</span>
+              <button class="chip-btn" @click="openEditGroup(g)" title="编辑组">✏</button>
+              <button class="chip-btn chip-danger" @click="deleteGroup(g)" title="删除组">✕</button>
+            </div>
+          </div>
+          <div v-else class="empty-groups">该部门下还没有组</div>
+        </div>
+      </div>
+    </div>
+
     <div class="page-top">
       <div></div>
       <button class="btn btn-primary" @click="openAdd">👤 添加用户</button>
@@ -7,12 +47,19 @@
 
     <div class="panel">
       <table class="table">
-        <thead><tr><th>姓名</th><th>邮箱</th><th>角色</th><th>Telegram ID</th><th>最后登录</th><th>操作</th></tr></thead>
+        <thead><tr><th>姓名</th><th>邮箱</th><th>角色</th><th>部门 / 组</th><th>Telegram ID</th><th>最后登录</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="u in users" :key="u.id">
             <td style="font-weight:700">{{ u.name }}</td>
             <td style="color:var(--ink-mid)">{{ u.email }}</td>
             <td><span class="role-badge" :class="u.role==='admin'?'role-admin':'role-member'">{{ u.role }}</span></td>
+            <td style="font-size:12px">
+              <template v-if="u.department_name">
+                <span class="dept-inline">{{ u.department_name }}</span>
+                <span v-if="u.group_name" class="group-inline">· {{ u.group_name }}</span>
+              </template>
+              <span v-else style="color:var(--ink-hint)">—</span>
+            </td>
             <td style="font-size:12px;color:var(--ink-soft)">{{ u.telegram_id || '—' }}</td>
             <td style="font-size:12px;color:var(--ink-soft)">{{ u.last_login || '—' }}</td>
             <td>
@@ -23,12 +70,12 @@
               </div>
             </td>
           </tr>
-          <tr v-if="!users.length"><td colspan="6" class="empty-cell">暂无用户</td></tr>
+          <tr v-if="!users.length"><td colspan="7" class="empty-cell">暂无用户</td></tr>
         </tbody>
       </table>
     </div>
 
-    <el-dialog v-model="showDialog" :title="editId ? '✏️ 编辑用户' : '👤 添加用户'" width="450px">
+    <el-dialog v-model="showDialog" :title="editId ? '✏️ 编辑用户' : '👤 添加用户'" width="480px">
       <div class="form-group"><label>姓名</label><input v-model="form.name" @keyup.enter="saveUser" /></div>
       <div class="form-group"><label>邮箱</label><input v-model="form.email" type="email" @keyup.enter="saveUser" /></div>
       <div v-if="!editId" class="form-group"><label>密码 <span style="font-weight:400;color:var(--ink-hint);font-size:12px">（至少 12 位，含大小写字母和数字）</span></label><input v-model="form.password" type="password" @keyup.enter="saveUser" /></div>
@@ -39,10 +86,54 @@
           <el-option label="成员" value="member" />
         </el-select>
       </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1">
+          <label>部门</label>
+          <el-select v-model="form.department_id" clearable placeholder="未指定" style="width:100%" @change="onDeptChange">
+            <el-option v-for="d in departments" :key="d.id" :label="d.name" :value="d.id" />
+          </el-select>
+        </div>
+        <div class="form-group" style="flex:1">
+          <label>组</label>
+          <el-select v-model="form.group_id" clearable placeholder="未指定" style="width:100%" :disabled="!form.department_id">
+            <el-option v-for="g in (groupsByDept[form.department_id] || [])" :key="g.id" :label="g.name" :value="g.id" />
+          </el-select>
+        </div>
+      </div>
       <div class="form-group"><label>Telegram ID</label><input v-model="form.telegram_id" /></div>
       <template #footer>
         <el-button @click="showDialog=false">取消</el-button>
         <el-button type="primary" @click="saveUser">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Department dialog -->
+    <el-dialog v-model="showDeptDialog" :title="deptEditId ? '编辑部门' : '新增部门'" width="380px">
+      <div class="form-group">
+        <label>部门名称</label>
+        <input v-model="deptForm.name" @keyup.enter="saveDept" placeholder="例如：技术部" />
+      </div>
+      <template #footer>
+        <el-button @click="showDeptDialog=false">取消</el-button>
+        <el-button type="primary" @click="saveDept">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Group dialog -->
+    <el-dialog v-model="showGroupDialog" :title="groupEditId ? '编辑组' : '新增组'" width="420px">
+      <div class="form-group">
+        <label>所属部门</label>
+        <el-select v-model="groupForm.department_id" placeholder="选择部门" style="width:100%">
+          <el-option v-for="d in departments" :key="d.id" :label="d.name" :value="d.id" />
+        </el-select>
+      </div>
+      <div class="form-group">
+        <label>组名称</label>
+        <input v-model="groupForm.name" @keyup.enter="saveGroup" placeholder="例如：前端组" />
+      </div>
+      <template #footer>
+        <el-button @click="showGroupDialog=false">取消</el-button>
+        <el-button type="primary" @click="saveGroup">保存</el-button>
       </template>
     </el-dialog>
 
@@ -82,32 +173,187 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 
 const users = ref([])
+const departments = ref([])
+const groups = ref([])
 const showDialog = ref(false)
 const editId = ref(null)
-const form = ref({ name:'', email:'', password:'', role:'member', telegram_id:'' })
+const form = ref({ name:'', email:'', password:'', role:'member', telegram_id:'', department_id:null, group_id:null })
 
-async function loadUsers() { try { const res = await api.listUsers(); users.value = res.data } catch (e) { console.error('加载用户失败', e); ElMessage.error('加载用户列表失败') } }
-function openAdd() { editId.value = null; form.value = { name:'', email:'', password:'', role:'member', telegram_id:'' }; showDialog.value = true }
-function openEdit(u) { editId.value = u.id; form.value = { name:u.name, email:u.email, role:u.role, telegram_id:u.telegram_id||'' }; showDialog.value = true }
+// Group-by-department map so the form's cascading dropdown and the
+// dept panel below can both render groups under the right parent.
+const groupsByDept = computed(() => {
+  const m = {}
+  for (const g of groups.value) {
+    if (!m[g.department_id]) m[g.department_id] = []
+    m[g.department_id].push(g)
+  }
+  return m
+})
+
+async function loadAll() {
+  try {
+    const [uRes, dRes, gRes] = await Promise.all([
+      api.listUsers(),
+      api.listDepartments(),
+      api.listGroups(),
+    ])
+    users.value = uRes.data
+    departments.value = dRes.data || []
+    groups.value = gRes.data || []
+  } catch (e) {
+    console.error('加载失败', e)
+    ElMessage.error('加载数据失败')
+  }
+}
+
+function openAdd() {
+  editId.value = null
+  form.value = { name:'', email:'', password:'', role:'member', telegram_id:'', department_id:null, group_id:null }
+  showDialog.value = true
+}
+function openEdit(u) {
+  editId.value = u.id
+  form.value = {
+    name: u.name,
+    email: u.email,
+    role: u.role,
+    telegram_id: u.telegram_id || '',
+    department_id: u.department_id || null,
+    group_id: u.group_id || null,
+  }
+  showDialog.value = true
+}
+
+// Reset group when department changes so the cascade doesn't allow
+// an invalid (dept, group) pair through the backend validator.
+function onDeptChange() {
+  form.value.group_id = null
+}
 
 async function saveUser() {
+  // Send explicit 0 for unassigned so the backend sees "user wants to
+  // clear it" rather than "not sent" (pointer-based).
+  const payload = {
+    ...form.value,
+    department_id: form.value.department_id || 0,
+    group_id: form.value.group_id || 0,
+  }
   try {
-    if (editId.value) await api.updateUser(editId.value, form.value)
-    else await api.createUser(form.value)
-    ElMessage.success('保存成功'); showDialog.value = false; loadUsers()
+    if (editId.value) await api.updateUser(editId.value, payload)
+    else await api.createUser(payload)
+    ElMessage.success('保存成功'); showDialog.value = false; loadAll()
   } catch (e) { console.error('保存用户失败', e) }
 }
 
 async function deleteUser(u) {
   try {
     await ElMessageBox.confirm(`确认删除用户 ${u.name}?`, '警告', { type: 'warning' })
-    await api.deleteUser(u.id); ElMessage.success('删除成功'); loadUsers()
+    await api.deleteUser(u.id); ElMessage.success('删除成功'); loadAll()
   } catch (e) { if (e !== 'cancel') console.error('删除用户失败', e) }
+}
+
+// ── Departments ──
+const showDeptDialog = ref(false)
+const deptEditId = ref(null)
+const deptForm = ref({ name: '' })
+
+function openAddDept() {
+  deptEditId.value = null
+  deptForm.value = { name: '' }
+  showDeptDialog.value = true
+}
+function openEditDept(d) {
+  deptEditId.value = d.id
+  deptForm.value = { name: d.name }
+  showDeptDialog.value = true
+}
+async function saveDept() {
+  if (!deptForm.value.name.trim()) {
+    ElMessage.warning('请填写部门名称')
+    return
+  }
+  try {
+    if (deptEditId.value) {
+      await api.updateDepartment(deptEditId.value, deptForm.value)
+    } else {
+      await api.createDepartment(deptForm.value)
+    }
+    ElMessage.success('保存成功')
+    showDeptDialog.value = false
+    loadAll()
+  } catch { /* interceptor */ }
+}
+async function deleteDept(d) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除部门「${d.name}」？其下 ${d.group_count} 个组将一并删除，${d.user_count} 个成员会被解除绑定（不会被删除）。`,
+      '警告',
+      { type: 'warning', confirmButtonText: '删除' },
+    )
+  } catch { return }
+  try {
+    await api.deleteDepartment(d.id)
+    ElMessage.success('已删除')
+    loadAll()
+  } catch { /* interceptor */ }
+}
+
+// ── Groups ──
+const showGroupDialog = ref(false)
+const groupEditId = ref(null)
+const groupForm = ref({ department_id: null, name: '' })
+
+function openAddGroup() {
+  groupEditId.value = null
+  groupForm.value = {
+    department_id: departments.value[0]?.id || null,
+    name: '',
+  }
+  showGroupDialog.value = true
+}
+function openEditGroup(g) {
+  groupEditId.value = g.id
+  groupForm.value = { department_id: g.department_id, name: g.name }
+  showGroupDialog.value = true
+}
+async function saveGroup() {
+  if (!groupForm.value.department_id) {
+    ElMessage.warning('请选择部门')
+    return
+  }
+  if (!groupForm.value.name.trim()) {
+    ElMessage.warning('请填写组名称')
+    return
+  }
+  try {
+    if (groupEditId.value) {
+      await api.updateGroup(groupEditId.value, groupForm.value)
+    } else {
+      await api.createGroup(groupForm.value)
+    }
+    ElMessage.success('保存成功')
+    showGroupDialog.value = false
+    loadAll()
+  } catch { /* interceptor */ }
+}
+async function deleteGroup(g) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除组「${g.name}」？其下 ${g.user_count} 个成员会被解除绑定（不会被删除，仍保留在部门里）。`,
+      '警告',
+      { type: 'warning', confirmButtonText: '删除' },
+    )
+  } catch { return }
+  try {
+    await api.deleteGroup(g.id)
+    ElMessage.success('已删除')
+    loadAll()
+  } catch { /* interceptor */ }
 }
 
 // ── Permissions ──
@@ -166,7 +412,7 @@ async function savePerms() {
   finally { savingPerms.value = false }
 }
 
-onMounted(loadUsers)
+onMounted(loadAll)
 </script>
 
 <style scoped>
@@ -212,4 +458,37 @@ onMounted(loadUsers)
 .perm-group-label { font-weight:700; font-size:14px; }
 .perm-children { padding:10px 14px 10px 32px; display:grid; grid-template-columns:1fr 1fr; gap:6px 20px; }
 .perm-item { font-size:13px; }
+
+/* ── Department + group panel (sits above the users table) ── */
+.dept-panel { margin-bottom:18px; padding:16px 22px; }
+.panel-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.panel-title { font-size:14px; font-weight:800; color:var(--ink); }
+.panel-actions { display:flex; gap:8px; }
+.btn-sm { padding:6px 14px; font-size:12.5px; border-radius:7px; }
+
+.dept-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:12px; }
+.dept-card { border:1.5px solid var(--border-light); border-radius:var(--r-sm); padding:12px 14px; background:var(--surface-2); transition:border-color .15s, box-shadow .15s; }
+.dept-card:hover { border-color:var(--peach); box-shadow:var(--s1); }
+.dept-card-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; gap:10px; }
+.dept-name { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:800; color:var(--ink); flex:1; min-width:0; }
+.dept-icon { font-size:16px; flex-shrink:0; }
+.dept-count { font-size:11px; font-weight:600; color:var(--ink-hint); padding:2px 9px; background:var(--surface); border:1px solid var(--border-light); border-radius:10px; white-space:nowrap; }
+.dept-actions { display:flex; gap:4px; flex-shrink:0; }
+
+.group-chip-row { display:flex; flex-wrap:wrap; gap:6px; }
+.group-chip { display:inline-flex; align-items:center; gap:5px; padding:4px 4px 4px 10px; background:var(--surface); border:1px solid var(--border-light); border-radius:14px; font-size:12px; transition:border-color .15s; }
+.group-chip:hover { border-color:var(--peach); }
+.group-chip .group-name { font-weight:700; color:var(--ink); }
+.group-chip .group-count { font-size:10.5px; color:var(--ink-hint); font-family:'JetBrains Mono',monospace; }
+.chip-btn { background:none; border:none; color:var(--ink-hint); cursor:pointer; padding:2px 5px; border-radius:50%; font-size:10.5px; width:20px; height:20px; display:inline-flex; align-items:center; justify-content:center; }
+.chip-btn:hover { background:var(--sun-light); color:var(--sun-deep); }
+.chip-danger:hover { background:var(--err-bg); color:var(--err); }
+.empty-groups { font-size:12px; color:var(--ink-hint); padding:4px 0; font-style:italic; }
+
+.dept-inline { font-weight:700; color:var(--ink); }
+.group-inline { margin-left:4px; color:var(--ink-soft); }
+
+/* Two-column form row used for dept + group side-by-side in the user dialog */
+.form-row { display:flex; gap:12px; }
+.form-row .form-group { flex:1; }
 </style>

@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	_ "modernc.org/sqlite"
 	"golang.org/x/crypto/bcrypt"
+	_ "modernc.org/sqlite"
 )
 
 var DB *sql.DB
@@ -518,6 +518,37 @@ func Init() {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_coord_attach_task ON coordination_attachments(task_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_coord_attach_event ON coordination_attachments(event_id)`,
+
+		// ─── Organization structure (部门 / 组) ─────────────────────────────
+		// Two-tier: departments contain groups, groups contain users. Both
+		// names are stored on the row — the users table gains FK-ish
+		// integer columns that reference these tables. We keep them as
+		// plain integers (not REAL foreign keys) so SQLite doesn't
+		// complain when a department is deleted (we re-point orphans
+		// to 0 in the delete handler).
+		`CREATE TABLE IF NOT EXISTS departments (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			name       TEXT NOT NULL UNIQUE,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			created_by INTEGER DEFAULT 0
+		)`,
+		`CREATE TABLE IF NOT EXISTS dept_groups (
+			id            INTEGER PRIMARY KEY AUTOINCREMENT,
+			department_id INTEGER NOT NULL,
+			name          TEXT NOT NULL,
+			created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+			created_by    INTEGER DEFAULT 0,
+			UNIQUE(department_id, name)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_dept_groups_dept ON dept_groups(department_id)`,
+
+		// Existing users rows get 0 = unassigned. IF NOT EXISTS isn't
+		// supported by SQLite for ALTER TABLE ADD COLUMN, so the
+		// "duplicate column" error filter in the migration loop below
+		// makes this idempotent.
+		`ALTER TABLE users ADD COLUMN department_id INTEGER DEFAULT 0`,
+		`ALTER TABLE users ADD COLUMN group_id INTEGER DEFAULT 0`,
+		`CREATE INDEX IF NOT EXISTS idx_users_dept_group ON users(department_id, group_id)`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {
@@ -610,15 +641,15 @@ func seedDefaultAdmin() {
 
 func seedDefaultSettings() {
 	defaults := map[string]string{
-		"site_title":                   "SEO巡站管理系统",
-		"auto_audit_enabled":           "false",
-		"auto_audit_cron":              "0 9 * * *",
-		"auto_audit_interval_hours":    "0",
-		"max_concurrent_audit":         "3",
-		"ai_api_url":                   "https://ai.router.team/v1",
-		"ai_model":                     "claude-sonnet-4-6",
-		"ip_whitelist":                 "",
-		"spider_ingest_api_key":        "", // Set via admin UI; empty disables /api/spider/ingest
+		"site_title":                "SEO巡站管理系统",
+		"auto_audit_enabled":        "false",
+		"auto_audit_cron":           "0 9 * * *",
+		"auto_audit_interval_hours": "0",
+		"max_concurrent_audit":      "3",
+		"ai_api_url":                "https://ai.router.team/v1",
+		"ai_model":                  "claude-sonnet-4-6",
+		"ip_whitelist":              "",
+		"spider_ingest_api_key":     "", // Set via admin UI; empty disables /api/spider/ingest
 	}
 
 	for k, v := range defaults {

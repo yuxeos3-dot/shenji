@@ -116,6 +116,22 @@ func main() {
 			users.GET("/permission-tree", api.GetPermissionTree)
 		}
 
+		// Organization structure — admin only. Matches the /users pattern
+		// so the settings page can list/create/update/delete departments
+		// and groups in the same admin-only section.
+		orgs := v1.Group("/org")
+		orgs.Use(middleware.AdminRequired())
+		{
+			orgs.GET("/departments", api.ListDepartments)
+			orgs.POST("/departments", api.CreateDepartment)
+			orgs.PUT("/departments/:id", api.UpdateDepartment)
+			orgs.DELETE("/departments/:id", api.DeleteDepartment)
+			orgs.GET("/groups", api.ListGroups)
+			orgs.POST("/groups", api.CreateGroup)
+			orgs.PUT("/groups/:id", api.UpdateGroup)
+			orgs.DELETE("/groups/:id", api.DeleteGroup)
+		}
+
 		// Sites
 		v1.GET("/sites", api.RequirePermission("sites.view"), api.ListSites)
 		v1.POST("/sites", api.RequirePermission("sites.create"), api.CreateSite)

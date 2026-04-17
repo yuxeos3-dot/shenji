@@ -80,6 +80,17 @@ const api = {
   updateUser: (id: Id, data: Record<string, any>) => instance.put(`/v1/users/${id}`, data),
   deleteUser: (id: Id) => instance.delete(`/v1/users/${id}`),
 
+  // Organization (departments + groups). Admin-only on the backend;
+  // the frontend shows the CRUD panel on the Users page.
+  listDepartments: () => instance.get('/v1/org/departments'),
+  createDepartment: (data: Record<string, any>) => instance.post('/v1/org/departments', data),
+  updateDepartment: (id: Id, data: Record<string, any>) => instance.put(`/v1/org/departments/${id}`, data),
+  deleteDepartment: (id: Id) => instance.delete(`/v1/org/departments/${id}`),
+  listGroups: (params?: Record<string, any>) => instance.get('/v1/org/groups', { params }),
+  createGroup: (data: Record<string, any>) => instance.post('/v1/org/groups', data),
+  updateGroup: (id: Id, data: Record<string, any>) => instance.put(`/v1/org/groups/${id}`, data),
+  deleteGroup: (id: Id) => instance.delete(`/v1/org/groups/${id}`),
+
   // Sites
   listSites: () => instance.get('/v1/sites'),
   createSite: (data: Record<string, any>) => instance.post('/v1/sites', data),
