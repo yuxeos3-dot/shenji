@@ -270,7 +270,9 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import { useSiteConfigStore } from '../stores/siteConfig'
 
+const siteConfig = useSiteConfigStore()
 const activeTab = ref('basic')
 const saving = ref(false)
 const settings = ref({})
@@ -337,7 +339,14 @@ watch([scheduleMode, intervalHours, dailyHour], () => {
 
 async function save() {
   saving.value = true
-  try { await api.saveSettings(settings.value); ElMessage.success('保存成功') } catch (e) { console.error(e) }
+  try {
+    await api.saveSettings(settings.value)
+    // site_title may have changed — refresh the global store so the
+    // sidebar logo, browser tab, and login page all pick it up without
+    // requiring a reload.
+    siteConfig.refresh()
+    ElMessage.success('保存成功')
+  } catch (e) { console.error(e) }
   finally { saving.value = false }
 }
 
@@ -348,6 +357,7 @@ async function saveAll() {
       api.saveSettings(settings.value),
       api.saveMyAIConfig({ slots: aiSlots.value }),
     ])
+    siteConfig.refresh()
     ElMessage.success('全部保存成功')
   } catch { ElMessage.error('保存失败') }
   finally { saving.value = false }

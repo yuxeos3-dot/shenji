@@ -1,6 +1,8 @@
 package api
 
 import (
+	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -49,26 +51,79 @@ func GetSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": settings})
 }
 
+// publicSettingsKeys is the allow-list of setting keys the frontend needs
+// before the user has logged in (used to render the login page title /
+// tab title / logo). Everything here MUST be safe to expose anonymously.
+var publicSettingsKeys = map[string]bool{
+	"site_title": true,
+}
+
+// GetPublicSettings is an unauthenticated variant of GetSettings that
+// returns only the handful of branding keys the login page needs. Anything
+// not in the allow-list is refused — don't add sensitive keys here.
+func GetPublicSettings(c *gin.Context) {
+	settings := make(map[string]string, len(publicSettingsKeys))
+	for key := range publicSettingsKeys {
+		settings[key] = db.GetSetting(key)
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": settings})
+}
+
 func SaveSettings(c *gin.Context) {
-	var settings map[string]string
-	if err := c.ShouldBindJSON(&settings); err != nil {
+	// Accept any JSON values (string / null / number) — the frontend used
+	// to occasionally send `null` for settings the user hadn't populated,
+	// which broke a strict map[string]string bind and failed the whole
+	// save. Coerce every value to string here.
+	var raw map[string]interface{}
+	if err := c.ShouldBindJSON(&raw); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "参数错误"})
 		return
 	}
 
-	for key, value := range settings {
-		// Skip masked values for sensitive keys (user didn't change them)
+	var failed []string
+	for key, v := range raw {
+		// Coerce to string. null → "", numbers → canonical representation.
+		value := ""
+		switch x := v.(type) {
+		case string:
+			value = x
+		case nil:
+			value = ""
+		case bool:
+			if x {
+				value = "true"
+			} else {
+				value = "false"
+			}
+		default:
+			// numbers, objects: stringify via fmt
+			value = strings.TrimSpace(strings.Trim(fmt.Sprintf("%v", x), "[]"))
+		}
+
+		// Skip masked values for sensitive keys (user didn't change them).
 		if sensitiveKeys[key] && strings.HasPrefix(value, "****") {
 			continue
 		}
 		if err := db.SetSetting(key, value); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存失败: " + key})
-			return
+			// Don't fail the whole request — a single rotten legacy key
+			// (e.g. orphaned `ai_model` / `ai_api_url` from the pre-per-user
+			// AI config days) shouldn't block saving something simple like
+			// `system_title`. Log the failure and move on.
+			log.Printf("[settings] SetSetting(%q) failed: %v", key, err)
+			failed = append(failed, key)
 		}
 	}
 
 	WriteAuditLog(c, "save_settings", "settings", "", "批量更新系统设置")
 
+	if len(failed) > 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"code":   0,
+			"data":   "部分保存成功",
+			"failed": failed,
+		})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "保存成功"})
 }
 

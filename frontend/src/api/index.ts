@@ -172,6 +172,7 @@ const api = {
   deleteExtlinkPoolItem: (id: Id) => instance.delete(`/v1/extlink-pool/${id}`),
 
   getSettings: () => instance.get('/v1/settings'),
+  getPublicSettings: () => instance.get('/v1/settings/public'),
   saveSettings: (data: Record<string, string>) => instance.put('/v1/settings', data),
   getMyIP: () => instance.get('/v1/settings/my-ip'),
   testAI: () => instance.post('/v1/settings/test-ai'),

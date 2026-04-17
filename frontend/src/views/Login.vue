@@ -2,7 +2,7 @@
   <div class="login-container">
     <div class="login-wrap">
       <div class="login-badge"><span class="lbdot"></span>SEO INTELLIGENCE</div>
-      <h1 class="login-h1">SEO<em>巡站</em>系统</h1>
+      <h1 class="login-h1">{{ siteConfig.title }}</h1>
       <p class="login-sub">多站点SEO健康监控 · AI驱动分析 · 数据聚合</p>
       <div class="login-card">
         <div class="form-group">
@@ -18,7 +18,7 @@
           <span v-else>☀ 登录系统</span>
         </button>
       </div>
-      <p class="login-note">Sunrise Design · Powered by Go + Vue3</p>
+      <p class="login-note">Sunrise Design · Powered by Go + Vue3 · {{ appVersion }}</p>
     </div>
   </div>
 </template>
@@ -27,10 +27,13 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
+import { useSiteConfigStore, APP_VERSION } from '../stores/siteConfig'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
 const userStore = useUserStore()
+const siteConfig = useSiteConfigStore()
+const appVersion = APP_VERSION
 const loading = ref(false)
 const form = ref({ email: '', password: '' })
 

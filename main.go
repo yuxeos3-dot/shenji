@@ -74,6 +74,11 @@ func main() {
 	// Auth routes (no auth required)
 	r.POST("/api/auth/login", middleware.LoginRateLimit(), api.Login)
 
+	// Public branding endpoint — exposes a tiny allow-list of settings
+	// (site_title) so the login page can render the configured system name
+	// without a session. See publicSettingsKeys in internal/api/settings.go.
+	r.GET("/api/v1/settings/public", api.GetPublicSettings)
+
 	// Spider hit ingest — authenticated by X-API-Key (set in system settings).
 	// Public so external log shippers (nginx parser, CF worker) can POST to it
 	// without holding a JWT cookie.

@@ -32,7 +32,6 @@
           <el-tab-pane label="🔑 关键词库" name="libs">
             <div class="tab-bar">
               <el-button type="primary" @click="showLibForm=true">+ 新建关键词库</el-button>
-              <el-button type="success" @click="syncGSCForLib" :loading="syncing">↻ 同步 GSC 数据</el-button>
             </div>
             <el-table :data="titleLibs" stripe>
               <el-table-column prop="name" label="库名" />
@@ -255,25 +254,6 @@ const siteId = ref(null)
 
 function onSiteChange() { loadAll() }
 function loadAll() { if(!siteId.value)return; loadStats(); loadLibs(); loadPrompts(); loadKnowledge(); loadTasks(); loadArticles() }
-
-const syncing = ref(false)
-async function syncGSCForLib() {
-  if (!siteId.value) { ElMessage.warning('请先选择站点'); return }
-  if (syncing.value) return
-  syncing.value = true
-  try {
-    await api.syncGSC(siteId.value)
-    ElMessage.success('GSC 同步成功，可点击「从GSC导入」导入关键词')
-  } catch (e) {
-    const msg = e?.response?.data?.error || '同步失败'
-    if (msg.includes('未配置GSC URL')) {
-      ElMessage.error('请先到「站点管理」→ 编辑站点 → 填写 GSC Site URL（如：sc-domain:hl365.com）')
-    } else {
-      ElMessage.error(msg)
-    }
-  }
-  finally { syncing.value = false }
-}
 
 // ── 关键词库 ──
 const titleLibs = ref([])

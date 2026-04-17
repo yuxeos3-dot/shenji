@@ -1,7 +1,7 @@
 <template>
   <div class="app-layout">
     <nav class="sidebar">
-      <div class="logo">☀ SEO巡站<span>管理后台</span></div>
+      <div class="logo">☀ {{ siteConfig.title }}<span>管理后台</span></div>
       <ul>
         <li><router-link to="/dashboard" :class="{active: $route.path==='/dashboard'}"><span class="nav-icon">📊</span>仪表盘</router-link></li>
         <li><router-link to="/sites" :class="{active: $route.path.startsWith('/sites')}"><span class="nav-icon">🌐</span>站点管理</router-link></li>
@@ -19,6 +19,7 @@
       <div class="sidebar-footer">
         <a href="#" @click.prevent="showPasswordDialog=true">🔑 修改密码</a>
         <a href="#" @click.prevent="handleLogout">🚪 退出登录</a>
+        <div class="version-tag">{{ appVersion }}</div>
       </div>
     </nav>
     <div class="content">
@@ -56,15 +57,18 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
+import { useSiteConfigStore, APP_VERSION } from '../stores/siteConfig'
 import { ElMessage } from 'element-plus'
 import apiClient from '../api'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const siteConfig = useSiteConfigStore()
+const appVersion = APP_VERSION
 const showPasswordDialog = ref(false)
 const pwdForm = ref({ old_password: '', new_password: '' })
 
@@ -91,8 +95,16 @@ const pageTitle = computed(() => {
   if (route.path.includes('/audit/')) return '审计详情'
   if (route.path.includes('/data')) return '数据中心'
   if (route.path.match(/\/sites\/\d+$/)) return '站点详情'
-  return 'SEO巡站系统'
+  return siteConfig.title
 })
+
+// Sync the browser tab title with `<section> · <site title>` whenever
+// either the route or the configured site title changes. Using a watch
+// (instead of onMounted) means a live edit in settings reflects in the
+// tab title immediately after siteConfig.refresh() is called.
+watch([pageTitle, () => siteConfig.title], ([section, _base]) => {
+  siteConfig.applyDocumentTitle(section)
+}, { immediate: true })
 
 // router.beforeEach in router/index.ts already calls fetchUser() before
 // rendering any authed route, so there's no need to call it again here —
@@ -202,6 +214,18 @@ async function changePassword() {
   text-decoration: none;
 }
 .sidebar-footer a:hover { background: var(--sun-light); color: var(--sun-deep); }
+.sidebar-footer .version-tag {
+  margin-top: 8px;
+  padding: 4px 10px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--ink-hint);
+  font-family: 'JetBrains Mono', monospace;
+  text-align: center;
+  letter-spacing: .05em;
+  border-top: 1px dashed var(--border-light);
+  padding-top: 10px;
+}
 
 /* ── Content ── */
 .content {
