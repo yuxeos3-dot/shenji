@@ -9,12 +9,19 @@
     <div v-if="loading && !task" class="panel" style="text-align:center;padding:60px">加载中...</div>
 
     <template v-else-if="task">
-      <!-- Header with status + key timestamps -->
+      <!-- Header: stats + issue title + status -->
       <div class="panel header-panel">
         <div class="header-top">
           <span :class="['sev-tag', sevClass(task.issue_severity)]">{{ task.issue_severity || '—' }}</span>
           <span v-if="task.issue_module" class="mod-chip">{{ task.issue_module }}</span>
-          <h1 class="issue-title">{{ task.issue_title }}</h1>
+          <h1 v-if="!editingNote" class="issue-title">{{ task.issue_title }}</h1>
+          <input
+            v-else
+            v-model="titleDraft"
+            class="issue-title-input"
+            placeholder="问题标题"
+            maxlength="200"
+          />
           <span :class="['status-tag', 'st-'+task.status]">{{ statusLabel(task.status) }}</span>
         </div>
 
@@ -70,38 +77,47 @@
 
         <!-- State-transition buttons. Which one shows is decided by status. -->
         <div class="action-row" v-if="!isLocked">
-          <template v-if="task.status === 'pending' || task.status === 'in_progress'">
-            <button class="btn btn-primary" @click="showAssignDialog = true">
-              {{ task.status === 'pending' ? '🛠 分配给开发（开始）' : '🔁 重新分配' }}
-            </button>
+          <!-- Edit mode: show save/cancel pair and hide other actions so
+               the user can't accidentally assign while they have unsaved
+               title/note changes. -->
+          <template v-if="editingNote">
+            <button class="btn btn-primary" @click="saveNote" :disabled="sending">💾 保存问题编辑</button>
+            <button class="btn btn-edit" @click="cancelEditNote">取消</button>
           </template>
-          <!-- Developer: ask a question. Only shown while actively developing;
-               pauses the task until the creator answers. -->
-          <button
-            v-if="task.status === 'in_progress'"
-            class="btn btn-ask"
-            @click="doAsk"
-          >❓ 提问（转给发起人）</button>
-          <button
-            v-if="task.status === 'in_progress' || task.status === 'awaiting_answer'"
-            class="btn btn-submit"
-            @click="doSubmit"
-          >✅ 开发完毕</button>
-          <button
-            v-if="task.status === 'under_review'"
-            class="btn btn-verify"
-            @click="doVerify"
-          >🎯 验收通过 · 关闭任务</button>
-          <button
-            v-if="task.status === 'pending'"
-            class="btn btn-edit"
-            @click="startEditNote"
-          >✏ 编辑问题描述</button>
-          <button
-            v-if="task.status === 'pending'"
-            class="btn btn-danger-soft"
-            @click="doDelete"
-          >🗑 删除任务</button>
+          <template v-else>
+            <template v-if="task.status === 'pending' || task.status === 'in_progress'">
+              <button class="btn btn-primary" @click="showAssignDialog = true">
+                {{ task.status === 'pending' ? '🛠 分配给开发（开始）' : '🔁 重新分配' }}
+              </button>
+            </template>
+            <!-- Developer: ask a question. Only shown while actively developing;
+                 pauses the task until the creator answers. -->
+            <button
+              v-if="task.status === 'in_progress'"
+              class="btn btn-ask"
+              @click="doAsk"
+            >❓ 提问（转给发起人）</button>
+            <button
+              v-if="task.status === 'in_progress' || task.status === 'awaiting_answer'"
+              class="btn btn-submit"
+              @click="doSubmit"
+            >✅ 开发完毕</button>
+            <button
+              v-if="task.status === 'under_review'"
+              class="btn btn-verify"
+              @click="doVerify"
+            >🎯 验收通过 · 关闭任务</button>
+            <button
+              v-if="task.status === 'pending'"
+              class="btn btn-edit"
+              @click="startEditNote"
+            >✏ 编辑问题</button>
+            <button
+              v-if="task.status === 'pending'"
+              class="btn btn-danger-soft"
+              @click="doDelete"
+            >🗑 删除任务</button>
+          </template>
         </div>
         <div v-else class="locked-banner">
           🔒 任务已完成并关闭，所有操作已锁定（留痕）
@@ -140,28 +156,22 @@
         </div>
       </div>
 
-      <!-- Editable note + new comment -->
-      <div class="panel note-panel" v-if="!isLocked">
+      <!-- Editable note — enters edit mode from the header button when
+           status === pending. Non-pending states show read-only with a
+           lock hint (the problem is already contracted with the dev). -->
+      <div class="panel note-panel" v-if="!isLocked" ref="noteAnchor">
         <div class="section-title">
           任务备注
-          <button
-            class="btn-xs"
-            v-if="!editingNote && task.status === 'pending'"
-            @click="startEditNote"
-          >✏ 编辑</button>
-          <span v-else-if="!editingNote && task.status !== 'pending'" class="lock-hint">
-            🔒 任务已推给开发，问题描述不可再改（可在下方添加备注）
+          <span v-if="editingNote" class="editing-badge">编辑中</span>
+          <span v-else-if="task.status !== 'pending'" class="lock-hint">
+            🔒 任务已推给开发，标题/备注不可再改（如需补充请在下方添加备注）
           </span>
-          <template v-else-if="editingNote">
-            <button class="btn-xs" @click="saveNote">保存</button>
-            <button class="btn-xs btn-xs-ghost" @click="editingNote = false; noteDraft = task.note">取消</button>
-          </template>
         </div>
         <textarea
           v-if="editingNote"
           v-model="noteDraft"
           class="note-textarea"
-          rows="4"
+          rows="5"
           placeholder="描述需求、附加上下文、验收标准等"
         ></textarea>
         <div v-else class="note-display">{{ task.note || '（暂无备注）' }}</div>
@@ -300,7 +310,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
@@ -317,6 +327,8 @@ const sending = ref(false)
 
 const editingNote = ref(false)
 const noteDraft = ref('')
+const titleDraft = ref('')
+const noteAnchor = ref(null) // DOM ref for smooth scroll target
 const commentDraft = ref('')
 const answerDraft = ref('')
 const uploading = ref(false)
@@ -427,16 +439,53 @@ async function loadDevelopers() {
 
 function startEditNote() {
   noteDraft.value = task.value?.note || ''
+  titleDraft.value = task.value?.issue_title || ''
   editingNote.value = true
+  // Smooth scroll to the editor so the user sees the textarea. Without
+  // this the note panel is below the snapshot panel and a user clicking
+  // the header "edit" button might not realize anything happened.
+  // nextTick waits for `note-textarea` to be in the DOM before we
+  // try to scroll/focus.
+  nextTick(() => {
+    if (noteAnchor.value) {
+      noteAnchor.value.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      const ta = noteAnchor.value.querySelector('textarea')
+      if (ta) ta.focus()
+    }
+  })
+}
+
+function cancelEditNote() {
+  editingNote.value = false
+  noteDraft.value = task.value?.note || ''
+  titleDraft.value = task.value?.issue_title || ''
 }
 
 async function saveNote() {
+  // Abort early if nothing actually changed — avoids recording an empty
+  // "edit" event in the timeline.
+  const titleChanged = titleDraft.value.trim() && titleDraft.value.trim() !== task.value.issue_title
+  const noteChanged = noteDraft.value !== task.value.note
+  if (!titleChanged && !noteChanged) {
+    editingNote.value = false
+    return
+  }
+  if (!titleDraft.value.trim()) {
+    ElMessage.warning('标题不能为空')
+    return
+  }
   sending.value = true
   try {
-    await api.coordUpdateTask(task.value.id, { note: noteDraft.value })
+    await api.coordUpdateTask(task.value.id, {
+      issue_title: titleDraft.value.trim(),
+      note: noteDraft.value,
+    })
+    task.value.issue_title = titleDraft.value.trim()
     task.value.note = noteDraft.value
     editingNote.value = false
     ElMessage.success('已保存')
+    // Refresh events so the "edit" timeline entry shows up.
+    await load()
   } catch { /* interceptor showed */ }
   finally { sending.value = false }
 }
@@ -657,6 +706,9 @@ onMounted(async () => {
 .header-panel { padding:24px 28px; }
 .header-top { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
 .issue-title { font-size:20px; font-weight:800; color:var(--ink); flex:1; margin:0; line-height:1.35; }
+.issue-title-input { flex:1; font-size:20px; font-weight:800; color:var(--ink); padding:6px 12px; border:2px solid var(--sun); border-radius:var(--r-sm); outline:none; background:#FFFDF8; font-family:inherit; line-height:1.35; }
+.issue-title-input:focus { box-shadow:0 0 0 3px rgba(249,115,22,.15); }
+.editing-badge { display:inline-block; margin-left:10px; padding:2px 10px; font-size:11px; font-weight:800; color:var(--sun-deep); background:var(--sun-light); border:1px solid var(--peach); border-radius:10px; animation: blink 2s ease-in-out infinite; }
 .sev-tag { display:inline-block; padding:3px 10px; border-radius:4px; font-size:12px; font-weight:800; color:#fff; }
 .sev-fatal { background:#C0392B; } .sev-serious { background:#E67E22; } .sev-medium { background:#F39C12; } .sev-low { background:#27AE60; } .sev-none { background:#94A3B8; }
 .mod-chip { padding:2px 9px; background:#34495E; color:#ECF0F1; border-radius:3px; font-size:11px; font-weight:700; }
