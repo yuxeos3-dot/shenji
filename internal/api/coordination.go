@@ -670,11 +670,15 @@ func AddCoordComment(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "已添加备注"})
 }
 
-// UpdateCoordTaskRequest covers the "edit description / note" affordance
-// on the detail page. Still disabled once done.
+// UpdateCoordTaskRequest covers editing an in-flight task before it
+// gets pushed to dev. Besides the title and note we also let the creator
+// rewrite the "original issue snapshot" — sometimes the AI-generated
+// wording is too verbose or the creator wants to add context the
+// developer cares about. This is a direct overwrite (no backup kept).
 type UpdateCoordTaskRequest struct {
-	Note       string `json:"note"`
-	IssueTitle string `json:"issue_title"`
+	Note          string `json:"note"`
+	IssueTitle    string `json:"issue_title"`
+	IssueSnapshot string `json:"issue_snapshot"` // full JSON; when empty, kept as-is
 }
 
 func UpdateCoordTask(c *gin.Context) {
@@ -689,21 +693,31 @@ func UpdateCoordTask(c *gin.Context) {
 	if !ok {
 		return
 	}
-	// Per spec: issue title / note can only be polished by the creator
-	// BEFORE it's handed to a developer. Once started, the issue is the
-	// contract — changing it mid-stream would confuse the developer.
-	// Attachments and comments remain allowed in later states.
+	// Per spec: issue title / note / snapshot can only be polished by
+	// the creator BEFORE it's handed to a developer. Once started, the
+	// issue is the contract — changing it mid-stream would confuse the
+	// developer. Attachments and comments remain allowed in later states.
 	if t.Status != coordStatusPending {
 		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "任务已进入开发流程，问题描述不可再修改；如需补充信息，请在评论里留言"})
 		return
 	}
 
+	// Validate the incoming snapshot is JSON so a later GET of the task
+	// doesn't crash the frontend's JSON.parse.
+	if req.IssueSnapshot != "" {
+		if !json.Valid([]byte(req.IssueSnapshot)) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "issue_snapshot 不是合法 JSON"})
+			return
+		}
+	}
+
 	_, err := db.DB.Exec(
 		`UPDATE coordination_tasks
 		 SET note = COALESCE(NULLIF(?, ''), note),
-		     issue_title = COALESCE(NULLIF(?, ''), issue_title)
+		     issue_title = COALESCE(NULLIF(?, ''), issue_title),
+		     issue_snapshot = COALESCE(NULLIF(?, ''), issue_snapshot)
 		 WHERE id = ?`,
-		req.Note, req.IssueTitle, id)
+		req.Note, req.IssueTitle, req.IssueSnapshot, id)
 	if err != nil {
 		log.Printf("[coord] UpdateCoordTask(%d) failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "更新失败"})

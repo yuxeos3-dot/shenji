@@ -141,19 +141,65 @@
         </div>
       </div>
 
-      <!-- Issue snapshot (read-only, even while status is active) -->
-      <div class="panel snapshot-panel" v-if="issueSnapshotParsed">
-        <div class="section-title">原始问题快照（创建时）</div>
-        <div v-if="issueSnapshotParsed.scope" class="issue-scope">{{ issueSnapshotParsed.scope }}</div>
-        <pre v-if="issueSnapshotParsed.evidence_code" class="evidence-code">{{ issueSnapshotParsed.evidence_code }}</pre>
-        <div v-if="issueSnapshotParsed.current_status" class="issue-section">
-          <div class="section-label current-label">目前现状</div>
-          <div class="section-body">{{ issueSnapshotParsed.current_status }}</div>
+      <!-- Issue snapshot. Read-only in every status except pending when
+           the user is in edit mode — then all 4 fields become editable
+           textareas so the creator can rewrite scope / current_status /
+           fix_suggestion / evidence_code before pushing to dev. -->
+      <div class="panel snapshot-panel" v-if="issueSnapshotParsed || editingNote">
+        <div class="section-title">
+          原始问题快照{{ editingNote ? '（编辑中）' : '（创建时）' }}
         </div>
-        <div v-if="issueSnapshotParsed.fix_suggestion" class="issue-section">
-          <div class="section-label fix-label">修改建议</div>
-          <div class="section-body fix-body">{{ issueSnapshotParsed.fix_suggestion }}</div>
-        </div>
+
+        <!-- Read-only view -->
+        <template v-if="!editingNote">
+          <div v-if="issueSnapshotParsed.scope" class="issue-scope">{{ issueSnapshotParsed.scope }}</div>
+          <pre v-if="issueSnapshotParsed.evidence_code" class="evidence-code">{{ issueSnapshotParsed.evidence_code }}</pre>
+          <div v-if="issueSnapshotParsed.current_status" class="issue-section">
+            <div class="section-label current-label">目前现状</div>
+            <div class="section-body">{{ issueSnapshotParsed.current_status }}</div>
+          </div>
+          <div v-if="issueSnapshotParsed.fix_suggestion" class="issue-section">
+            <div class="section-label fix-label">修改建议</div>
+            <div class="section-body fix-body">{{ issueSnapshotParsed.fix_suggestion }}</div>
+          </div>
+        </template>
+
+        <!-- Edit view — 4 editable fields. We keep the key names aligned
+             with the audit's v6 report schema so changes round-trip
+             through `issue_snapshot` as valid JSON. -->
+        <template v-else>
+          <div class="edit-field">
+            <div class="edit-field-label">范围 (scope)</div>
+            <input v-model="snapshotDraft.scope" class="snap-input" placeholder="例如：全站 / 首页 / 文章详情页" />
+          </div>
+          <div class="edit-field">
+            <div class="edit-field-label">证据代码 (evidence_code)</div>
+            <textarea
+              v-model="snapshotDraft.evidence_code"
+              class="snap-textarea mono"
+              rows="3"
+              placeholder="相关 HTML / JS / 配置片段"
+            ></textarea>
+          </div>
+          <div class="edit-field">
+            <div class="edit-field-label current-label">目前现状 (current_status)</div>
+            <textarea
+              v-model="snapshotDraft.current_status"
+              class="snap-textarea"
+              rows="3"
+              placeholder="描述目前的状况、存在的问题"
+            ></textarea>
+          </div>
+          <div class="edit-field">
+            <div class="edit-field-label fix-label">修改建议 (fix_suggestion)</div>
+            <textarea
+              v-model="snapshotDraft.fix_suggestion"
+              class="snap-textarea"
+              rows="4"
+              placeholder="给开发的具体修改建议、步骤、验收标准"
+            ></textarea>
+          </div>
+        </template>
       </div>
 
       <!-- Editable note — enters edit mode from the header button when
@@ -328,6 +374,14 @@ const sending = ref(false)
 const editingNote = ref(false)
 const noteDraft = ref('')
 const titleDraft = ref('')
+// When editing, we edit individual fields of the snapshot rather than
+// raw JSON — reassembled on save. Keys match the v6 report shape.
+const snapshotDraft = ref({
+  scope: '',
+  evidence_code: '',
+  current_status: '',
+  fix_suggestion: '',
+})
 const noteAnchor = ref(null) // DOM ref for smooth scroll target
 const commentDraft = ref('')
 const answerDraft = ref('')
@@ -440,6 +494,16 @@ async function loadDevelopers() {
 function startEditNote() {
   noteDraft.value = task.value?.note || ''
   titleDraft.value = task.value?.issue_title || ''
+  // Hydrate snapshot draft from the currently-displayed snapshot JSON.
+  // Missing fields default to empty strings so the bound inputs don't
+  // show `undefined`.
+  const snap = issueSnapshotParsed.value || {}
+  snapshotDraft.value = {
+    scope: snap.scope || '',
+    evidence_code: snap.evidence_code || '',
+    current_status: snap.current_status || '',
+    fix_suggestion: snap.fix_suggestion || '',
+  }
   editingNote.value = true
   // Smooth scroll to the editor so the user sees the textarea. Without
   // this the note panel is below the snapshot panel and a user clicking
@@ -459,14 +523,27 @@ function cancelEditNote() {
   editingNote.value = false
   noteDraft.value = task.value?.note || ''
   titleDraft.value = task.value?.issue_title || ''
+  // snapshotDraft will be re-hydrated on next enter; don't need to reset.
 }
 
 async function saveNote() {
-  // Abort early if nothing actually changed — avoids recording an empty
-  // "edit" event in the timeline.
+  // Rebuild the snapshot JSON from the draft. Preserve any fields
+  // that the AI put in the original but we don't expose for editing
+  // (e.g. module, severity_reason) — merge them back in.
+  const originalSnap = issueSnapshotParsed.value || {}
+  const newSnap = {
+    ...originalSnap,
+    scope: snapshotDraft.value.scope,
+    evidence_code: snapshotDraft.value.evidence_code,
+    current_status: snapshotDraft.value.current_status,
+    fix_suggestion: snapshotDraft.value.fix_suggestion,
+  }
+  const newSnapJson = JSON.stringify(newSnap)
+
   const titleChanged = titleDraft.value.trim() && titleDraft.value.trim() !== task.value.issue_title
   const noteChanged = noteDraft.value !== task.value.note
-  if (!titleChanged && !noteChanged) {
+  const snapChanged = newSnapJson !== (task.value.issue_snapshot || '')
+  if (!titleChanged && !noteChanged && !snapChanged) {
     editingNote.value = false
     return
   }
@@ -479,9 +556,11 @@ async function saveNote() {
     await api.coordUpdateTask(task.value.id, {
       issue_title: titleDraft.value.trim(),
       note: noteDraft.value,
+      issue_snapshot: snapChanged ? newSnapJson : '',
     })
     task.value.issue_title = titleDraft.value.trim()
     task.value.note = noteDraft.value
+    if (snapChanged) task.value.issue_snapshot = newSnapJson
     editingNote.value = false
     ElMessage.success('已保存')
     // Refresh events so the "edit" timeline entry shows up.
@@ -750,6 +829,17 @@ onMounted(async () => {
 .current-label { color:#C0392B; } .fix-label { color:#27AE60; }
 .section-body { font-size:13px; color:var(--ink-mid); line-height:1.7; white-space:pre-line; }
 .fix-body { background:#F0FFF4; padding:12px 14px; border-radius:var(--r-sm); border-left:3px solid #27AE60; }
+
+/* Snapshot edit mode: labeled fields with focused borders */
+.edit-field { margin-bottom:14px; }
+.edit-field-label { font-size:12.5px; font-weight:700; color:var(--ink-mid); margin-bottom:6px; }
+.edit-field-label.current-label { color:#C0392B; }
+.edit-field-label.fix-label { color:#27AE60; }
+.snap-input { width:100%; box-sizing:border-box; padding:9px 12px; border:1.5px solid var(--border); border-radius:var(--r-sm); font-size:13.5px; font-family:inherit; outline:none; background:#FFFDF9; }
+.snap-input:focus { border-color:var(--sun); box-shadow:0 0 0 3px rgba(249,115,22,.12); }
+.snap-textarea { width:100%; box-sizing:border-box; padding:10px 12px; border:1.5px solid var(--border); border-radius:var(--r-sm); font-size:13px; font-family:inherit; line-height:1.7; resize:vertical; outline:none; background:#FFFDF9; }
+.snap-textarea:focus { border-color:var(--sun); box-shadow:0 0 0 3px rgba(249,115,22,.12); }
+.snap-textarea.mono { font-family:'JetBrains Mono', monospace; font-size:12px; background:#F8F9FA; }
 
 .note-panel { padding:20px 26px; }
 .note-display { font-size:13.5px; color:var(--ink-mid); line-height:1.7; padding:12px 16px; background:var(--surface-2); border-radius:var(--r-sm); white-space:pre-wrap; min-height:40px; }
