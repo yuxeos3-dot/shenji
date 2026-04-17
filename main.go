@@ -92,6 +92,21 @@ func main() {
 	// without holding a JWT cookie.
 	r.POST("/api/spider/ingest", api.IngestSpiderLog)
 
+	// OAuth callbacks. MUST be outside the authenticated v1 group: after the
+	// user consents on Google/Yandex, the provider redirects the browser back
+	// here via a plain 302. Third-party-initiated navigation does not always
+	// forward our session cookie (especially in a new tab or cross-site
+	// context), so requiring auth here would break every OAuth flow.
+	//
+	// CSRF-safe because each callback self-validates a server-generated
+	// single-use state token (see internal/api/oauth_state.go): the token
+	// was issued when the authenticated admin clicked "Authorize", is bound
+	// to their user id, has a 10-minute TTL, and is deleted on first use.
+	// An attacker who doesn't know the state cannot trigger the handler.
+	r.GET("/api/v1/oauth/gsc/callback", api.GSCCallback)
+	r.GET("/api/v1/oauth/ga/callback", api.GACallback)
+	r.GET("/api/v1/oauth/yandex/callback", api.YandexCallback)
+
 	// Authenticated routes
 	// CSRF runs AFTER auth: it's cheap to skip for non-cookie clients, and
 	// needs to know whether the request is cookie-based.
@@ -186,7 +201,6 @@ func main() {
 
 		// GSC
 		v1.GET("/oauth/gsc", api.GetGSCAuthURL)
-		v1.GET("/oauth/gsc/callback", api.GSCCallback)
 		v1.POST("/oauth/gsc/token", api.SaveGSCToken)
 		v1.POST("/gsc/store-keywords", api.StoreSiteKeywords) // push keywords from browser
 		v1.POST("/sites/:id/gsc/sync", api.RequirePermission("data.sync_gsc"), api.SyncGSCData)
@@ -194,13 +208,11 @@ func main() {
 
 		// GA
 		v1.GET("/oauth/ga", api.GetGAAuthURL)
-		v1.GET("/oauth/ga/callback", api.GACallback)
 		v1.POST("/sites/:id/ga/sync", api.RequirePermission("data.sync_ga"), api.SyncGAData)
 		v1.GET("/sites/:id/ga", api.RequirePermission("data.view"), api.GetGAData)
 
 		// Yandex
 		v1.GET("/oauth/yandex", api.GetYandexAuthURL)
-		v1.GET("/oauth/yandex/callback", api.YandexCallback)
 		v1.POST("/sites/:id/yandex/sync", api.RequirePermission("data.sync_yandex"), api.SyncYandexData)
 		v1.GET("/sites/:id/yandex", api.RequirePermission("data.view"), api.GetYandexData)
 
