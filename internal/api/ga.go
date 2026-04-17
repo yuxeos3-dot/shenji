@@ -155,15 +155,21 @@ func ga4Fetch(token, propertyID string, body map[string]interface{}) (json.RawMe
 
 func SyncGAData(c *gin.Context) {
 	siteID := c.Param("id")
-	var gaPropertyID string
-	err := db.DB.QueryRow("SELECT ga_property_id FROM sites WHERE id = ?", siteID).Scan(&gaPropertyID)
-	if err != nil || gaPropertyID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点未配置 GA4 Property ID"})
+	var domain string
+	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
+	if err != nil || domain == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点不存在或无域名"})
 		return
 	}
 	token, err := getGAAccessToken()
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
+		return
+	}
+	// Resolve GA4 property by domain — user no longer enters a property id.
+	gaPropertyID, err := resolveGAProperty(token, domain)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
 

@@ -133,24 +133,10 @@
         <el-form-item label="站点名称">
           <el-input v-model="form.name" placeholder="我的网站" />
         </el-form-item>
-
-        <div class="form-section-title" style="margin-top:16px">数据平台配置 <span style="font-size:11px;font-weight:400;color:var(--ink-hint)">（用于同步数据和导入关键词）</span></div>
-        <el-form-item label="GSC Site URL">
-          <el-input v-model="form.gsc_site_url" placeholder="sc-domain:example.com 或 https://example.com/" />
-          <div style="font-size:11px;color:var(--ink-hint);margin-top:4px">在 Google Search Console 里复制站点 URL，格式通常是 sc-domain:xxx.com</div>
-        </el-form-item>
-        <el-form-item label="GA4 Property ID">
-          <el-input v-model="form.ga_property_id" placeholder="123456789" />
-          <div style="font-size:11px;color:var(--ink-hint);margin-top:4px">GA4 → 管理 → 媒体资源 → 媒体资源 ID（纯数字）</div>
-        </el-form-item>
-        <el-form-item label="Yandex Host ID">
-          <el-input v-model="form.yandex_host_id" placeholder="https:example.com:443" />
-          <div style="font-size:11px;color:var(--ink-hint);margin-top:4px">Yandex Webmaster → 站点设置 → Host ID</div>
-        </el-form-item>
-        <el-form-item label="Bing Site URL">
-          <el-input v-model="form.bing_site_url" placeholder="https://example.com/" />
-          <div style="font-size:11px;color:var(--ink-hint);margin-top:4px">Bing 站长工具里的站点 URL</div>
-        </el-form-item>
+        <div style="margin-top:12px;padding:10px 14px;background:var(--surface-2);border-radius:8px;font-size:12px;color:var(--ink-mid);line-height:1.6">
+          💡 数据平台（GSC / GA4 / Bing / Yandex）的站点会根据域名自动匹配，无需手动填写。
+          请确保已在「系统管理 → 数据平台」完成授权，并在对应平台里添加 + 验证过本站点。
+        </div>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
@@ -175,7 +161,7 @@ const loading = ref(false)
 const showDialog = ref(false)
 const editId = ref(null)
 const capExpanded = ref(false)
-const form = ref({ domain: '', name: '', gsc_site_url: '', ga_property_id: '', yandex_host_id: '', bing_site_url: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' })
+const form = ref({ domain: '', name: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' })
 
 const activeSites = computed(() => sites.value.filter(s => s.status === 'active').length)
 const auditedSites = computed(() => sites.value.filter(s => s.last_audit_status === 'done').length)
@@ -191,7 +177,7 @@ function auditLabel(status) {
 }
 function openAddDialog() {
   editId.value = null
-  form.value = { domain: '', name: '', gsc_site_url: '', ga_property_id: '', yandex_host_id: '', bing_site_url: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' }
+  form.value = { domain: '', name: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' }
   showDialog.value = true
 }
 
@@ -202,14 +188,12 @@ async function editSite(row) {
     const s = res.data
     form.value = {
       domain: s.domain, name: s.name,
-      gsc_site_url: s.gsc_site_url || '', ga_property_id: s.ga_property_id || '',
-      yandex_host_id: s.yandex_host_id || '', bing_site_url: s.bing_site_url || '',
       url_category: s.url_category || '', url_detail: s.url_detail || '',
       url_news_list: s.url_news_list || '', url_news_detail: s.url_news_detail || '',
       url_search: s.url_search || '', url_static: s.url_static || '',
     }
   } catch {
-    form.value = { domain: row.domain, name: row.name, gsc_site_url: '', ga_property_id: '', yandex_host_id: '', bing_site_url: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' }
+    form.value = { domain: row.domain, name: row.name, url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' }
   }
   showDialog.value = true
 }
@@ -222,7 +206,7 @@ async function saveSite() {
     if (editId.value) { await api.updateSite(editId.value, form.value); ElMessage.success('站点信息已更新') }
     else { await api.createSite(form.value); ElMessage.success('站点添加成功') }
     showDialog.value = false
-    form.value = { domain: '', name: '', gsc_site_url: '', ga_property_id: '', yandex_host_id: '', bing_site_url: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' }
+    form.value = { domain: '', name: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' }
     loadSites()
   } catch (e) { console.error('保存站点失败', e) }
 }

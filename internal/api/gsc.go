@@ -238,16 +238,25 @@ func gscFetch(token, apiURL, method string, body interface{}) (json.RawMessage, 
 func SyncGSCData(c *gin.Context) {
 	siteID := c.Param("id")
 
-	var gscSiteURL string
-	err := db.DB.QueryRow("SELECT gsc_site_url FROM sites WHERE id = ?", siteID).Scan(&gscSiteURL)
-	if err != nil || gscSiteURL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点未配置GSC URL"})
+	var domain string
+	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
+	if err != nil || domain == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点不存在或无域名"})
 		return
 	}
 
 	token, err := getGoogleAccessToken()
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
+		return
+	}
+
+	// Look up the actual GSC property that corresponds to this domain.
+	// User no longer fills a "GSC Site URL" field; the resolver reads
+	// the account's properties and picks the best canonical match.
+	gscSiteURL, err := resolveGSCProperty(token, domain)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
 

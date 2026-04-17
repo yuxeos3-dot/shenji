@@ -243,10 +243,10 @@ func getYandexUserIDCached(token string) (string, error) {
 func SyncYandexData(c *gin.Context) {
 	siteID := c.Param("id")
 
-	var yandexHostID string
-	err := db.DB.QueryRow("SELECT yandex_host_id FROM sites WHERE id = ?", siteID).Scan(&yandexHostID)
-	if err != nil || yandexHostID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点未配置Yandex Host ID"})
+	var domain string
+	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
+	if err != nil || domain == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点不存在或无域名"})
 		return
 	}
 
@@ -259,6 +259,13 @@ func SyncYandexData(c *gin.Context) {
 	userID, err := getYandexUserIDCached(token)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": err.Error()})
+		return
+	}
+
+	// Resolve Yandex host_id by domain.
+	yandexHostID, err := resolveYandexHost(token, userID, domain)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
 

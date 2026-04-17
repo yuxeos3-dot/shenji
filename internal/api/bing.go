@@ -62,16 +62,23 @@ func bingFetch(apiKey, endpoint string, params map[string]string) (json.RawMessa
 func SyncBingData(c *gin.Context) {
 	siteID := c.Param("id")
 
-	var bingSiteURL string
-	err := db.DB.QueryRow("SELECT bing_site_url FROM sites WHERE id = ?", siteID).Scan(&bingSiteURL)
-	if err != nil || bingSiteURL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点未配置 Bing Site URL"})
+	var domain string
+	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
+	if err != nil || domain == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点不存在或无域名"})
 		return
 	}
 
 	apiKey := db.GetSetting("bing_api_key")
 	if apiKey == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "Bing Webmaster API Key未配置，请在系统设置中添加"})
+		return
+	}
+
+	// Resolve actual Bing site URL by domain.
+	bingSiteURL, err := resolveBingSiteURL(apiKey, domain)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
 
