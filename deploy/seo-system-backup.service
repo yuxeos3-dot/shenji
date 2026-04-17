@@ -1,0 +1,13 @@
+[Unit]
+Description=SEO system DB backup
+After=seo-system.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/seo-system-backup.sh
+Environment=DB_PATH=/opt/seo-system/data/seo.db
+Environment=BACKUP_DIR=/var/backups/seo-system
+Environment=KEEP_DAYS=7
+Nice=10
+IOSchedulingClass=idle

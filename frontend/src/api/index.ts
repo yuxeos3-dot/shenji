@@ -8,22 +8,43 @@ export interface ApiResponse<T = any> {
   error?: string
 }
 
+// readCookie reads a non-httpOnly cookie by name. The auth cookie IS httpOnly
+// and intentionally not readable here — only the CSRF cookie is needed from JS.
+function readCookie(name: string): string {
+  const prefix = name + '='
+  for (const raw of document.cookie.split(';')) {
+    const c = raw.trim()
+    if (c.startsWith(prefix)) return decodeURIComponent(c.slice(prefix.length))
+  }
+  return ''
+}
+
 const instance = axios.create({
   baseURL: '/api',
   timeout: 120000,
+  // Send cookies on same-origin and approved cross-origin (CORS credentials).
+  withCredentials: true,
 })
 
 instance.interceptors.request.use(config => {
-  const token = localStorage.getItem('token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+  // Bearer-token fallback for clients persisting via localStorage. Once the
+  // cookie is set by /login, the cookie takes precedence server-side.
+  const legacyToken = localStorage.getItem('token')
+  if (legacyToken && !config.headers.Authorization) {
+    config.headers.Authorization = `Bearer ${legacyToken}`
+  }
+  // CSRF double-submit: mirror the csrf_token cookie into X-CSRF-Token for
+  // state-changing methods.
+  const method = (config.method || 'get').toLowerCase()
+  if (method !== 'get' && method !== 'head' && method !== 'options') {
+    const csrf = readCookie('csrf_token')
+    if (csrf) config.headers['X-CSRF-Token'] = csrf
   }
   return config
 })
 
 instance.interceptors.response.use(
   response => {
-    // Binary downloads bypass the JSON envelope check.
     if (response.config.responseType === 'blob' || response.config.responseType === 'arraybuffer') {
       return response as any
     }
@@ -52,6 +73,7 @@ const api = {
   logout: () => instance.post('/v1/auth/logout'),
   changePassword: (data: { old_password: string; new_password: string }) => instance.post('/v1/auth/change-password', data),
   getMe: () => instance.get('/v1/auth/me'),
+  getCSRFToken: () => instance.get('/v1/auth/csrf'),
 
   // Users
   listUsers: () => instance.get('/v1/users'),

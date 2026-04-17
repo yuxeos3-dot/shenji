@@ -1,0 +1,45 @@
+# Minimal golangci-lint config for the xunzhan backend.
+# Run locally: golangci-lint run ./...
+# CI installs via: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - errcheck
+    - gosec
+    - gocritic
+    - revive
+    - bodyclose
+    - rowserrcheck
+    - sqlclosecheck
+
+linters-settings:
+  errcheck:
+    # Don't complain about Close() errors on rollback-style calls.
+    exclude-functions:
+      - (*database/sql.Tx).Rollback
+      - (*database/sql.Rows).Close
+      - (net/http.ResponseWriter).Write
+  gosec:
+    # We deliberately use http.NoBody-less defaults in some handlers; allow.
+    excludes:
+      - G104 # errcheck covers this
+      - G204 # exec.Command with variable — we don't shell out
+  revive:
+    rules:
+      - name: var-naming
+        disabled: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-rules:
+    - path: _test\.go
+      linters: [gosec, errcheck]

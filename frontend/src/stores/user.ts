@@ -10,35 +10,41 @@ export interface User {
   telegram_id?: string
 }
 
+// Since moving to httpOnly auth cookies, the store no longer mirrors the JWT
+// into localStorage. `authed` tracks whether a server session is known to
+// exist (set after login, cleared on logout/401).
 export const useUserStore = defineStore('user', () => {
   const user = ref<User | null>(null)
-  const token = ref(localStorage.getItem('token') || '')
+  const authed = ref(false)
 
   async function login(email: string, password: string) {
     const res = await api.login({ email, password })
-    token.value = res.data.token
     user.value = res.data.user
-    localStorage.setItem('token', res.data.token)
+    authed.value = true
+    // Clear legacy bearer token — the cookie is now the source of truth.
+    localStorage.removeItem('token')
     return res
   }
 
   async function fetchUser() {
-    if (!token.value) return
     try {
       const res = await api.getMe()
       user.value = res.data
+      authed.value = true
     } catch {
-      logout()
+      user.value = null
+      authed.value = false
     }
   }
 
-  function logout() {
-    token.value = ''
+  async function logout() {
+    try { await api.logout() } catch { /* server may already have cleared */ }
     user.value = null
+    authed.value = false
     localStorage.removeItem('token')
   }
 
   const isAdmin = (): boolean => user.value?.role === 'admin'
 
-  return { user, token, login, fetchUser, logout, isAdmin }
+  return { user, authed, login, fetchUser, logout, isAdmin }
 })

@@ -52,16 +52,32 @@ func GenerateToken(userID int64, email, role string) (string, error) {
 	return token.SignedString(jwtSecret)
 }
 
+// AuthCookieName is the name of the httpOnly cookie that carries the JWT.
+// Kept exported so handlers (login/logout) can share the constant.
+const AuthCookieName = "auth_token"
+
+// extractJWT finds the JWT in either the auth_token cookie (preferred) or the
+// Authorization: Bearer header (fallback, for API clients / legacy frontends).
+func extractJWT(c *gin.Context) string {
+	if ck, err := c.Cookie(AuthCookieName); err == nil && ck != "" {
+		return ck
+	}
+	auth := c.GetHeader("Authorization")
+	if strings.HasPrefix(auth, "Bearer ") {
+		return strings.TrimPrefix(auth, "Bearer ")
+	}
+	return ""
+}
+
 func AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		tokenStr := extractJWT(c)
+		if tokenStr == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": "未登录"})
 			c.Abort()
 			return
 		}
 
-		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 		claims := &Claims{}
 		token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {

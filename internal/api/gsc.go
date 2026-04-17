@@ -64,7 +64,7 @@ func GSCCallback(c *gin.Context) {
 
 	if _, err := db.DB.Exec(
 		"INSERT OR REPLACE INTO oauth_tokens (service, access_token, refresh_token, expires_at) VALUES ('gsc', ?, ?, ?)",
-		token.AccessToken, token.RefreshToken, token.ExpiresAt,
+		MustEncryptToken(token.AccessToken), MustEncryptToken(token.RefreshToken), token.ExpiresAt,
 	); err != nil {
 		log.Printf("[gsc] persist token failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "Token 存储失败"})
@@ -102,7 +102,7 @@ func SaveGSCToken(c *gin.Context) {
 	}
 	if _, err := db.DB.Exec(
 		"INSERT OR REPLACE INTO oauth_tokens (service, access_token, refresh_token, expires_at) VALUES ('gsc', ?, '', ?)",
-		req.AccessToken, expiresAt,
+		MustEncryptToken(req.AccessToken), expiresAt,
 	); err != nil {
 		log.Printf("[gsc] save token failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "Token 存储失败"})
@@ -150,13 +150,21 @@ func exchangeGoogleToken(code string) (*OAuthToken, error) {
 }
 
 func getGoogleAccessToken() (string, error) {
-	var accessToken, refreshToken string
+	var storedAccess, storedRefresh string
 	var expiresAt time.Time
 	err := db.DB.QueryRow(
 		"SELECT access_token, refresh_token, expires_at FROM oauth_tokens WHERE service = 'gsc' ORDER BY id DESC LIMIT 1",
-	).Scan(&accessToken, &refreshToken, &expiresAt)
+	).Scan(&storedAccess, &storedRefresh, &expiresAt)
 	if err != nil {
 		return "", fmt.Errorf("GSC未授权")
+	}
+	accessToken, err := DecryptToken(storedAccess)
+	if err != nil {
+		return "", fmt.Errorf("GSC token 解密失败: %w", err)
+	}
+	refreshToken, err := DecryptToken(storedRefresh)
+	if err != nil {
+		return "", fmt.Errorf("GSC refresh token 解密失败: %w", err)
 	}
 
 	if time.Now().Before(expiresAt) {
@@ -188,7 +196,7 @@ func getGoogleAccessToken() (string, error) {
 
 	newExpiry := time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
 	db.DB.Exec("UPDATE oauth_tokens SET access_token = ?, expires_at = ? WHERE service = 'gsc'",
-		result.AccessToken, newExpiry)
+		MustEncryptToken(result.AccessToken), newExpiry)
 
 	return result.AccessToken, nil
 }

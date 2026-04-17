@@ -79,7 +79,8 @@ func YandexCallback(c *gin.Context) {
 
 	if _, err := db.DB.Exec(
 		"INSERT OR REPLACE INTO oauth_tokens (service, access_token, refresh_token, expires_at) VALUES ('yandex', ?, ?, ?)",
-		result.AccessToken, result.RefreshToken, time.Now().Add(time.Duration(result.ExpiresIn)*time.Second),
+		MustEncryptToken(result.AccessToken), MustEncryptToken(result.RefreshToken),
+		time.Now().Add(time.Duration(result.ExpiresIn)*time.Second),
 	); err != nil {
 		log.Printf("[yandex] persist token failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "Token 存储失败"})
@@ -173,14 +174,18 @@ func getYandexUserID(token string) (string, error) {
 }
 
 func getYandexAccessToken() (string, error) {
-	var accessToken string
+	var stored string
 	err := db.DB.QueryRow(
 		"SELECT access_token FROM oauth_tokens WHERE service = 'yandex' ORDER BY id DESC LIMIT 1",
-	).Scan(&accessToken)
+	).Scan(&stored)
 	if err != nil {
 		return "", fmt.Errorf("Yandex未授权")
 	}
-	return accessToken, nil
+	plain, err := DecryptToken(stored)
+	if err != nil {
+		return "", fmt.Errorf("Yandex token 解密失败: %w", err)
+	}
+	return plain, nil
 }
 
 // yandexUserIDCacheTTL bounds how long a cached Yandex user id is trusted.

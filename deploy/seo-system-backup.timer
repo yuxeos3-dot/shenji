@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily SEO system DB backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=300
+Unit=seo-system-backup.service
+
+[Install]
+WantedBy=timers.target

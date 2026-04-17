@@ -29,20 +29,38 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	// Account-level lockout check — prevents brute force from rotating IPs.
+	if locked, retry := IsAccountLocked(req.Email); locked {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"code":  -1,
+			"error": "账户因多次失败已临时锁定，请 " + retry.Round(time.Second).String() + " 后重试",
+		})
+		return
+	}
+
 	var id int64
 	var name, email, password, role string
 	err := db.DB.QueryRow(
 		"SELECT id, name, email, password, role FROM users WHERE email = ?", req.Email,
 	).Scan(&id, &name, &email, &password, &role)
 	if err != nil {
+		IncLoginFailure()
+		if RecordLoginFailure(req.Email) {
+			IncLoginLockout()
+		}
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": "邮箱或密码错误"})
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(password), []byte(req.Password)); err != nil {
+		IncLoginFailure()
+		if RecordLoginFailure(req.Email) {
+			IncLoginLockout()
+		}
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": "邮箱或密码错误"})
 		return
 	}
+	RecordLoginSuccess(req.Email)
 
 	token, err := middleware.GenerateToken(id, email, role)
 	if err != nil {
@@ -55,10 +73,23 @@ func Login(c *gin.Context) {
 		_ = err
 	}
 
+	// Set the JWT as an httpOnly cookie so an XSS can't exfiltrate it. The
+	// cookie is Secure when the request was TLS (either directly or via an
+	// X-Forwarded-Proto header from a trusted proxy).
+	secure := isHTTPS(c)
+	c.SetSameSite(http.SameSiteStrictMode)
+	c.SetCookie(middleware.AuthCookieName, token, 24*60*60, "/", "", secure, true /* httpOnly */)
+	// Pair the session with a fresh CSRF token (readable by JS for the
+	// double-submit header).
+	csrf := middleware.IssueCSRFToken(c, secure)
+
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"data": gin.H{
-			"token": token,
+			// Token is returned in the body for backwards-compat with any
+			// non-browser API client; browsers should prefer the cookie.
+			"token":      token,
+			"csrf_token": csrf,
 			"user": gin.H{
 				"id":    id,
 				"name":  name,
@@ -70,6 +101,11 @@ func Login(c *gin.Context) {
 }
 
 func Logout(c *gin.Context) {
+	// Expire both cookies. Empty value + MaxAge<0 tells the browser to drop them.
+	secure := isHTTPS(c)
+	c.SetSameSite(http.SameSiteStrictMode)
+	c.SetCookie(middleware.AuthCookieName, "", -1, "/", "", secure, true)
+	c.SetCookie(middleware.CSRFCookieName, "", -1, "/", "", secure, false)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "已注销"})
 }
 
@@ -77,6 +113,10 @@ func ChangePassword(c *gin.Context) {
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "新密码至少8个字符"})
+		return
+	}
+	if err := ValidatePassword(req.NewPassword); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
 

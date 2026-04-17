@@ -93,8 +93,8 @@ const pageTitle = computed(() => {
 
 onMounted(() => { userStore.fetchUser() })
 
-function handleLogout() {
-  userStore.logout()
+async function handleLogout() {
+  await userStore.logout()
   router.push('/login')
 }
 

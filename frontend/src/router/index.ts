@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { useUserStore } from '../stores/user'
 
 const routes: RouteRecordRaw[] = [
   { path: '/login', name: 'Login', component: () => import('../views/Login.vue') },
@@ -30,12 +31,24 @@ const router = createRouter({
   routes,
 })
 
-router.beforeEach((to, _from, next) => {
-  const token = localStorage.getItem('token')
-  if (to.path !== '/login' && !token) {
-    next('/login')
-  } else {
+// With cookie-based auth we can't see the token from JS, so the guard asks
+// the server once via /auth/me. Result is cached in the pinia store so
+// subsequent navigations are instant.
+router.beforeEach(async (to, _from, next) => {
+  if (to.path === '/login') {
     next()
+    return
+  }
+  const userStore = useUserStore()
+  if (userStore.authed) {
+    next()
+    return
+  }
+  await userStore.fetchUser()
+  if (userStore.authed) {
+    next()
+  } else {
+    next({ path: '/login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : {} })
   }
 })
 

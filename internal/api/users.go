@@ -65,6 +65,10 @@ func CreateUser(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "参数错误: " + err.Error()})
 		return
 	}
+	if err := ValidatePassword(req.Password); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
+		return
+	}
 
 	if req.Role == "" {
 		req.Role = "member"
