@@ -18,6 +18,7 @@ package api
 // user, no shared blob.
 
 import (
+	"database/sql"
 	"log"
 
 	"seo-system/internal/db"
@@ -27,7 +28,18 @@ import (
 // per-user record on the target user. Idempotent — sets
 // `perm_migrated_personal_v1=1` when complete and no-ops on every
 // subsequent boot.
+//
+// Wrapped in a top-level recover so a migration bug on production data
+// (e.g. an unexpected NULL in a pre-DEFAULT-era row) can't crash-loop
+// the whole service at startup. We log the panic and continue; admin
+// can investigate via logs and re-run after fixing the data.
 func MigrateGlobalToPersonalConfig() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[personal-migration] PANIC: %v (service continues; retry on next boot after DB cleanup)", r)
+		}
+	}()
+
 	var done string
 	db.DB.QueryRow(`SELECT COALESCE(value,'') FROM settings WHERE key='perm_migrated_personal_v1'`).Scan(&done)
 	if done == "1" {
@@ -112,9 +124,12 @@ func MigrateGlobalToPersonalConfig() {
 
 	// ─── OAuth access tokens ────────────────────────────────────────────
 	// Existing rows in oauth_tokens (global) are re-associated with the
-	// target user. Values are already encrypted — copy as-is.
+	// target user. Values are already encrypted — copy as-is. Use
+	// nullable scan targets because pre-DEFAULT-clause rows can still
+	// carry NULLs for refresh_token / expires_at, and `string` Scan
+	// would fail on NULL.
 	rows, err := db.DB.Query(
-		`SELECT service, access_token, refresh_token, expires_at
+		`SELECT service, COALESCE(access_token,''), COALESCE(refresh_token,''), expires_at
 		 FROM oauth_tokens ORDER BY id DESC`,
 	)
 	if err == nil {
@@ -122,17 +137,21 @@ func MigrateGlobalToPersonalConfig() {
 		seen := map[string]bool{}
 		for rows.Next() {
 			var svc, at, rt string
-			var expiresAt *string
+			var expiresAt sql.NullTime
 			if err := rows.Scan(&svc, &at, &rt, &expiresAt); err != nil {
+				log.Printf("[personal-migration] oauth_tokens scan: %v", err)
 				continue
 			}
 			if seen[svc] {
 				continue // keep only most-recent per service
 			}
 			seen[svc] = true
+			if at == "" {
+				continue // nothing useful to migrate
+			}
 			var expiresVal interface{}
-			if expiresAt != nil {
-				expiresVal = *expiresAt
+			if expiresAt.Valid {
+				expiresVal = expiresAt.Time
 			}
 			if _, err := db.DB.Exec(
 				`INSERT INTO user_oauth_tokens (user_id, service, access_token, refresh_token, expires_at)
