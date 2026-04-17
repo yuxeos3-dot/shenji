@@ -113,6 +113,19 @@
             </div>
           </div>
 
+          <!-- FRW AI 图片/视频生成 -->
+          <div class="platform-block">
+            <div class="platform-name">🎨 FRW AI 图片 / 视频生成</div>
+            <div class="field-row">
+              <label class="field-label">全局 API Key</label>
+              <input class="field-input" v-model="settings.frw_apikey" type="password" placeholder="每个用户可在个人中心单独配置，这里填全局回退值" autocomplete="new-password" />
+              <div class="field-hint">
+                如果用户在「图片管理 → 我的 FRW 配置」里没填自己的 apikey，系统会用这里的全局值。
+                Bearer token 和 User ID 必须由每个用户在浏览器自行登录后复制到个人中心。
+              </div>
+            </div>
+          </div>
+
           <div class="save-bar">
             <button class="btn btn-primary" @click="save" :disabled="saving">{{ saving ? '保存中...' : '💾 保存配置' }}</button>
           </div>

@@ -15,6 +15,11 @@ const routes: RouteRecordRaw[] = [
       { path: 'sites/:id/audit/:taskId', name: 'AuditDetail', component: () => import('../views/AuditDetail.vue') },
       { path: 'sites/:id/data', name: 'DataCenter', component: () => import('../views/DataCenter.vue') },
       { path: 'geo-management', name: 'GeoManagement', component: () => import('../views/GeoContent.vue') },
+      // Image/Video gen share a single view with a kind prop. The `props` route
+      // option turns route params into component props but we need a static
+      // value, hence the render-function wrapper.
+      { path: 'image-management', name: 'ImageManagement', component: () => import('../views/MediaGen.vue'), props: { kind: 'image' } },
+      { path: 'video-management', name: 'VideoManagement', component: () => import('../views/MediaGen.vue'), props: { kind: 'video' } },
       { path: 'dead-links', name: 'DeadLinks', component: () => import('../views/DeadLinks.vue') },
       { path: 'content-rewrite', name: 'ContentRewrite', component: () => import('../views/ContentRewrite.vue') },
       { path: 'external-links', name: 'ExternalLinks', component: () => import('../views/ExternalLinks.vue') },

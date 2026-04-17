@@ -107,6 +107,12 @@ func main() {
 	r.GET("/api/v1/oauth/ga/callback", api.GACallback)
 	r.GET("/api/v1/oauth/yandex/callback", api.YandexCallback)
 
+	// FRW published assets (downloaded images/videos) — served from local
+	// disk. Paths stored in ai_generations.local_path as "/data/frw/...",
+	// so the URL directly maps to the file. No auth: if an attacker can
+	// guess /data/frw/u42_gen17.jpg they're welcome to it.
+	r.Static("/data/frw", "./data/frw")
+
 	// Authenticated routes
 	// CSRF runs AFTER auth: it's cheap to skip for non-cookie clients, and
 	// needs to know whether the request is cookie-based.
@@ -405,6 +411,26 @@ func main() {
 			// Viewer permission is enough — doesn't expose anything sensitive,
 			// just lets step-3 of the wizard pre-fill the editor.
 			geo.GET("/defaults", api.RequirePermission("geo.view"), api.GeoGetDefaults)
+		}
+
+		// FRW AI image/video generation. Each user brings their own Bearer
+		// token + user_id copied from the frw.aiaiartist dashboard; apikey
+		// is either set per-user or falls back to the global "frw_apikey"
+		// setting. Gated by the new ai_gen.* permissions.
+		frwG := v1.Group("/frw")
+		{
+			// Config is viewable/saveable by any user who can use either
+			// image or video gen — the same endpoint serves both flows.
+			frwG.GET("/config", api.GetMyFRWConfig)
+			frwG.PUT("/config", api.SaveMyFRWConfig)
+
+			// Generation endpoints. Permission check happens per-request
+			// because a single user may have only image or only video.
+			frwG.GET("/generations", api.RequirePermission("ai_gen.view"), api.ListFRWGenerations)
+			frwG.POST("/generations", api.RequirePermission("ai_gen.submit"), api.SubmitFRWGeneration)
+			frwG.GET("/generations/:id", api.RequirePermission("ai_gen.view"), api.GetFRWGeneration)
+			frwG.POST("/generations/:id/publish", api.RequirePermission("ai_gen.publish"), api.PublishFRWGeneration)
+			frwG.DELETE("/generations/:id", api.RequirePermission("ai_gen.submit"), api.DeleteFRWGeneration)
 		}
 	}
 

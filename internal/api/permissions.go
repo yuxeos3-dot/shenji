@@ -52,6 +52,11 @@ var PermissionTree = []PermNode{
 		{Code: "geo.articles_publish", Label: "发布文章"},
 		{Code: "geo.articles_delete", Label: "删除文章"},
 	}},
+	{Code: "ai_gen", Label: "AI 图片 / 视频生成", Children: []PermNode{
+		{Code: "ai_gen.view", Label: "查看生成任务列表"},
+		{Code: "ai_gen.submit", Label: "提交新生成任务（消耗 FRW 额度）"},
+		{Code: "ai_gen.publish", Label: "发布 / 下载结果到本地"},
+	}},
 	{Code: "deadlinks", Label: "死链检查", Children: []PermNode{
 		{Code: "deadlinks.view", Label: "查看死链结果"},
 		{Code: "deadlinks.check", Label: "触发死链检测"},
@@ -166,10 +171,10 @@ func MigrateLegacyPermissions() {
 		"reports.polish": true,
 		"reports.export": true,
 		// 4-step wizard refactor dropped batch-task / per-template flows.
-		"geo.tasks_run":  true,
-		"geo.tasks":      true,
-		"geo.prompts":    true,
-		"geo.knowledge":  true,
+		"geo.tasks_run": true,
+		"geo.tasks":     true,
+		"geo.prompts":   true,
+		"geo.knowledge": true,
 	}
 
 	rows, err := db.DB.Query(`SELECT id, COALESCE(permissions,'') FROM users WHERE permissions IS NOT NULL AND permissions <> ''`)

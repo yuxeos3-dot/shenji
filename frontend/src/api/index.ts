@@ -306,6 +306,15 @@ const api = {
   coordGetTestPageSource: (id: Id, pageId: Id) => instance.get(`/v1/coord/tasks/${id}/test-pages/${pageId}/source`),
   coordPreAudit: (id: Id) => instance.post(`/v1/coord/tasks/${id}/pre-audit`, {}),
   coordRejectTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/reject`, data),
+
+  // FRW image / video generation
+  getMyFRWConfig: () => instance.get('/v1/frw/config'),
+  saveMyFRWConfig: (data: Record<string, any>) => instance.put('/v1/frw/config', data),
+  listFRWGenerations: (params?: Record<string, any>) => instance.get('/v1/frw/generations', { params }),
+  submitFRWGeneration: (data: Record<string, any>) => instance.post('/v1/frw/generations', data),
+  getFRWGeneration: (id: Id) => instance.get(`/v1/frw/generations/${id}`),
+  publishFRWGeneration: (id: Id) => instance.post(`/v1/frw/generations/${id}/publish`, {}),
+  deleteFRWGeneration: (id: Id) => instance.delete(`/v1/frw/generations/${id}`),
 }
 
 export default api

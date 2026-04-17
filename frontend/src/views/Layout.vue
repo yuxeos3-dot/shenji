@@ -11,6 +11,8 @@
         <li><router-link to="/data-management" :class="{active: $route.path==='/data-management'}"><span class="nav-icon">📡</span>数据管理</router-link></li>
         <li><router-link to="/spider-management" :class="{active: $route.path==='/spider-management'}"><span class="nav-icon">🕷️</span>蜘蛛管理</router-link></li>
         <li><router-link to="/geo-management" :class="{active: $route.path==='/geo-management'}"><span class="nav-icon">🤖</span>GEO管理</router-link></li>
+        <li><router-link to="/image-management" :class="{active: $route.path==='/image-management'}"><span class="nav-icon">🎨</span>图片管理</router-link></li>
+        <li><router-link to="/video-management" :class="{active: $route.path==='/video-management'}"><span class="nav-icon">🎬</span>视频管理</router-link></li>
         <li><router-link to="/dead-links" :class="{active: $route.path==='/dead-links'}"><span class="nav-icon">💀</span>死链管理</router-link></li>
         <li><router-link to="/content-rewrite" :class="{active: $route.path==='/content-rewrite'}"><span class="nav-icon">✍️</span>二创管理</router-link></li>
         <li><router-link to="/external-links" :class="{active: $route.path==='/external-links'}"><span class="nav-icon">🔗</span>外链管理</router-link></li>

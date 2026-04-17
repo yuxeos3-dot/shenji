@@ -700,6 +700,40 @@ func Init() {
 		`DROP TABLE IF EXISTS geo_tasks`,
 		`DROP TABLE IF EXISTS geo_prompts`,
 		`DROP TABLE IF EXISTS geo_knowledge`,
+
+		// ─── FRW (外部图/视频生成) ────────────────────────────────────────
+		// Per-user FRW credentials. apikey is optional (falls back to
+		// the global "frw_apikey" setting if empty). bearer_token and
+		// user_id are obtained by the user logging into frw.aiaiartist
+		// in their browser and copy-pasting from dev-tools. Token
+		// expires; when submit returns 401 the UI asks user to refresh.
+		`ALTER TABLE users ADD COLUMN frw_config TEXT DEFAULT ''`,
+
+		// ai_generations: a single table for both image and video tasks.
+		// "kind" distinguishes them; "mode" is the FRW template
+		// (text2image / img2img / text2video / img2video). status
+		// mirrors FRW: 0 pending / 1 running / 2 done / -1 failed / 4 timeout.
+		// result_url: the FRW-hosted output; local_path: set when the
+		// user clicks "发布" and we mirror it to /data/frw/...
+		`CREATE TABLE IF NOT EXISTS ai_generations (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id      INTEGER NOT NULL,
+			kind         TEXT NOT NULL,
+			mode         TEXT NOT NULL,
+			prompt       TEXT NOT NULL DEFAULT '',
+			source_url   TEXT DEFAULT '',
+			frw_task_id  TEXT DEFAULT '',
+			status       INTEGER DEFAULT 0,
+			progress     REAL DEFAULT 0,
+			result_url   TEXT DEFAULT '',
+			local_path   TEXT DEFAULT '',
+			error_msg    TEXT DEFAULT '',
+			extra_json   TEXT DEFAULT '{}',
+			created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_gen_user_kind ON ai_generations(user_id, kind, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_gen_status ON ai_generations(status)`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {
@@ -801,6 +835,7 @@ func seedDefaultSettings() {
 		"ai_model":                  "claude-sonnet-4-6",
 		"ip_whitelist":              "",
 		"spider_ingest_api_key":     "", // Set via admin UI; empty disables /api/spider/ingest
+		"frw_apikey":                "", // Global fallback for FRW image/video gen apikey
 	}
 
 	for k, v := range defaults {
