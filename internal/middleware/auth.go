@@ -324,6 +324,26 @@ func init() {
 			heavyLimiter.cleanup()
 		}
 	}()
+	// Background cleanup for stale online-user entries (prevents memory leak
+	// when admin never opens the online-users page).
+	go func() {
+		t := time.NewTicker(5 * time.Minute)
+		defer t.Stop()
+		for range t.C {
+			cleanupStaleOnlineUsers()
+		}
+	}()
+}
+
+func cleanupStaleOnlineUsers() {
+	cutoff := time.Now().Add(-5 * time.Minute)
+	onlineUsers.Range(func(k, v interface{}) bool {
+		entry, ok := v.(*OnlineEntry)
+		if !ok || entry.LastSeen.Before(cutoff) {
+			onlineUsers.Delete(k)
+		}
+		return true
+	})
 }
 
 func (r *userRateLimiter) cleanup() {
