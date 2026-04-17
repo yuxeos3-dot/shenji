@@ -10,6 +10,9 @@ import (
 
 // WriteAuditLog records a sensitive operation for compliance / forensics.
 func WriteAuditLog(c *gin.Context, action, targetType, targetID, detail string) {
+	if len(detail) > 2048 {
+		detail = detail[:2048]
+	}
 	userID := c.GetInt64("user_id")
 	email, _ := c.Get("email")
 	emailStr, _ := email.(string)
