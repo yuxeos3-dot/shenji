@@ -14,6 +14,7 @@
         <li><router-link to="/dead-links" :class="{active: $route.path==='/dead-links'}"><span class="nav-icon">💀</span>死链管理</router-link></li>
         <li><router-link to="/content-rewrite" :class="{active: $route.path==='/content-rewrite'}"><span class="nav-icon">✍️</span>二创管理</router-link></li>
         <li><router-link to="/external-links" :class="{active: $route.path==='/external-links'}"><span class="nav-icon">🔗</span>外链管理</router-link></li>
+        <li><router-link to="/coordination" :class="{active: $route.path.startsWith('/coordination')}"><span class="nav-icon">🤝</span>协同管理</router-link></li>
         <li><router-link to="/reports" :class="{active: $route.path.startsWith('/reports')}"><span class="nav-icon">📋</span>汇报管理</router-link></li>
         <li v-if="userStore.isAdmin()"><router-link to="/users" :class="{active: $route.path==='/users'}"><span class="nav-icon">👥</span>用户管理</router-link></li>
         <li v-if="userStore.isAdmin()"><router-link to="/cache-management" :class="{active: $route.path==='/cache-management'}"><span class="nav-icon">💾</span>缓存管理</router-link></li>
@@ -84,6 +85,7 @@ const pageTitles = {
   '/dead-links': '死链管理',
   '/content-rewrite': '二创管理',
   '/external-links': '外链管理',
+  '/coordination': '协同管理',
   '/reports': '汇报管理',
   '/reports/write': '写汇报',
   '/users': '用户管理',
@@ -97,6 +99,7 @@ const pageTitle = computed(() => {
   if (route.path.includes('/audit/')) return '审计详情'
   if (route.path.includes('/data')) return '数据中心'
   if (route.path.match(/\/sites\/\d+$/)) return '站点详情'
+  if (route.path.match(/\/coordination\/\d+$/)) return '协同任务详情'
   return siteConfig.title
 })
 

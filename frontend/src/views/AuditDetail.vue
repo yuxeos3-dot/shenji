@@ -19,7 +19,10 @@
       v-if="v6Report"
       :report="v6Report"
       :show-download="task?.status === 'done'"
+      :enable-coord="true"
+      :coord-added-ids="coordAddedIds"
       @download="downloadReport"
+      @add-to-coord="addIssueToCoord"
     />
 
     <!-- 进行中占位 -->
@@ -44,7 +47,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 import { copyToClipboard } from '../utils/clipboard'
 import TaskStatusCard from '../components/audit/TaskStatusCard.vue'
@@ -55,7 +58,51 @@ const task = ref(null)
 const result = ref(null)
 const v6Report = ref(null)
 const downloading = ref(false)
+// Track issue IDs already pushed into the coordination queue so the
+// button toggles to "✓ 已加入" after a successful submit. Cleared when
+// we re-load the audit (poll / initial mount).
+const coordAddedIds = ref(new Set())
 let pollTimer = null
+
+async function addIssueToCoord(issue) {
+  // Let the user attach a remark describing *why* this issue needs a fix
+  // (sometimes the audit description alone isn't enough context for the
+  // developer). Prompt is optional — they can just hit 确定 to skip.
+  let note = ''
+  try {
+    const { value } = await ElMessageBox.prompt('可选：给开发的说明（例如：首页影响较大，本周修复）', '加入协同管理', {
+      confirmButtonText: '加入',
+      cancelButtonText: '取消',
+      inputPlaceholder: '留空也可以',
+    })
+    note = value || ''
+  } catch {
+    return // user cancelled
+  }
+
+  try {
+    const payload = {
+      site_id: Number(route.params.id),
+      audit_task_id: Number(route.params.taskId),
+      issue_id: String(issue.id || ''),
+      issue_title: issue.title || '未命名问题',
+      issue_severity: issue.severity || '',
+      issue_module: issue.module || '',
+      issue_chapter: issue._chapter || '',
+      // Snapshot the full issue so the coord detail page can render the
+      // original context even if the audit is re-run later.
+      issue_snapshot: JSON.stringify(issue),
+      note,
+    }
+    await api.coordCreateTask(payload)
+    coordAddedIds.value.add(String(issue.id))
+    // Force Set reactivity by reassigning (Vue 3 doesn't track Set mutations)
+    coordAddedIds.value = new Set(coordAddedIds.value)
+    ElMessage.success('已加入协同管理，可到「协同管理」分配给开发')
+  } catch (e) {
+    // interceptor already showed an error toast
+  }
+}
 
 async function copyRaw() {
   const ok = await copyToClipboard(result.value?.raw_ai_response || '')
@@ -115,6 +162,21 @@ async function loadData() {
     if (task.value.status === 'running' || task.value.status === 'pending') {
       pollTimer = setTimeout(loadData, 3000)
     }
+    // Pre-populate the "already added to coordination" set so the button
+    // shows ✓ for issues previously queued. Fails silently for users
+    // without coord.view permission — they won't see the button state
+    // but can still add issues (backend re-checks on create).
+    try {
+      const cRes = await api.coordListTasks({ site_id: route.params.id, per_page: 200 })
+      const items = cRes.data?.items || []
+      const ids = new Set()
+      for (const t of items) {
+        if (String(t.audit_task_id) === String(route.params.taskId) && t.issue_id) {
+          ids.add(String(t.issue_id))
+        }
+      }
+      coordAddedIds.value = ids
+    } catch { /* ignore */ }
   } catch (e) { console.error(e) }
 }
 

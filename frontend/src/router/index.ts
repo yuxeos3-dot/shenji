@@ -24,6 +24,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'users', name: 'Users', component: () => import('../views/Users.vue') },
       { path: 'cache-management', name: 'CacheManagement', component: () => import('../views/CacheManagement.vue') },
       { path: 'spider-management', name: 'SpiderManagement', component: () => import('../views/SpiderManagement.vue') },
+      { path: 'coordination', name: 'Coordination', component: () => import('../views/Coordination.vue') },
+      { path: 'coordination/:id', name: 'CoordinationDetail', component: () => import('../views/CoordinationDetail.vue') },
     ]
   },
 ]

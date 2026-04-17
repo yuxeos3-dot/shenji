@@ -222,6 +222,18 @@ const api = {
   geoDeleteArticle: (id: Id, ct?: string) => instance.delete(`/v1/geo/articles/${id}`, { params: { content_type: ct || 'geo' } }),
   geoReviewArticle: (id: Id, data: Record<string, any>) => instance.post(`/v1/geo/articles/${id}/review`, data),
   geoPublishArticle: (id: Id) => instance.post(`/v1/geo/articles/${id}/publish`),
+
+  // Coordination (协同管理)
+  coordStats: (params?: Record<string, any>) => instance.get('/v1/coord/stats', { params }),
+  coordListTasks: (params?: Record<string, any>) => instance.get('/v1/coord/tasks', { params }),
+  coordCreateTask: (data: Record<string, any>) => instance.post('/v1/coord/tasks', data),
+  coordGetTask: (id: Id) => instance.get(`/v1/coord/tasks/${id}`),
+  coordUpdateTask: (id: Id, data: Record<string, any>) => instance.put(`/v1/coord/tasks/${id}`, data),
+  coordDeleteTask: (id: Id) => instance.delete(`/v1/coord/tasks/${id}`),
+  coordAssignTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/assign`, data),
+  coordSubmitTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/submit`, data),
+  coordVerifyTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/verify`, data),
+  coordAddComment: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/comments`, data),
 }
 
 export default api

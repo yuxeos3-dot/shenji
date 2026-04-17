@@ -19,6 +19,15 @@
         <span class="issue-id">#{{ issue.id }}</span>
         <span class="issue-title">{{ issue.title }}</span>
         <span v-if="issue._chapter" class="chapter-tag">{{ issue._chapter }}</span>
+        <button
+          v-if="enableCoord"
+          class="coord-btn"
+          :disabled="coordAddedIds.has(String(issue.id))"
+          @click="$emit('add-to-coord', issue)"
+          :title="coordAddedIds.has(String(issue.id)) ? '已加入协同管理' : '加入协同管理交给开发修复'"
+        >
+          {{ coordAddedIds.has(String(issue.id)) ? '✓ 已加入' : '➕ 加入协同' }}
+        </button>
       </div>
       <div v-if="issue.scope" class="issue-scope">{{ issue.scope }}</div>
       <div v-if="issue.evidence_label" class="evidence-label">{{ issue.evidence_label }}</div>
@@ -57,8 +66,15 @@ import { ref, computed } from 'vue'
 const props = defineProps({
   report: { type: Object, default: null },
   showDownload: { type: Boolean, default: false },
+  // Enables the "加入协同" button on each issue card. Parent listens for
+  // `add-to-coord` and pushes the snapshot into /v1/coord/tasks.
+  enableCoord: { type: Boolean, default: false },
+  // Set of issue-ids (as strings) already in the coordination queue for
+  // this audit — used to disable the button and show a checkmark so the
+  // user doesn't queue the same issue twice accidentally.
+  coordAddedIds: { type: Set, default: () => new Set() },
 })
-defineEmits(['download'])
+defineEmits(['download', 'add-to-coord'])
 
 const filterSev = ref('')
 const page = ref(1)
@@ -132,6 +148,9 @@ function countBySev(sev) {
 .issue-id { font-size:11px; font-weight:700; color:var(--ink-hint); font-family:'JetBrains Mono',monospace; }
 .issue-title { font-size:15px; font-weight:700; color:var(--ink); flex:1; }
 .chapter-tag { font-size:11px; color:var(--ink-hint); padding:2px 8px; background:var(--surface-3); border-radius:4px; white-space:nowrap; }
+.coord-btn { padding:4px 12px; border-radius:6px; font-size:11.5px; font-weight:700; cursor:pointer; background:var(--sun-light); color:var(--sun-deep); border:1.5px solid var(--peach); transition:all .15s; font-family:inherit; white-space:nowrap; }
+.coord-btn:hover:not(:disabled) { background:var(--sun); color:#fff; border-color:var(--sun); box-shadow:0 2px 8px rgba(249,115,22,.3); }
+.coord-btn:disabled { background:var(--ok-bg); color:var(--ok); border-color:var(--ok-border); cursor:not-allowed; opacity:.85; }
 .issue-scope { font-size:12.5px; color:var(--ink-soft); margin-bottom:10px; }
 .evidence-label { font-size:12px; font-weight:700; color:#34495E; margin-bottom:6px; }
 .evidence-code { background:#2C3E50; color:#ECF0F1; padding:12px 16px; border-radius:var(--r-sm); font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.6; overflow-x:auto; white-space:pre-wrap; word-break:break-all; margin-bottom:10px; }
