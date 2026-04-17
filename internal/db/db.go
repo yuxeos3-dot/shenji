@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"strings"
-	"time"
 
 	_ "modernc.org/sqlite"
 	"golang.org/x/crypto/bcrypt"
@@ -270,14 +269,20 @@ func Init() {
 		log.Fatalf("Failed to open database: %v", err)
 	}
 
-	// SQLite + WAL supports many concurrent readers; pinning MaxOpenConns=1
-	// serialised *everything*, so a single slow audit read blocked the
-	// entire API. Allow a pool of readers while still funnelling writes
-	// through the busy_timeout. The driver will only ever use one writer
-	// at a time because SQLite itself enforces that.
-	DB.SetMaxOpenConns(10)
-	DB.SetMaxIdleConns(5)
-	DB.SetConnMaxLifetime(30 * time.Minute)
+	// SQLite caveat: with modernc.org/sqlite, opening more than one raw
+	// connection to the same DB file results in all-but-one being treated
+	// as read-only (unless the DSN explicitly opts into shared-cache
+	// read/write mode). An earlier attempt to raise this to 10 to allow
+	// concurrent reads actually broke every write migration at startup
+	// with "attempt to write a readonly database (8)".
+	//
+	// For this app's traffic profile (single-process, low QPS, SQLite
+	// backend) one connection is plenty — SQLite itself serialises
+	// writes, so extra pooled connections only buy us trouble. If read
+	// throughput ever becomes a real bottleneck, the right fix is to
+	// open a second DB handle in read-only mode for SELECTs, NOT to
+	// raise this value.
+	DB.SetMaxOpenConns(1)
 
 	// Additional PRAGMAs (idempotent).
 	for _, p := range []string{
