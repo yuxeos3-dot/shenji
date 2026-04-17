@@ -248,6 +248,10 @@ const api = {
   saveMyFrwApiKey: (data: Record<string, any>) => instance.put('/v1/auth/my-frw-apikey', data),
   getUserPlatformStatus: (userId: Id) => instance.get(`/v1/users/${userId}/platform-status`),
   getUserOverview: (userId: Id) => instance.get(`/v1/users/${userId}/overview`),
+
+  // Admin-only global overview: all sites across all users + latest
+  // 4-platform snapshot. Params: { user_id? } to narrow by owner.
+  getGlobalData: (params?: Record<string, any>) => instance.get('/v1/admin/global-data', { params }),
   testMyAI: () => instance.post('/v1/auth/test-my-ai'),
 
   listExtlinkPool: () => instance.get('/v1/extlink-pool'),

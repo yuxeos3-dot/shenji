@@ -140,14 +140,30 @@ const groups = [
     ],
   },
   {
+    // 用户管理 top-level group (admin only). Keeps "who can do what" knobs
+    // next to "what are they actually doing" — avoids stuffing monitoring
+    // under the generic 系统管理 bucket.
+    key: 'user-mgmt', icon: '👥', label: '用户管理', adminOnly: true,
+    items: [
+      { path: '/users',         icon: '👤', label: '用户管理' },
+      { path: '/users-monitor', icon: '📊', label: '用户数据' },
+    ],
+  },
+  {
+    // 全局数据 (admin only). Cross-user total overview of all sites and
+    // their 4-platform data — the bird's-eye view.
+    key: 'global-data', icon: '🌐', label: '全局数据', adminOnly: true,
+    items: [
+      { path: '/global-data', icon: '📈', label: '全局数据总览' },
+    ],
+  },
+  {
     // 系统管理 group. Non-admin members only see 个人中心 here; admins see
-    // the full management toolbox. We don't gate the whole group by role
-    // anymore because every user needs access to their own API keys.
+    // the remaining management knobs. 用户管理 / 用户数据 moved into their
+    // own top-level group above.
     key: 'system', icon: '⚙️', label: '系统管理',
     items: [
       { path: '/personal-center',  icon: '🧑', label: '个人中心' },
-      { path: '/users',            icon: '👥', label: '用户管理',   adminOnly: true },
-      { path: '/users-monitor',    icon: '📡', label: '用户监控',   adminOnly: true },
       { path: '/cache-management', icon: '💾', label: '缓存管理',   adminOnly: true },
       { path: '/settings',         icon: '⚙️', label: '系统设置',   adminOnly: true },
     ],
@@ -240,7 +256,8 @@ const pageTitles = {
   '/reports/monthly': '月汇报',
   '/reports/monthly/new': '生成月汇报',
   '/users': '用户管理',
-  '/users-monitor': '用户监控',
+  '/users-monitor': '用户数据',
+  '/global-data': '全局数据总览',
   '/cache-management': '缓存管理',
   '/settings': '系统设置',
   '/personal-center': '个人中心',

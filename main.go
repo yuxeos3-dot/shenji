@@ -181,6 +181,14 @@ func main() {
 			users.GET("/:id/overview", api.GetUserOverview)
 		}
 
+		// Admin-only global overview: every site across every user +
+		// latest 4-platform snapshot in one payload.
+		admin := v1.Group("/admin")
+		admin.Use(middleware.AdminRequired())
+		{
+			admin.GET("/global-data", api.GetGlobalDataOverview)
+		}
+
 		// Organization structure — admin only. Matches the /users pattern
 		// so the settings page can list/create/update/delete departments
 		// and groups in the same admin-only section.
