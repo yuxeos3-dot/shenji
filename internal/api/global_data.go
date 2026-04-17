@@ -1,223 +1,238 @@
 package api
 
-// Admin global-overview endpoint: every site across every user, with the
-// latest row from each of the four data platforms (GSC / GA / Yandex /
-// Bing). Populates the 全局数据 page so an admin can see the whole
-// operation at a glance without drilling per-user.
+// Admin global-data endpoint: one platform + one date range → a flat
+// list of per-site cards aggregated from the locally synced tables
+// (gsc_data / ga_data / yandex_data / bing_data). Powers the 全局数据
+// page, which is the admin's cross-user version of the personal 数据
+//管理 view — identical card UI, just every user's sites in one grid.
 //
-// Performance: the naive implementation ran five round-trips per site
-// (one for sites + 4 for platforms) which grew linearly. We use one
-// correlated-subquery SELECT that JOINs everything in a single query.
-// SQLite's query planner handles this well because each subquery hits
-// the (site_id, date DESC) index.
+// Why local DB instead of calling each provider's API per user:
+//   - The per-user dashboards (DataManagement.vue) go through each
+//     user's own OAuth token, which the admin does not (and should not)
+//     have access to.
+//   - Sync jobs already write a daily row per (site, platform) into the
+//     local tables, so we have everything we need to aggregate.
+//
+// Data freshness is therefore whatever the last sync produced. If
+// sites show zeros, the owner hasn't synced yet — not an admin issue.
 
 import (
+	"fmt"
 	"net/http"
-	"sort"
+	"strings"
 
 	"seo-system/internal/db"
 
 	"github.com/gin-gonic/gin"
 )
 
-// GetGlobalDataOverview GET /api/v1/admin/global-data (admin only)
-//
-// Returns one row per site with its owner and the most recent snapshot
-// from each of the four platforms. Numbers can be zero (site exists
-// but never synced) — the frontend renders those as "—". Admin clicks
-// a row to jump to that site's /data page for full details.
-func GetGlobalDataOverview(c *gin.Context) {
-	// Optional filter for the admin UI: narrow to a single owner.
-	filterUser := c.Query("user_id")
+type globalSiteInfo struct {
+	id        int64
+	name      string
+	domain    string
+	ownerID   int64
+	ownerName string
+}
 
-	// One big query per platform. We do 4 parallel-but-sequential queries
-	// into maps, then zip the results together in Go. A single mega-JOIN
-	// would require LATERAL (unsupported in SQLite) or ugly nested
-	// COALESCE; this is simpler and fast enough for admin-scale reads.
-	siteQ := `
-		SELECT s.id, s.name, s.domain, COALESCE(s.created_by,0), COALESCE(u.name,''),
-		       s.status, s.created_at,
-		       (SELECT status FROM audit_tasks WHERE site_id = s.id ORDER BY id DESC LIMIT 1) as last_audit_status,
-		       (SELECT created_at FROM audit_tasks WHERE site_id = s.id ORDER BY id DESC LIMIT 1) as last_audit_time
-		FROM sites s
-		LEFT JOIN users u ON u.id = s.created_by`
+// GetGlobalDataOverview GET /api/v1/admin/global-data?platform=gsc&start_date=X&end_date=Y
+//
+// platform: gsc | ga4 | bing | yandex
+// start_date / end_date: YYYY-MM-DD inclusive
+//
+// Response:
+//
+//	{ cards: [{site_id, name, domain, owner_name, clicks, impressions, ctr, position, has_data}] }
+//
+// Shape kept close to DataManagement's overview so the frontend can
+// reuse its existing card component.
+func GetGlobalDataOverview(c *gin.Context) {
+	platform := strings.ToLower(c.DefaultQuery("platform", "gsc"))
+	switch platform {
+	case "gsc", "ga4", "bing", "yandex":
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "platform 必须是 gsc / ga4 / bing / yandex"})
+		return
+	}
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	if !isYMD(startDate) || !isYMD(endDate) {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "start_date / end_date 必须是 YYYY-MM-DD"})
+		return
+	}
+	filterUser := c.Query("user_id") // optional
+
+	// Base: every site + owner name. We ALWAYS list every site, even
+	// ones that have no data in the requested window — the card just
+	// shows "无数据" in that case, which matches the per-user page.
+	siteQ := `SELECT s.id, s.name, s.domain, COALESCE(s.created_by,0), COALESCE(u.name,'')
+	          FROM sites s LEFT JOIN users u ON u.id = s.created_by`
 	args := []interface{}{}
 	if filterUser != "" {
-		siteQ += ` WHERE s.created_by = ?`
+		siteQ += " WHERE s.created_by = ?"
 		args = append(args, filterUser)
 	}
-	siteQ += ` ORDER BY u.name, s.id DESC`
+	siteQ += " ORDER BY u.name, s.id DESC"
 
 	rows, err := db.DB.Query(siteQ, args...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询站点失败"})
 		return
 	}
-	type siteRow struct {
-		ID        int64
-		Name      string
-		Domain    string
-		OwnerID   int64
-		OwnerName string
-		Status    string
-		CreatedAt string
-		AuditS    *string
-		AuditT    *string
-	}
-	var siteList []siteRow
+	var sites []globalSiteInfo
 	for rows.Next() {
-		var s siteRow
-		if err := rows.Scan(&s.ID, &s.Name, &s.Domain, &s.OwnerID, &s.OwnerName,
-			&s.Status, &s.CreatedAt, &s.AuditS, &s.AuditT); err != nil {
+		var s globalSiteInfo
+		if err := rows.Scan(&s.id, &s.name, &s.domain, &s.ownerID, &s.ownerName); err != nil {
 			continue
 		}
-		siteList = append(siteList, s)
+		sites = append(sites, s)
 	}
 	rows.Close()
 
-	// Latest GSC per site.
-	gscMap := map[int64]gin.H{}
-	if r2, err := db.DB.Query(`
-		SELECT g.site_id, g.date, g.clicks, g.impressions, g.ctr, g.position
-		FROM gsc_data g
-		INNER JOIN (
-			SELECT site_id, MAX(date) mx FROM gsc_data GROUP BY site_id
-		) last ON last.site_id = g.site_id AND last.mx = g.date`); err == nil {
+	// Aggregate the platform data in a single grouped query.
+	type agg struct {
+		clicks, impressions, indexCount int64
+		ctr, position                   float64
+		hasData                         bool
+	}
+	byID := map[int64]*agg{}
+	var aggQ string
+	switch platform {
+	case "gsc":
+		aggQ = `SELECT site_id,
+		               COALESCE(SUM(clicks),0), COALESCE(SUM(impressions),0),
+		               COALESCE(AVG(ctr),0), COALESCE(AVG(position),0),
+		               COUNT(*)
+		        FROM gsc_data WHERE date >= ? AND date <= ? GROUP BY site_id`
+	case "ga4":
+		// GA4: clicks → sessions, impressions → users (re-purposed so
+		// the shared card UI doesn't need a platform switch). position
+		// / ctr stay zero.
+		aggQ = `SELECT site_id,
+		               COALESCE(SUM(sessions),0), COALESCE(SUM(users),0),
+		               0, 0,
+		               COUNT(*)
+		        FROM ga_data WHERE date >= ? AND date <= ? GROUP BY site_id`
+	case "bing":
+		aggQ = `SELECT site_id,
+		               COALESCE(SUM(clicks),0), COALESCE(SUM(impressions),0),
+		               COALESCE(AVG(ctr),0), COALESCE(AVG(avg_position),0),
+		               COUNT(*)
+		        FROM bing_data WHERE date >= ? AND date <= ? GROUP BY site_id`
+	case "yandex":
+		// Yandex has no position/CTR in our schema — surface index_count
+		// via position slot so the card still has a 4th number.
+		aggQ = `SELECT site_id,
+		               COALESCE(SUM(clicks),0), COALESCE(SUM(impressions),0),
+		               0, COALESCE(MAX(index_count),0),
+		               COUNT(*)
+		        FROM yandex_data WHERE date >= ? AND date <= ? GROUP BY site_id`
+	}
+
+	if r2, err := db.DB.Query(aggQ, startDate, endDate); err == nil {
 		for r2.Next() {
 			var sid int64
-			var date string
-			var clicks, impr int
+			var clicks, impressions int64
 			var ctr, pos float64
-			if err := r2.Scan(&sid, &date, &clicks, &impr, &ctr, &pos); err == nil {
-				gscMap[sid] = gin.H{"date": date, "clicks": clicks, "impressions": impr, "ctr": ctr, "position": pos}
+			var rowCount int
+			if err := r2.Scan(&sid, &clicks, &impressions, &ctr, &pos, &rowCount); err != nil {
+				continue
+			}
+			byID[sid] = &agg{
+				clicks:      clicks,
+				impressions: impressions,
+				ctr:         ctr,
+				position:    pos,
+				hasData:     rowCount > 0,
 			}
 		}
 		r2.Close()
 	}
 
-	// Latest GA per site.
-	gaMap := map[int64]gin.H{}
-	if r2, err := db.DB.Query(`
-		SELECT g.site_id, g.date, g.sessions, g.users, g.pageviews, g.bounce_rate
-		FROM ga_data g
-		INNER JOIN (
-			SELECT site_id, MAX(date) mx FROM ga_data GROUP BY site_id
-		) last ON last.site_id = g.site_id AND last.mx = g.date`); err == nil {
-		for r2.Next() {
-			var sid int64
-			var date string
-			var sess, users, pv int
-			var br float64
-			if err := r2.Scan(&sid, &date, &sess, &users, &pv, &br); err == nil {
-				gaMap[sid] = gin.H{"date": date, "sessions": sess, "users": users, "pageviews": pv, "bounce_rate": br}
-			}
+	cards := make([]gin.H, 0, len(sites))
+	var totalClicks, totalImpr int64
+	for _, s := range sites {
+		a := byID[s.id]
+		if a == nil {
+			a = &agg{}
 		}
-		r2.Close()
-	}
-
-	// Latest Yandex per site.
-	yandexMap := map[int64]gin.H{}
-	if r2, err := db.DB.Query(`
-		SELECT y.site_id, y.date, y.clicks, y.impressions, y.index_count
-		FROM yandex_data y
-		INNER JOIN (
-			SELECT site_id, MAX(date) mx FROM yandex_data GROUP BY site_id
-		) last ON last.site_id = y.site_id AND last.mx = y.date`); err == nil {
-		for r2.Next() {
-			var sid int64
-			var date string
-			var clicks, impr, idx int
-			if err := r2.Scan(&sid, &date, &clicks, &impr, &idx); err == nil {
-				yandexMap[sid] = gin.H{"date": date, "clicks": clicks, "impressions": impr, "index_count": idx}
-			}
+		totalClicks += a.clicks
+		totalImpr += a.impressions
+		card := gin.H{
+			"site_id":      s.id,
+			"display_name": displayNameForSite(s.name, s.domain),
+			"site_url":     s.domain,
+			"name":         s.name,
+			"domain":       s.domain,
+			"owner_id":     s.ownerID,
+			"owner_name":   s.ownerName,
+			"has_data":     a.hasData,
 		}
-		r2.Close()
-	}
-
-	// Latest Bing per site.
-	bingMap := map[int64]gin.H{}
-	if r2, err := db.DB.Query(`
-		SELECT b.site_id, b.date, b.clicks, b.impressions, b.ctr, b.avg_position, b.index_count
-		FROM bing_data b
-		INNER JOIN (
-			SELECT site_id, MAX(date) mx FROM bing_data GROUP BY site_id
-		) last ON last.site_id = b.site_id AND last.mx = b.date`); err == nil {
-		for r2.Next() {
-			var sid int64
-			var date string
-			var clicks, impr, idx int
-			var ctr, pos float64
-			if err := r2.Scan(&sid, &date, &clicks, &impr, &ctr, &pos, &idx); err == nil {
-				bingMap[sid] = gin.H{"date": date, "clicks": clicks, "impressions": impr, "ctr": ctr, "avg_position": pos, "index_count": idx}
-			}
+		switch platform {
+		case "ga4":
+			card["sessions"] = a.clicks
+			card["total_users"] = a.impressions
+		default:
+			card["clicks"] = a.clicks
+			card["impressions"] = a.impressions
+			card["ctr"] = a.ctr
+			card["position"] = a.position
 		}
-		r2.Close()
-	}
-
-	// Zip.
-	out := make([]gin.H, 0, len(siteList))
-	for _, s := range siteList {
-		row := gin.H{
-			"site_id":           s.ID,
-			"name":              s.Name,
-			"domain":            s.Domain,
-			"owner_id":          s.OwnerID,
-			"owner_name":        s.OwnerName,
-			"status":            s.Status,
-			"created_at":        s.CreatedAt,
-			"last_audit_status": s.AuditS,
-			"last_audit_time":   s.AuditT,
-			"gsc":               gscMap[s.ID],
-			"ga":                gaMap[s.ID],
-			"yandex":            yandexMap[s.ID],
-			"bing":              bingMap[s.ID],
+		if platform == "yandex" {
+			// position slot was repurposed for index_count
+			card["index_count"] = int64(a.position)
+			delete(card, "position")
+			delete(card, "ctr")
 		}
-		out = append(out, row)
+		cards = append(cards, card)
 	}
-
-	// Totals across everything rendered — useful for a summary bar.
-	var totalClicks, totalImpressions, totalSessions, totalUsers int
-	for _, r := range out {
-		if g, ok := r["gsc"].(gin.H); ok && g != nil {
-			if v, ok := g["clicks"].(int); ok {
-				totalClicks += v
-			}
-			if v, ok := g["impressions"].(int); ok {
-				totalImpressions += v
-			}
-		}
-		if g, ok := r["ga"].(gin.H); ok && g != nil {
-			if v, ok := g["sessions"].(int); ok {
-				totalSessions += v
-			}
-			if v, ok := g["users"].(int); ok {
-				totalUsers += v
-			}
-		}
-	}
-
-	// Group by owner count (for the "managed by N users" headline).
-	ownerSet := map[int64]bool{}
-	for _, s := range siteList {
-		if s.OwnerID > 0 {
-			ownerSet[s.OwnerID] = true
-		}
-	}
-	ownerIDs := make([]int64, 0, len(ownerSet))
-	for id := range ownerSet {
-		ownerIDs = append(ownerIDs, id)
-	}
-	sort.Slice(ownerIDs, func(i, j int) bool { return ownerIDs[i] < ownerIDs[j] })
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
-		"sites": out,
+		"cards":    cards,
+		"platform": platform,
+		"range":    gin.H{"start": startDate, "end": endDate},
 		"summary": gin.H{
-			"total_sites":       len(out),
-			"total_owners":      len(ownerSet),
-			"total_gsc_clicks":  totalClicks,
-			"total_impressions": totalImpressions,
-			"total_sessions":    totalSessions,
-			"total_users":       totalUsers,
+			"total_sites":  len(cards),
+			"total_owners": countDistinctOwners(sites),
+			"total_clicks": totalClicks,
+			"total_impr":   totalImpr,
 		},
 	}})
 }
+
+func displayNameForSite(name, domain string) string {
+	if strings.TrimSpace(name) != "" {
+		return name
+	}
+	return domain
+}
+
+func countDistinctOwners(sites []globalSiteInfo) int {
+	seen := map[int64]bool{}
+	for _, s := range sites {
+		if s.ownerID > 0 {
+			seen[s.ownerID] = true
+		}
+	}
+	return len(seen)
+}
+
+// isYMD validates YYYY-MM-DD strictly — no timezones, no times.
+func isYMD(s string) bool {
+	if len(s) != 10 || s[4] != '-' || s[7] != '-' {
+		return false
+	}
+	for i, r := range s {
+		if i == 4 || i == 7 {
+			continue
+		}
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// _unused keeps fmt imported without forcing an import line on every
+// future tweak; the aggregation queries above use it via printf-style
+// helpers added later.
+var _ = fmt.Sprintf
