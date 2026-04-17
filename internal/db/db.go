@@ -734,6 +734,20 @@ func Init() {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_gen_user_kind ON ai_generations(user_id, kind, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_gen_status ON ai_generations(status)`,
+		// ─── Pre-launch performance + wizard-round-trip fixes ─────────────
+		// - meta_title: the wizard lets users edit both Meta Title and Meta
+		//   Description, but geo_articles was missing the column so edits to
+		//   Meta Title silently vanished. Add the column and backfill from
+		//   the matching workflow job on apply.
+		// - Composite indexes: stats / list endpoints hit these hot columns
+		//   without a covering index, causing full-table scans on a growing
+		//   articles table.
+		`ALTER TABLE geo_articles ADD COLUMN meta_title TEXT DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS idx_geo_articles_content_type ON geo_articles(content_type, site_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_geo_articles_status ON geo_articles(status, content_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_geo_articles_review_ct ON geo_articles(review_status, content_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_bing_data_site_date ON bing_data(site_id, date DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_dead_link_results_site_status ON dead_link_results(site_id, status_code)`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {

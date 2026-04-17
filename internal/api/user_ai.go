@@ -204,8 +204,14 @@ func callAISlot(apiURL, apiKey, model, prompt string, maxTokens int) (string, er
 		"max_tokens":  maxTokens,
 		"temperature": 0.7,
 	}
-	bj, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(bj))
+	bj, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("AI 请求体序列化失败: %w", err)
+	}
+	req, err := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(bj))
+	if err != nil {
+		return "", fmt.Errorf("AI 请求构造失败: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	client := &http.Client{Timeout: 120 * time.Second}

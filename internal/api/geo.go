@@ -340,7 +340,12 @@ func GeoListArticles(c *gin.Context) {
 	db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles a WHERE "+where, args...).Scan(&total)
 
 	args = append(args, perPage, offset)
-	rows, err := db.DB.Query(`SELECT a.id, a.task_id, a.title, a.excerpt, a.keywords, a.meta_description, a.status, a.review_status, a.ai_model, a.word_count, a.created_at, a.published_at
+	// List intentionally omits the full `content` column — it can be 100+
+	// KiB per row. Callers render excerpt; GeoGetArticle fetches content
+	// on demand when the user opens a single article.
+	rows, err := db.DB.Query(`SELECT a.id, a.task_id, a.title, a.excerpt, a.keywords,
+		COALESCE(a.meta_title,''), a.meta_description,
+		a.status, a.review_status, a.ai_model, a.word_count, a.created_at, a.published_at
 		FROM geo_articles a
 		WHERE `+where+` ORDER BY a.id DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
@@ -351,12 +356,14 @@ func GeoListArticles(c *gin.Context) {
 	var list []gin.H
 	for rows.Next() {
 		var id, taskID, wordCount int64
-		var title, excerpt, kw, md, status, reviewStatus, aiModel, cat string
+		var title, excerpt, kw, mt, md, status, reviewStatus, aiModel, cat string
 		var pubAt *string
-		rows.Scan(&id, &taskID, &title, &excerpt, &kw, &md, &status, &reviewStatus, &aiModel, &wordCount, &cat, &pubAt)
+		if err := rows.Scan(&id, &taskID, &title, &excerpt, &kw, &mt, &md, &status, &reviewStatus, &aiModel, &wordCount, &cat, &pubAt); err != nil {
+			continue
+		}
 		list = append(list, gin.H{
 			"id": id, "task_id": taskID, "title": title, "excerpt": excerpt,
-			"keywords": kw, "meta_description": md, "status": status,
+			"keywords": kw, "meta_title": mt, "meta_description": md, "status": status,
 			"review_status": reviewStatus, "ai_model": aiModel, "word_count": wordCount,
 			"created_at": cat, "published_at": pubAt,
 		})
@@ -370,18 +377,23 @@ func GeoListArticles(c *gin.Context) {
 func GeoGetArticle(c *gin.Context) {
 	id := c.Param("id")
 	var aID, taskID, titleID, wordCount int64
-	var title, content, excerpt, kw, md, category, status, reviewStatus, reviewerNote, aiModel, slug, createdAt string
+	var title, content, excerpt, kw, metaTitle, md, category, status, reviewStatus, reviewerNote, aiModel, slug, createdAt string
 	var pubAt *string
-	err := db.DB.QueryRow(`SELECT id, task_id, title_id, title, slug, content, excerpt, keywords, meta_description, category, status, review_status, reviewer_note, ai_model, word_count, created_at, published_at
+	err := db.DB.QueryRow(`SELECT id, task_id, title_id, title, slug, content, excerpt, keywords,
+		COALESCE(meta_title,''), meta_description, category, status, review_status, reviewer_note,
+		ai_model, word_count, created_at, published_at
 		FROM geo_articles WHERE id=?`, id).
-		Scan(&aID, &taskID, &titleID, &title, &slug, &content, &excerpt, &kw, &md, &category, &status, &reviewStatus, &reviewerNote, &aiModel, &wordCount, &createdAt, &pubAt)
+		Scan(&aID, &taskID, &titleID, &title, &slug, &content, &excerpt, &kw,
+			&metaTitle, &md, &category, &status, &reviewStatus, &reviewerNote,
+			&aiModel, &wordCount, &createdAt, &pubAt)
 	if err != nil {
 		c.JSON(404, gin.H{"code": -1, "error": "文章不存在"})
 		return
 	}
 	c.JSON(200, gin.H{"code": 0, "data": gin.H{
 		"id": aID, "task_id": taskID, "title_id": titleID, "title": title, "slug": slug,
-		"content": content, "excerpt": excerpt, "keywords": kw, "meta_description": md,
+		"content": content, "excerpt": excerpt, "keywords": kw,
+		"meta_title": metaTitle, "meta_description": md,
 		"category": category, "status": status, "review_status": reviewStatus,
 		"reviewer_note": reviewerNote, "ai_model": aiModel, "word_count": wordCount,
 		"created_at": createdAt, "published_at": pubAt,
@@ -394,6 +406,7 @@ func GeoUpdateArticle(c *gin.Context) {
 		Title           string `json:"title"`
 		Content         string `json:"content"`
 		Keywords        string `json:"keywords"`
+		MetaTitle       string `json:"meta_title"`
 		MetaDescription string `json:"meta_description"`
 		Category        string `json:"category"`
 	}
@@ -402,8 +415,14 @@ func GeoUpdateArticle(c *gin.Context) {
 		return
 	}
 	wc := utf8.RuneCountInString(req.Content)
-	db.DB.Exec(`UPDATE geo_articles SET title=?, content=?, keywords=?, meta_description=?, category=?, word_count=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-		req.Title, req.Content, req.Keywords, req.MetaDescription, req.Category, wc, id)
+	if _, err := db.DB.Exec(`UPDATE geo_articles
+		SET title=?, content=?, keywords=?, meta_title=?, meta_description=?, category=?, word_count=?,
+		    updated_at=CURRENT_TIMESTAMP
+		WHERE id=?`,
+		req.Title, req.Content, req.Keywords, req.MetaTitle, req.MetaDescription, req.Category, wc, id); err != nil {
+		c.JSON(500, gin.H{"code": -1, "error": "更新失败"})
+		return
+	}
 	c.JSON(200, gin.H{"code": 0, "data": "更新成功"})
 }
 

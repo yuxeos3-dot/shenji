@@ -343,7 +343,14 @@ func fetchSitemapURLs(sitemapURL string, depth int) []string {
 		log.Printf("[deadlink] fetch failed %s: %v", sitemapURL, err)
 		return nil
 	}
-	defer resp.Body.Close()
+	defer func() {
+		// Drain + close so the transport can return the TCP connection
+		// to its idle pool. Without the drain, non-200 and non-XML
+		// responses would slowly exhaust the client pool during a big
+		// sitemap walk.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode != 200 {
 		return nil
 	}

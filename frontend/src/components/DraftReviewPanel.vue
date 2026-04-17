@@ -200,6 +200,7 @@ async function saveEdit() {
       title: viewing.value.title,
       content: viewing.value.content,
       keywords: viewing.value.keywords,
+      meta_title: viewing.value.meta_title || '',
       meta_description: viewing.value.meta_description,
       category: viewing.value.category || '',
     })

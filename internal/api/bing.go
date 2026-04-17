@@ -42,7 +42,10 @@ func bingFetch(apiKey, endpoint string, params map[string]string) (json.RawMessa
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	// Cap response size to protect against upstream misbehavior. Bing's
+	// largest normal response (GetRankAndTrafficStats on a busy site)
+	// sits comfortably under 1 MiB.
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxOAuthResponseBytes))
 	if resp.StatusCode != 200 {
 		var errResp struct {
 			Error struct {

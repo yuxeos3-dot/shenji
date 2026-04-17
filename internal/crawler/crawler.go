@@ -250,20 +250,33 @@ func validateURL(raw string) error {
 	return nil
 }
 
-// BuildHTTPClient returns an SSRF-aware HTTP client with the given timeout.
-func BuildHTTPClient(timeout time.Duration) *http.Client {
+// sharedTransport is initialized once and reused by every HTTP client
+// returned from BuildHTTPClient. Rebuilding a Transport per request (as
+// the old code did) discarded the idle connection pool and TLS session
+// cache, meaning a 500-page audit opened 500 fresh TCP+TLS handshakes
+// against the target. Reusing the transport across all crawler requests
+// cuts audit wall time dramatically.
+var sharedTransport = func() *http.Transport {
 	base := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-	tr := &http.Transport{
+	return &http.Transport{
 		DialContext:           safeDialContext(base),
 		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
+		MaxIdleConns:          256,
+		MaxIdleConnsPerHost:   32,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
+}()
+
+// BuildHTTPClient returns an SSRF-aware HTTP client with the given timeout.
+// All returned clients share a single Transport (idle-connection pool),
+// so they're cheap to construct — the per-call overhead is a small
+// struct allocation.
+func BuildHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{
 		Timeout:   timeout,
-		Transport: tr,
+		Transport: sharedTransport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return fmt.Errorf("too many redirects")

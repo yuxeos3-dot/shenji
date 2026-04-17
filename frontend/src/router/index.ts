@@ -49,6 +49,19 @@ const router = createRouter({
 // With cookie-based auth we can't see the token from JS, so the guard asks
 // the server once via /auth/me. Result is cached in the pinia store so
 // subsequent navigations are instant.
+// safeRedirect returns `to.fullPath` only when it's a safe same-origin path,
+// i.e. starts with exactly one "/" and isn't a protocol-relative URL like
+// "//evil.com/..." or a javascript: scheme. Anything else becomes "" and
+// the /login redirect falls back to its default landing page.
+function safeRedirect(fullPath: string): string {
+  if (!fullPath || fullPath === '/') return ''
+  if (!fullPath.startsWith('/')) return ''
+  if (fullPath.startsWith('//')) return '' // protocol-relative
+  if (fullPath.startsWith('/\\')) return ''
+  if (/^\s*(javascript|data|vbscript):/i.test(fullPath)) return ''
+  return fullPath
+}
+
 router.beforeEach(async (to, _from, next) => {
   if (to.path === '/login') {
     next()
@@ -63,7 +76,8 @@ router.beforeEach(async (to, _from, next) => {
   if (userStore.authed) {
     next()
   } else {
-    next({ path: '/login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : {} })
+    const target = safeRedirect(to.fullPath)
+    next({ path: '/login', query: target ? { redirect: target } : {} })
   }
 })
 

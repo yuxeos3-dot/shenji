@@ -62,7 +62,9 @@ const downloading = ref(false)
 // button toggles to "✓ 已加入" after a successful submit. Cleared when
 // we re-load the audit (poll / initial mount).
 const coordAddedIds = ref(new Set())
-let pollTimer = null
+// ref-scoped so HMR / rapid remounts can't leave an orphan setTimeout
+// chain firing against a stale component.
+const pollTimer = ref(null)
 
 async function addIssueToCoord(issue) {
   // Let the user attach a remark describing *why* this issue needs a fix
@@ -126,7 +128,10 @@ async function downloadReport() {
 }
 
 function clearPoll() {
-  if (pollTimer) { clearTimeout(pollTimer); pollTimer = null }
+  if (pollTimer.value) {
+    clearTimeout(pollTimer.value)
+    pollTimer.value = null
+  }
 }
 
 async function loadData() {
@@ -160,7 +165,7 @@ async function loadData() {
       }
     }
     if (task.value.status === 'running' || task.value.status === 'pending') {
-      pollTimer = setTimeout(loadData, 3000)
+      pollTimer.value = setTimeout(loadData, 3000)
     }
     // Pre-populate the "already added to coordination" set so the button
     // shows ✓ for issues previously queued. Fails silently for users

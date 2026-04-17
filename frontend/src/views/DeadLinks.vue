@@ -125,8 +125,10 @@ const page = ref(1)
 const perPage = 100
 const totalCount = ref(0)
 const summary = ref({ total_all: 0, total_dead: 0, total_redirect: 0, total_ok: 0 })
-let pollTimer = null
-let unmounted = false
+// ref-scoped so HMR / rapid remounts can't leave orphaned setTimeout
+// chains firing against a dead component instance.
+const pollTimer = ref(null)
+const unmounted = ref(false)
 
 const displayResults = computed(() => {
   if (!search.value) return results.value
@@ -202,7 +204,7 @@ async function startCheck() {
 }
 
 async function pollProgress() {
-  if (unmounted) return
+  if (unmounted.value) return
   try {
     const res = await apiClient.getDeadLinkProgress(selectedSiteId.value)
     const d = res.data
@@ -212,8 +214,8 @@ async function pollProgress() {
       checking.value = false
       await loadResults()
       ElMessage.success(`检测完成，共 ${summary.value.total_all} 条链接，死链 ${summary.value.total_dead} 条`)
-    } else if (!unmounted) {
-      pollTimer = setTimeout(pollProgress, 2000)
+    } else if (!unmounted.value) {
+      pollTimer.value = setTimeout(pollProgress, 2000)
     }
   } catch {
     checking.value = false
@@ -225,7 +227,13 @@ onMounted(async () => {
   sites.value = res.data || []
   if (sites.value.length) { selectedSiteId.value = sites.value[0].id; loadResults() }
 })
-onUnmounted(() => { unmounted = true; if (pollTimer) clearTimeout(pollTimer) })
+onUnmounted(() => {
+  unmounted.value = true
+  if (pollTimer.value) {
+    clearTimeout(pollTimer.value)
+    pollTimer.value = null
+  }
+})
 </script>
 
 <style scoped>

@@ -237,6 +237,41 @@ func GeoStartKeywordWorkflow(c *gin.Context) {
 		req.WordCount = 5000
 	}
 
+	// Bound free-form wizard inputs. These get spliced into the AI prompt,
+	// so a runaway 1 MB custom_prompt would blow past the model's context
+	// window and waste an API call. Caps are generous (enough for a full
+	// prompt rewrite) but not unbounded. Keyword itself is capped shorter —
+	// it's a search term, not an essay.
+	const (
+		maxCustomPrompt = 32 * 1024
+		maxFreeText     = 4 * 1024
+		maxKeyword      = 200
+	)
+	if len(req.CustomPrompt) > maxCustomPrompt {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "自定义 Prompt 超长（上限 32KB）"})
+		return
+	}
+	if len(req.ExtraRequirements) > maxFreeText {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "附加要求超长（上限 4KB）"})
+		return
+	}
+	if len(req.ParagraphStruct) > maxFreeText {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "段落结构描述超长（上限 4KB）"})
+		return
+	}
+	if len(req.ReferenceURL) > 2048 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "参考链接超长"})
+		return
+	}
+	if len(req.Keyword) > maxKeyword {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "关键词过长"})
+		return
+	}
+	if len(req.TitleText) > 500 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "标题过长"})
+		return
+	}
+
 	// Non-blocking semaphore: if full, reject fast.
 	select {
 	case geoWorkflowSem <- struct{}{}:
@@ -398,10 +433,10 @@ func GeoApplyWorkflowJob(c *gin.Context) {
 	res, err := db.DB.Exec(
 		`INSERT INTO geo_articles
 		 (task_id, title_id, site_id, title, content, excerpt, keywords,
-		  meta_description, ai_model, word_count, status, review_status, content_type)
-		 VALUES (0, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'pending', ?)`,
+		  meta_title, meta_description, ai_model, word_count, status, review_status, content_type)
+		 VALUES (0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'pending', ?)`,
 		job.TitleID, job.SiteID, title, content, excerpt, kwField,
-		metaDesc, job.AIModel, wc, job.ContentType,
+		metaTitle, metaDesc, job.AIModel, wc, job.ContentType,
 	)
 	if err != nil {
 		log.Printf("[geo-workflow] apply insert: %v", err)
