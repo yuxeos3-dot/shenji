@@ -198,7 +198,10 @@ func main() {
 		// Audit Logs (admin only)
 		v1.GET("/audit-logs", middleware.AdminRequired(), api.ListAuditLogs)
 
-		// Spider analytics (read-only for now; ingest is a public route above)
+		// Spider analytics (read-only for now; ingest is a public route above).
+		// All endpoints are scoped by site; /sites returns a lightweight summary
+		// of every registered site so the UI can render the selector.
+		v1.GET("/spider/sites", api.RequirePermission("spider.view"), api.SpiderSiteSummary)
 		v1.GET("/spider/overview", api.RequirePermission("spider.view"), api.SpiderOverview)
 		v1.GET("/spider/trend", api.RequirePermission("spider.view"), api.SpiderDailyTrend)
 		v1.GET("/spider/logs", api.RequirePermission("spider.view"), api.SpiderLogs)

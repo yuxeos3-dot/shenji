@@ -146,9 +146,23 @@ func IngestSpiderLog(c *gin.Context) {
 
 // ─── Read endpoints (admin / authenticated) ─────────────────────────────────
 
-// SpiderOverview returns global spider stats and per-site rollups for the
-// landing dashboard. Windows: today (UTC), last 7 days, last 30 days.
+// SpiderOverview returns spider stats for ONE site. site_id query parameter
+// is required — spider analytics is designed around per-site reporting
+// (aggregating across sites mixes unrelated hosts with very different
+// crawl budgets, which isn't useful for SEO monitoring).
+//
+// Response fields:
+//   - total_24h / total_7d / total_30d: hit counts for this site
+//   - top_url_7d: most-crawled URLs on this site (top 10, last 7 days)
+//   - by_spider: per-spider breakdown (last 7 days, this site)
+//   - last_visit_by_spider: when each spider last hit this site
 func SpiderOverview(c *gin.Context) {
+	siteID := c.Query("site_id")
+	if siteID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "site_id 必填"})
+		return
+	}
+
 	now := time.Now().UTC()
 	day1 := now.Add(-24 * time.Hour)
 	day7 := now.Add(-7 * 24 * time.Hour)
@@ -156,19 +170,24 @@ func SpiderOverview(c *gin.Context) {
 
 	count := func(since time.Time) int {
 		var n int
-		db.DB.QueryRow("SELECT COUNT(*) FROM spider_logs WHERE visited_at >= ?", since).Scan(&n)
+		db.DB.QueryRow(
+			"SELECT COUNT(*) FROM spider_logs WHERE site_id = ? AND visited_at >= ?",
+			siteID, since,
+		).Scan(&n)
 		return n
 	}
 
-	// Per-spider breakdown (last 7 days)
+	// Per-spider breakdown (last 7 days, this site only)
 	type row struct {
 		Spider string `json:"spider"`
 		Hits   int    `json:"hits"`
 	}
 	var breakdown []row
 	if rows, err := db.DB.Query(
-		"SELECT spider, COUNT(*) FROM spider_logs WHERE visited_at >= ? GROUP BY spider ORDER BY 2 DESC",
-		day7,
+		`SELECT spider, COUNT(*) FROM spider_logs
+		 WHERE site_id = ? AND visited_at >= ?
+		 GROUP BY spider ORDER BY 2 DESC`,
+		siteID, day7,
 	); err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -179,27 +198,43 @@ func SpiderOverview(c *gin.Context) {
 		}
 	}
 
-	// Per-site top 20 (last 7 days)
-	type siteRow struct {
-		SiteID  int64  `json:"site_id"`
-		Domain  string `json:"domain"`
-		Name    string `json:"name"`
-		Hits    int    `json:"hits"`
+	// Most crawled URLs (top 10, last 7 days, this site)
+	type urlRow struct {
+		URL  string `json:"url"`
+		Hits int    `json:"hits"`
 	}
-	var sites []siteRow
+	var topURLs []urlRow
 	if rows, err := db.DB.Query(
-		`SELECT sl.site_id, s.domain, s.name, COUNT(*) as hits
-		 FROM spider_logs sl JOIN sites s ON sl.site_id = s.id
-		 WHERE sl.visited_at >= ?
-		 GROUP BY sl.site_id, s.domain, s.name
-		 ORDER BY hits DESC LIMIT 20`,
-		day7,
+		`SELECT url, COUNT(*) as hits FROM spider_logs
+		 WHERE site_id = ? AND visited_at >= ? AND url != ''
+		 GROUP BY url ORDER BY hits DESC LIMIT 10`,
+		siteID, day7,
 	); err == nil {
 		defer rows.Close()
 		for rows.Next() {
-			var r siteRow
-			if rows.Scan(&r.SiteID, &r.Domain, &r.Name, &r.Hits) == nil {
-				sites = append(sites, r)
+			var r urlRow
+			if rows.Scan(&r.URL, &r.Hits) == nil {
+				topURLs = append(topURLs, r)
+			}
+		}
+	}
+
+	// Last visit per spider (so operators can see "Googlebot last crawled 3h ago")
+	type lastVisit struct {
+		Spider string `json:"spider"`
+		At     string `json:"at"`
+	}
+	var lastVisits []lastVisit
+	if rows, err := db.DB.Query(
+		`SELECT spider, MAX(visited_at) FROM spider_logs
+		 WHERE site_id = ? GROUP BY spider ORDER BY 2 DESC LIMIT 20`,
+		siteID,
+	); err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var r lastVisit
+			if rows.Scan(&r.Spider, &r.At) == nil {
+				lastVisits = append(lastVisits, r)
 			}
 		}
 	}
@@ -207,18 +242,71 @@ func SpiderOverview(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"data": gin.H{
-			"total_24h":  count(day1),
-			"total_7d":   count(day7),
-			"total_30d":  count(day30),
-			"by_spider":  breakdown,
-			"top_sites":  sites,
-			"generated":  now.Format(time.RFC3339),
+			"site_id":              siteID,
+			"total_24h":            count(day1),
+			"total_7d":             count(day7),
+			"total_30d":            count(day30),
+			"by_spider":            breakdown,
+			"top_url_7d":           topURLs,
+			"last_visit_by_spider": lastVisits,
+			"generated":            now.Format(time.RFC3339),
 		},
 	})
 }
 
+// SpiderSiteSummary returns a lightweight per-site row for all registered
+// sites: last-7-day total + per-spider breakdown. Used by the site selector
+// tooltip / overview table so operators can see at a glance which sites are
+// being crawled without drilling into each one.
+func SpiderSiteSummary(c *gin.Context) {
+	day7 := time.Now().UTC().Add(-7 * 24 * time.Hour)
+
+	rows, err := db.DB.Query(
+		`SELECT s.id, s.name, s.domain,
+		        COALESCE(SUM(CASE WHEN sl.visited_at >= ? THEN 1 ELSE 0 END), 0) as hits_7d,
+		        COALESCE(COUNT(DISTINCT CASE WHEN sl.visited_at >= ? THEN sl.spider END), 0) as spiders_7d,
+		        MAX(sl.visited_at) as last_visit
+		 FROM sites s
+		 LEFT JOIN spider_logs sl ON sl.site_id = s.id
+		 GROUP BY s.id, s.name, s.domain
+		 ORDER BY hits_7d DESC, s.id`,
+		day7, day7,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
+		return
+	}
+	defer rows.Close()
+
+	type siteRow struct {
+		SiteID    int64   `json:"site_id"`
+		Name      string  `json:"name"`
+		Domain    string  `json:"domain"`
+		Hits7d    int     `json:"hits_7d"`
+		Spiders7d int     `json:"spiders_7d"`
+		LastVisit *string `json:"last_visit"`
+	}
+	var out []siteRow
+	for rows.Next() {
+		var r siteRow
+		if rows.Scan(&r.SiteID, &r.Name, &r.Domain, &r.Hits7d, &r.Spiders7d, &r.LastVisit) == nil {
+			out = append(out, r)
+		}
+	}
+	if out == nil {
+		out = []siteRow{}
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": out})
+}
+
 // SpiderDailyTrend returns one row per day × spider for the last N days.
+// site_id is required — same reasoning as SpiderOverview.
 func SpiderDailyTrend(c *gin.Context) {
+	siteID := c.Query("site_id")
+	if siteID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "site_id 必填"})
+		return
+	}
 	days, _ := strconv.Atoi(c.DefaultQuery("days", "14"))
 	if days < 1 {
 		days = 14
@@ -226,19 +314,14 @@ func SpiderDailyTrend(c *gin.Context) {
 	if days > 180 {
 		days = 180
 	}
-	siteIDFilter := c.Query("site_id")
 
 	since := time.Now().UTC().AddDate(0, 0, -days)
-	q := `SELECT strftime('%Y-%m-%d', visited_at) as d, spider, COUNT(*)
-	      FROM spider_logs WHERE visited_at >= ?`
-	args := []interface{}{since}
-	if siteIDFilter != "" {
-		q += " AND site_id = ?"
-		args = append(args, siteIDFilter)
-	}
-	q += " GROUP BY d, spider ORDER BY d ASC"
-
-	rows, err := db.DB.Query(q, args...)
+	rows, err := db.DB.Query(
+		`SELECT strftime('%Y-%m-%d', visited_at) as d, spider, COUNT(*)
+		 FROM spider_logs WHERE site_id = ? AND visited_at >= ?
+		 GROUP BY d, spider ORDER BY d ASC`,
+		siteID, since,
+	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
 		return

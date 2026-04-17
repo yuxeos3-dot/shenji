@@ -181,10 +181,11 @@ const api = {
   listCaches: () => instance.get('/v1/cache'),
   clearCache: (key: string) => instance.delete(`/v1/cache/${key}`),
 
-  // Spider analytics
-  spiderOverview: () => instance.get('/v1/spider/overview'),
-  spiderTrend: (params?: Record<string, any>) => instance.get('/v1/spider/trend', { params }),
-  spiderLogs: (params?: Record<string, any>) => instance.get('/v1/spider/logs', { params }),
+  // Spider analytics (site-scoped)
+  spiderSiteSummary: () => instance.get('/v1/spider/sites'),
+  spiderOverview: (siteId: Id) => instance.get('/v1/spider/overview', { params: { site_id: siteId } }),
+  spiderTrend: (siteId: Id, params?: Record<string, any>) => instance.get('/v1/spider/trend', { params: { site_id: siteId, ...(params || {}) } }),
+  spiderLogs: (siteId: Id, params?: Record<string, any>) => instance.get('/v1/spider/logs', { params: { site_id: siteId, ...(params || {}) } }),
 
   // GEO Content Production
   geoStats: (params?: Record<string, any>) => instance.get('/v1/geo/stats', { params }),
