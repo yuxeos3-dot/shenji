@@ -16,6 +16,13 @@ package api
 // person simply need to re-fill their own credentials via the new
 // 个人中心 page. That's the intended outcome: private onboarding per
 // user, no shared blob.
+//
+// The migration runs in a BACKGROUND GOROUTINE from main() so even if
+// it deadlocks or takes a long time, the HTTP server comes up and
+// login keeps working. On a single-connection SQLite pool
+// (MaxOpenConns=1), any Exec issued while a Rows iterator is still
+// open deadlocks forever — this file is careful to drain Rows into a
+// slice and Close BEFORE issuing any follow-up writes.
 
 import (
 	"database/sql"
@@ -28,21 +35,17 @@ import (
 // per-user record on the target user. Idempotent — sets
 // `perm_migrated_personal_v1=1` when complete and no-ops on every
 // subsequent boot.
-//
-// Wrapped in a top-level recover so a migration bug on production data
-// (e.g. an unexpected NULL in a pre-DEFAULT-era row) can't crash-loop
-// the whole service at startup. We log the panic and continue; admin
-// can investigate via logs and re-run after fixing the data.
 func MigrateGlobalToPersonalConfig() {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[personal-migration] PANIC: %v (service continues; retry on next boot after DB cleanup)", r)
+			log.Printf("[personal-migration] PANIC: %v (service unaffected; retry next boot)", r)
 		}
 	}()
 
 	var done string
 	db.DB.QueryRow(`SELECT COALESCE(value,'') FROM settings WHERE key='perm_migrated_personal_v1'`).Scan(&done)
 	if done == "1" {
+		log.Println("[personal-migration] already completed, skipping")
 		return
 	}
 
@@ -53,7 +56,9 @@ func MigrateGlobalToPersonalConfig() {
 	}
 
 	migrated := 0
+
 	// ─── OAuth app credentials (GSC + GA share one; Yandex separate) ───
+	log.Println("[personal-migration] step 1/5: OAuth app credentials")
 	if cid := db.GetSetting("gsc_client_id"); cid != "" {
 		cs := db.GetSetting("gsc_client_secret")
 		ru := db.GetSetting("gsc_redirect_uri")
@@ -63,7 +68,7 @@ func MigrateGlobalToPersonalConfig() {
 				encSecret = v
 			}
 		}
-		_, err := db.DB.Exec(
+		if _, err := db.DB.Exec(
 			`INSERT INTO user_oauth_config (user_id, service, client_id, client_secret, redirect_uri)
 			 VALUES (?, 'gsc', ?, ?, ?)
 			 ON CONFLICT(user_id, service) DO UPDATE SET
@@ -72,13 +77,11 @@ func MigrateGlobalToPersonalConfig() {
 			   redirect_uri = excluded.redirect_uri,
 			   updated_at = CURRENT_TIMESTAMP`,
 			target, cid, encSecret, ru,
-		)
-		if err != nil {
+		); err != nil {
 			log.Printf("[personal-migration] gsc config: %v", err)
 		} else {
 			// Google Analytics shares the same OAuth app — seed a GA row too.
 			gaRU := ru
-			// The existing code swaps "/gsc/" → "/ga/" in redirect URIs.
 			if gaRU != "" {
 				gaRU = replaceServicePath(gaRU, "/gsc/", "/ga/")
 			}
@@ -123,58 +126,62 @@ func MigrateGlobalToPersonalConfig() {
 	}
 
 	// ─── OAuth access tokens ────────────────────────────────────────────
-	// Existing rows in oauth_tokens (global) are re-associated with the
-	// target user. Values are already encrypted — copy as-is. Use
-	// nullable scan targets because pre-DEFAULT-clause rows can still
-	// carry NULLs for refresh_token / expires_at, and `string` Scan
-	// would fail on NULL.
-	rows, err := db.DB.Query(
+	// CRITICAL: read all rows fully + close BEFORE issuing any write. On
+	// modernc.org/sqlite with MaxOpenConns=1 the single connection is
+	// pinned to the Rows iterator; issuing db.DB.Exec inside the rows.Next
+	// loop deadlocks forever (Exec waits for conn, Rows never releases
+	// until Close). Drain into a slice, Close, then INSERT.
+	log.Println("[personal-migration] step 2/5: OAuth access tokens")
+	type tokRow struct {
+		svc, at, rt string
+		expiresAt   sql.NullTime
+	}
+	var toks []tokRow
+	if rows, err := db.DB.Query(
 		`SELECT service, COALESCE(access_token,''), COALESCE(refresh_token,''), expires_at
 		 FROM oauth_tokens ORDER BY id DESC`,
-	)
-	if err == nil {
-		defer rows.Close()
+	); err == nil {
 		seen := map[string]bool{}
 		for rows.Next() {
-			var svc, at, rt string
-			var expiresAt sql.NullTime
-			if err := rows.Scan(&svc, &at, &rt, &expiresAt); err != nil {
+			var r tokRow
+			if err := rows.Scan(&r.svc, &r.at, &r.rt, &r.expiresAt); err != nil {
 				log.Printf("[personal-migration] oauth_tokens scan: %v", err)
 				continue
 			}
-			if seen[svc] {
-				continue // keep only most-recent per service
+			if seen[r.svc] || r.at == "" {
+				continue
 			}
-			seen[svc] = true
-			if at == "" {
-				continue // nothing useful to migrate
-			}
-			var expiresVal interface{}
-			if expiresAt.Valid {
-				expiresVal = expiresAt.Time
-			}
-			if _, err := db.DB.Exec(
-				`INSERT INTO user_oauth_tokens (user_id, service, access_token, refresh_token, expires_at)
-				 VALUES (?, ?, ?, ?, ?)
-				 ON CONFLICT(user_id, service) DO UPDATE SET
-				   access_token = excluded.access_token,
-				   refresh_token = excluded.refresh_token,
-				   expires_at = excluded.expires_at,
-				   updated_at = CURRENT_TIMESTAMP`,
-				target, svc, at, rt, expiresVal,
-			); err != nil {
-				log.Printf("[personal-migration] token %s: %v", svc, err)
-			} else {
-				migrated++
-			}
+			seen[r.svc] = true
+			toks = append(toks, r)
+		}
+		rows.Close()
+	}
+	for _, r := range toks {
+		var expiresVal interface{}
+		if r.expiresAt.Valid {
+			expiresVal = r.expiresAt.Time
+		}
+		if _, err := db.DB.Exec(
+			`INSERT INTO user_oauth_tokens (user_id, service, access_token, refresh_token, expires_at)
+			 VALUES (?, ?, ?, ?, ?)
+			 ON CONFLICT(user_id, service) DO UPDATE SET
+			   access_token = excluded.access_token,
+			   refresh_token = excluded.refresh_token,
+			   expires_at = excluded.expires_at,
+			   updated_at = CURRENT_TIMESTAMP`,
+			target, r.svc, r.at, r.rt, expiresVal,
+		); err != nil {
+			log.Printf("[personal-migration] token %s: %v", r.svc, err)
+		} else {
+			migrated++
 		}
 	}
 
 	// ─── Telegram ───────────────────────────────────────────────────────
+	log.Println("[personal-migration] step 3/5: Telegram bot")
 	if tok := db.GetSetting("telegram_bot_token"); tok != "" {
 		chat := db.GetSetting("telegram_chat_id")
 		enc := tok
-		// Global tokens were stored plaintext — encrypt on the way in.
 		if v, err := EncryptToken(tok); err == nil {
 			enc = v
 		}
@@ -193,6 +200,7 @@ func MigrateGlobalToPersonalConfig() {
 	}
 
 	// ─── Bing API key ───────────────────────────────────────────────────
+	log.Println("[personal-migration] step 4/5: Bing + FRW")
 	if key := db.GetSetting("bing_api_key"); key != "" {
 		enc := key
 		if v, err := EncryptToken(key); err == nil {
@@ -225,8 +233,7 @@ func MigrateGlobalToPersonalConfig() {
 	}
 
 	// ─── Delete the migrated keys from settings ────────────────────────
-	// ai_* keys also get removed — AI config is already fully per-user
-	// (users.ai_slots) so any residual global AI setting is dead weight.
+	log.Println("[personal-migration] step 5/5: cleaning up global keys")
 	obsoleteKeys := []string{
 		"gsc_client_id", "gsc_client_secret", "gsc_redirect_uri",
 		"yandex_client_id", "yandex_client_secret", "yandex_redirect_uri",
@@ -240,18 +247,18 @@ func MigrateGlobalToPersonalConfig() {
 			log.Printf("[personal-migration] delete setting %s: %v", k, err)
 		}
 	}
-	// Old global token rows are also cleared — user_oauth_tokens is the
-	// authoritative source going forward.
 	if _, err := db.DB.Exec(`DELETE FROM oauth_tokens`); err != nil {
 		log.Printf("[personal-migration] delete oauth_tokens: %v", err)
 	}
 
-	db.DB.Exec(
+	if _, err := db.DB.Exec(
 		`INSERT INTO settings(key, value) VALUES('perm_migrated_personal_v1','1')
 		 ON CONFLICT(key) DO UPDATE SET value='1'`,
-	)
+	); err != nil {
+		log.Printf("[personal-migration] set flag: %v", err)
+	}
 
-	log.Printf("[personal-migration] migrated %d global credential(s) to user id=%d", migrated, target)
+	log.Printf("[personal-migration] DONE — migrated %d global credential(s) to user id=%d", migrated, target)
 }
 
 // resolveMigrationTargetUser returns 沈万三's user id, or the first admin

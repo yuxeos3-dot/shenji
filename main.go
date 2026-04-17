@@ -37,11 +37,19 @@ func main() {
 
 	// One-time migration of ALL global platform credentials (Telegram
 	// bot, Bing key, FRW apikey, OAuth client + access tokens) onto a
-	// designated per-user record (沈万三, fallback first-admin). After
-	// this runs the shared-platform fields are gone from settings and
-	// every user manages their own credentials. Idempotent via
-	// `perm_migrated_personal_v1` flag.
-	api.MigrateGlobalToPersonalConfig()
+	// designated per-user record (沈万三, fallback first-admin).
+	// Idempotent via `perm_migrated_personal_v1` flag.
+	//
+	// CRITICAL: run in a background goroutine, not synchronously in
+	// main(). SQLite with MaxOpenConns=1 plus long-running migrations
+	// is a recipe for boot-time deadlock — if the migration blocks,
+	// main() never reaches ListenAndServe and login breaks for
+	// everybody. Kicking it off async means the HTTP server comes up
+	// within milliseconds and the migration finishes whenever it
+	// finishes; the user-visible effect is just that per-user credentials
+	// might take a few more seconds to appear in the admin monitoring
+	// view on first boot after deploy.
+	go api.MigrateGlobalToPersonalConfig()
 
 	// Warm the 4-platform data cache right after the DB is ready so first
 	// request hits a primed cache. Done in a goroutine — the HTTP server
