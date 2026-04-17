@@ -3,6 +3,7 @@ package middleware
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -100,49 +101,86 @@ func AdminRequired() gin.HandlerFunc {
 
 // ─── IP Whitelist (DB-backed with cache) ─────────────────────────────────────
 
+type ipWhitelistEntry struct {
+	exact string     // empty when cidr is set
+	cidr  *net.IPNet // nil when exact is set
+}
+
 var (
-	cachedIPs     []string
+	cachedEntries []ipWhitelistEntry
 	ipCacheMu     sync.RWMutex
 	ipCacheExpiry time.Time
 )
 
 const ipCacheTTL = 30 * time.Second
 
-// refreshIPCache reads ip_whitelist from DB and caches the parsed IPs.
-func refreshIPCache() []string {
+// refreshIPCache reads ip_whitelist from DB and caches parsed entries. Invalid
+// lines are logged and dropped so a typo can't silently open access.
+func refreshIPCache() []ipWhitelistEntry {
 	ipCacheMu.Lock()
 	defer ipCacheMu.Unlock()
 
 	if time.Now().Before(ipCacheExpiry) {
-		return cachedIPs
+		return cachedEntries
 	}
 
 	raw := db.GetSetting("ip_whitelist")
-	var ips []string
-	for _, line := range strings.Split(raw, "\n") {
-		ip := strings.TrimSpace(line)
-		if ip != "" {
-			ips = append(ips, ip)
-		}
-	}
-	cachedIPs = ips
+	entries := parseIPWhitelist(raw)
+	cachedEntries = entries
 	ipCacheExpiry = time.Now().Add(ipCacheTTL)
-	return ips
+	return entries
+}
+
+// parseIPWhitelist splits the setting by newlines / commas and validates each
+// entry as a plain IP or a CIDR block. Invalid tokens are logged and skipped.
+func parseIPWhitelist(raw string) []ipWhitelistEntry {
+	var entries []ipWhitelistEntry
+	for _, block := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == '\n' || r == ',' || r == ';'
+	}) {
+		token := strings.TrimSpace(block)
+		if token == "" {
+			continue
+		}
+		if strings.Contains(token, "/") {
+			_, ipnet, err := net.ParseCIDR(token)
+			if err != nil {
+				log.Printf("[ip_whitelist] invalid CIDR %q: %v", token, err)
+				continue
+			}
+			entries = append(entries, ipWhitelistEntry{cidr: ipnet})
+			continue
+		}
+		if ip := net.ParseIP(token); ip != nil {
+			entries = append(entries, ipWhitelistEntry{exact: ip.String()})
+			continue
+		}
+		log.Printf("[ip_whitelist] invalid IP %q (ignored)", token)
+	}
+	return entries
 }
 
 // IPWhitelist blocks requests from IPs not in the whitelist.
 // If ip_whitelist setting is empty, all IPs are allowed.
 func IPWhitelist() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ips := getIPWhitelist()
-		if len(ips) == 0 {
+		entries := getIPWhitelist()
+		if len(entries) == 0 {
 			c.Next()
 			return
 		}
 
 		clientIP := c.ClientIP()
-		for _, ip := range ips {
-			if clientIP == ip {
+		parsed := net.ParseIP(clientIP)
+		for _, e := range entries {
+			if e.cidr != nil {
+				if parsed != nil && e.cidr.Contains(parsed) {
+					c.Next()
+					return
+				}
+				continue
+			}
+			if e.exact == clientIP {
 				c.Next()
 				return
 			}
@@ -153,12 +191,12 @@ func IPWhitelist() gin.HandlerFunc {
 	}
 }
 
-func getIPWhitelist() []string {
+func getIPWhitelist() []ipWhitelistEntry {
 	ipCacheMu.RLock()
 	if time.Now().Before(ipCacheExpiry) {
-		ips := cachedIPs
+		entries := cachedEntries
 		ipCacheMu.RUnlock()
-		return ips
+		return entries
 	}
 	ipCacheMu.RUnlock()
 	return refreshIPCache()

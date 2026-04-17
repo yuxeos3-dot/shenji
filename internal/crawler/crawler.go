@@ -172,12 +172,23 @@ func isPrivateIP(ip net.IP) bool {
 	return false
 }
 
-func ssrfAllowed() bool {
-	// Escape hatch for local development / CI.
+// ssrfAllowed is resolved once at startup: the escape hatch only works in
+// non-release Gin modes, so setting ALLOW_PRIVATE_FETCH=true in production
+// has no effect. This prevents accidental internal-network fetches.
+var ssrfAllowedCached = func() bool {
+	if os.Getenv("GIN_MODE") == "release" {
+		return false
+	}
 	return strings.EqualFold(os.Getenv("ALLOW_PRIVATE_FETCH"), "true")
+}()
+
+func ssrfAllowed() bool {
+	return ssrfAllowedCached
 }
 
 // safeDialContext wraps a base dialer to reject connections to private IPs.
+// It resolves the hostname once and dials the chosen IP directly so that a
+// subsequent DNS flip (DNS rebinding) cannot swap the IP between check and dial.
 func safeDialContext(base *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		if ssrfAllowed() {
@@ -187,18 +198,31 @@ func safeDialContext(base *net.Dialer) func(ctx context.Context, network, addr s
 		if err != nil {
 			return nil, err
 		}
+		// If addr is already a literal IP we can validate and dial directly.
+		if ip := net.ParseIP(host); ip != nil {
+			if isPrivateIP(ip) {
+				return nil, errBlockedHost
+			}
+			return base.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		}
 		ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
 		if err != nil {
 			return nil, err
 		}
+		var chosen net.IP
 		for _, ip := range ips {
 			if isPrivateIP(ip) {
 				return nil, errBlockedHost
 			}
+			if chosen == nil {
+				chosen = ip
+			}
 		}
-		// Re-resolve via dialer (will hit DNS again, but at least we've rejected
-		// private IPs; accept that small race window).
-		return base.DialContext(ctx, network, net.JoinHostPort(host, port))
+		if chosen == nil {
+			return nil, errBlockedHost
+		}
+		// Dial the already-validated IP to close the rebinding race window.
+		return base.DialContext(ctx, network, net.JoinHostPort(chosen.String(), port))
 	}
 }
 

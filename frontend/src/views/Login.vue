@@ -45,6 +45,9 @@ async function handleLogin() {
     ElMessage.success('登录成功')
     router.push('/dashboard')
   } catch (e) {
+    // The axios interceptor surfaces the server-side reason via ElMessage,
+    // but network errors still need to be logged so operators can diagnose.
+    if (!e?.response) console.error('登录失败', e)
   } finally {
     loading.value = false
   }

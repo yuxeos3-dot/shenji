@@ -19,6 +19,9 @@ import (
 
 const gscAPI = "https://www.googleapis.com/webmasters/v3"
 
+// maxOAuthResponseBytes caps provider response size to prevent memory blow-ups.
+const maxOAuthResponseBytes = 1 << 20 // 1 MiB
+
 func GetGSCAuthURL(c *gin.Context) {
 	clientID := db.GetSetting("gsc_client_id")
 	redirectURI := db.GetSetting("gsc_redirect_uri")
@@ -28,16 +31,25 @@ func GetGSCAuthURL(c *gin.Context) {
 		return
 	}
 
+	state, err := newOAuthState(c.GetInt64("user_id"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "state 生成失败"})
+		return
+	}
 	authURL := fmt.Sprintf(
-		"https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=%s&access_type=offline&prompt=consent",
+		"https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=%s&state=%s&access_type=offline&prompt=consent",
 		clientID, redirectURI,
 		url.QueryEscape("https://www.googleapis.com/auth/webmasters.readonly https://www.googleapis.com/auth/analytics.readonly"),
+		url.QueryEscape(state),
 	)
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": authURL}})
 }
 
 func GSCCallback(c *gin.Context) {
+	if !requireValidState(c) {
+		return
+	}
 	code := c.Query("code")
 	if code == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "缺少授权码"})
@@ -50,10 +62,14 @@ func GSCCallback(c *gin.Context) {
 		return
 	}
 
-	db.DB.Exec(
+	if _, err := db.DB.Exec(
 		"INSERT OR REPLACE INTO oauth_tokens (service, access_token, refresh_token, expires_at) VALUES ('gsc', ?, ?, ?)",
 		token.AccessToken, token.RefreshToken, token.ExpiresAt,
-	)
+	); err != nil {
+		log.Printf("[gsc] persist token failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "Token 存储失败"})
+		return
+	}
 
 	c.Redirect(http.StatusFound, "/?oauth=gsc&status=success")
 }
@@ -65,8 +81,13 @@ type OAuthToken struct {
 }
 
 // SaveGSCToken receives the access token obtained by browser-side OAuth (gsc-dashboard.html)
-// and stores it in the DB so server-side GSC sync can use it.
+// and stores it in the DB so server-side GSC sync can use it. Admin-only because
+// the token is global: a non-admin push would hijack sync for every site.
 func SaveGSCToken(c *gin.Context) {
+	if role, _ := c.Get("role"); role != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "需要管理员权限"})
+		return
+	}
 	var req struct {
 		AccessToken string `json:"access_token" binding:"required"`
 		ExpiresIn   int    `json:"expires_in"` // seconds remaining
@@ -79,10 +100,14 @@ func SaveGSCToken(c *gin.Context) {
 	if req.ExpiresIn <= 0 {
 		expiresAt = time.Now().Add(55 * time.Minute) // default 55 min
 	}
-	db.DB.Exec(
+	if _, err := db.DB.Exec(
 		"INSERT OR REPLACE INTO oauth_tokens (service, access_token, refresh_token, expires_at) VALUES ('gsc', ?, '', ?)",
 		req.AccessToken, expiresAt,
-	)
+	); err != nil {
+		log.Printf("[gsc] save token failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "Token 存储失败"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "GSC token 已保存"})
 }
 
@@ -190,7 +215,7 @@ func gscFetch(token, apiURL, method string, body interface{}) (json.RawMessage, 
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxOAuthResponseBytes))
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
@@ -427,5 +452,12 @@ func StoreSiteKeywords(c *gin.Context) {
 		siteID, date, req.Clicks, req.Impressions, req.CTR, req.Position, kw, pg, dv, ct,
 	)
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"site_id": siteID, "keyword_count": len(strings.Split(kw, ","))}})
+	// keyword_count = number of elements in the keywords JSON array, not comma-split.
+	kwCount := 0
+	var kwArr []json.RawMessage
+	if err := json.Unmarshal([]byte(kw), &kwArr); err == nil {
+		kwCount = len(kwArr)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"site_id": siteID, "keyword_count": kwCount}})
 }

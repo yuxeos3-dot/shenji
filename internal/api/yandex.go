@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,14 +26,22 @@ func GetYandexAuthURL(c *gin.Context) {
 		return
 	}
 
+	state, err := newOAuthState(c.GetInt64("user_id"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "state 生成失败"})
+		return
+	}
 	authURL := fmt.Sprintf(
-		"https://oauth.yandex.ru/authorize?response_type=code&client_id=%s",
-		clientID,
+		"https://oauth.yandex.ru/authorize?response_type=code&client_id=%s&state=%s",
+		clientID, url.QueryEscape(state),
 	)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": authURL}})
 }
 
 func YandexCallback(c *gin.Context) {
+	if !requireValidState(c) {
+		return
+	}
 	code := c.Query("code")
 	if code == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "缺少授权码"})
@@ -59,7 +68,7 @@ func YandexCallback(c *gin.Context) {
 		RefreshToken string `json:"refresh_token"`
 		ExpiresIn    int    `json:"expires_in"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOAuthResponseBytes)).Decode(&result); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "解析Token响应失败"})
 		return
 	}
@@ -68,10 +77,14 @@ func YandexCallback(c *gin.Context) {
 		return
 	}
 
-	db.DB.Exec(
+	if _, err := db.DB.Exec(
 		"INSERT OR REPLACE INTO oauth_tokens (service, access_token, refresh_token, expires_at) VALUES ('yandex', ?, ?, ?)",
 		result.AccessToken, result.RefreshToken, time.Now().Add(time.Duration(result.ExpiresIn)*time.Second),
-	)
+	); err != nil {
+		log.Printf("[yandex] persist token failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "Token 存储失败"})
+		return
+	}
 
 	c.Redirect(http.StatusFound, "/?oauth=yandex&status=success")
 }
@@ -94,7 +107,7 @@ func yandexFetch(token, path string) (json.RawMessage, error) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxOAuthResponseBytes))
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
@@ -170,21 +183,37 @@ func getYandexAccessToken() (string, error) {
 	return accessToken, nil
 }
 
-// getYandexUserIDCached gets userID from DB cache first, fetches and saves if missing
+// yandexUserIDCacheTTL bounds how long a cached Yandex user id is trusted.
+// Without a TTL, swapping the Yandex account leaves sync permanently broken.
+const yandexUserIDCacheTTL = 6 * time.Hour
+
+// getYandexUserIDCached gets userID from DB cache first, fetches and saves if missing.
+// The cache is keyed to the current access token so rotating accounts invalidates it,
+// and expires after yandexUserIDCacheTTL regardless.
 func getYandexUserIDCached(token string) (string, error) {
-	// Try cache first
+	tokenFingerprint := ""
+	if len(token) >= 8 {
+		tokenFingerprint = token[:8]
+	}
 	var cached string
 	db.DB.QueryRow("SELECT value FROM settings WHERE key = 'yandex_user_id'").Scan(&cached)
 	if cached != "" {
-		return cached, nil
+		parts := strings.SplitN(cached, "|", 3)
+		// Legacy entries without fingerprint/ts → treat as stale.
+		if len(parts) == 3 && parts[0] == tokenFingerprint {
+			if ts, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+				if time.Since(time.Unix(ts, 0)) < yandexUserIDCacheTTL {
+					return parts[2], nil
+				}
+			}
+		}
 	}
-	// Fetch fresh
 	userID, err := getYandexUserID(token)
 	if err != nil {
 		return "", err
 	}
-	// Save to cache
-	db.DB.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES ('yandex_user_id', ?)", userID)
+	payload := fmt.Sprintf("%s|%d|%s", tokenFingerprint, time.Now().Unix(), userID)
+	db.DB.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES ('yandex_user_id', ?)", payload)
 	return userID, nil
 }
 

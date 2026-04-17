@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 
 	"seo-system/internal/db"
@@ -192,41 +193,46 @@ func DeleteSite(c *gin.Context) {
 		return
 	}
 
-	// Cascade delete all related data in a transaction
+	// Cascade delete all related data in a single transaction — bail out and
+	// rollback on the first error so we never leave orphan rows behind.
 	tx, err := db.DB.Begin()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 		return
 	}
 
-	tx.Exec("DELETE FROM dead_link_results WHERE site_id = ?", id)
-	tx.Exec("DELETE FROM external_links WHERE site_id = ?", id)
-	tx.Exec("DELETE FROM site_pages WHERE site_id = ?", id)
-	tx.Exec("DELETE FROM gsc_data WHERE site_id = ?", id)
-	tx.Exec("DELETE FROM ga_data WHERE site_id = ?", id)
-	tx.Exec("DELETE FROM yandex_data WHERE site_id = ?", id)
-
-	// Delete audit tasks and their results/pages
-	taskRows, qErr := db.DB.Query("SELECT id FROM audit_tasks WHERE site_id = ?", id)
-	if qErr == nil {
-		var taskIDs []int64
-		for taskRows.Next() {
-			var tid int64
-			if taskRows.Scan(&tid) == nil {
-				taskIDs = append(taskIDs, tid)
-			}
+	execInTx := func(query string, args ...interface{}) error {
+		if _, err := tx.Exec(query, args...); err != nil {
+			return fmt.Errorf("%s: %w", query, err)
 		}
-		taskRows.Close()
-		for _, tid := range taskIDs {
-			tx.Exec("DELETE FROM audit_results WHERE task_id = ?", tid)
-			tx.Exec("DELETE FROM audit_pages WHERE task_id = ?", tid)
-		}
-		tx.Exec("DELETE FROM audit_tasks WHERE site_id = ?", id)
+		return nil
 	}
 
-	tx.Exec("DELETE FROM sites WHERE id = ?", id)
+	steps := []struct {
+		query string
+		args  []interface{}
+	}{
+		{"DELETE FROM dead_link_results WHERE site_id = ?", []interface{}{id}},
+		{"DELETE FROM external_links WHERE site_id = ?", []interface{}{id}},
+		{"DELETE FROM site_pages WHERE site_id = ?", []interface{}{id}},
+		{"DELETE FROM gsc_data WHERE site_id = ?", []interface{}{id}},
+		{"DELETE FROM ga_data WHERE site_id = ?", []interface{}{id}},
+		{"DELETE FROM yandex_data WHERE site_id = ?", []interface{}{id}},
+		{"DELETE FROM audit_results WHERE task_id IN (SELECT id FROM audit_tasks WHERE site_id = ?)", []interface{}{id}},
+		{"DELETE FROM audit_pages   WHERE task_id IN (SELECT id FROM audit_tasks WHERE site_id = ?)", []interface{}{id}},
+		{"DELETE FROM audit_tasks WHERE site_id = ?", []interface{}{id}},
+		{"DELETE FROM sites WHERE id = ?", []interface{}{id}},
+	}
+	for _, s := range steps {
+		if err := execInTx(s.query, s.args...); err != nil {
+			_ = tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败: " + err.Error()})
+			return
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
+		_ = tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 		return
 	}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -23,15 +24,23 @@ func GetGAAuthURL(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "Google OAuth未配置"})
 		return
 	}
+	state, err := newOAuthState(c.GetInt64("user_id"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "state 生成失败"})
+		return
+	}
 	scope := "https://www.googleapis.com/auth/analytics.readonly"
 	authURL := fmt.Sprintf(
-		"https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=%s&access_type=offline&prompt=consent",
-		clientID, redirectURI, scope,
+		"https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=%s&state=%s&access_type=offline&prompt=consent",
+		clientID, redirectURI, scope, url.QueryEscape(state),
 	)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"url": authURL}})
 }
 
 func GACallback(c *gin.Context) {
+	if !requireValidState(c) {
+		return
+	}
 	code := c.Query("code")
 	if code == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "缺少授权码"})
@@ -58,14 +67,18 @@ func GACallback(c *gin.Context) {
 		RefreshToken string `json:"refresh_token"`
 		ExpiresIn    int    `json:"expires_in"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOAuthResponseBytes)).Decode(&result); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "解析Token响应失败"})
 		return
 	}
-	db.DB.Exec(
+	if _, err := db.DB.Exec(
 		"INSERT OR REPLACE INTO oauth_tokens (service, access_token, refresh_token, expires_at) VALUES ('ga', ?, ?, ?)",
 		result.AccessToken, result.RefreshToken, time.Now().Add(time.Duration(result.ExpiresIn)*time.Second),
-	)
+	); err != nil {
+		log.Printf("[ga] persist token failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "Token 存储失败"})
+		return
+	}
 	c.Redirect(http.StatusFound, "/?oauth=ga&status=success")
 }
 
@@ -123,7 +136,7 @@ func ga4Fetch(token, propertyID string, body map[string]interface{}) (json.RawMe
 		return nil, err
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxOAuthResponseBytes))
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("GA4 API HTTP %d: %s", resp.StatusCode, string(respBody))
 	}

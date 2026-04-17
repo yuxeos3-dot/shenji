@@ -23,6 +23,10 @@ instance.interceptors.request.use(config => {
 
 instance.interceptors.response.use(
   response => {
+    // Binary downloads bypass the JSON envelope check.
+    if (response.config.responseType === 'blob' || response.config.responseType === 'arraybuffer') {
+      return response as any
+    }
     const data = response.data as ApiResponse
     if (data.code !== 0) {
       ElMessage.error(data.error || '请求失败')
@@ -69,6 +73,14 @@ const api = {
   getAudit: (taskId: Id) => instance.get(`/v1/audits/${taskId}`),
   getAuditPages: (taskId: Id) => instance.get(`/v1/audits/${taskId}/pages`),
   downloadAuditReport: (taskId: Id): string => `/api/v1/audits/${taskId}/report/download`,
+  // fetchAuditReportBlob reuses the axios instance so the Authorization header
+  // and 401-redirect logic from the interceptor apply.
+  fetchAuditReportBlob: async (taskId: Id): Promise<{ blob: Blob; filename: string }> => {
+    const resp: any = await instance.get(`/v1/audits/${taskId}/report/download`, { responseType: 'blob' })
+    const disp = resp.headers?.['content-disposition'] || ''
+    const match = /filename="([^"]+)"/.exec(disp)
+    return { blob: resp.data as Blob, filename: match ? match[1] : `SEO审计报告_${taskId}.docx` }
+  },
 
   // Dead Link Check
   getDeadLinks: (siteId: Id, params?: Record<string, any>) => instance.get(`/v1/sites/${siteId}/deadlinks`, { params }),

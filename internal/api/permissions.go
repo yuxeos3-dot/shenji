@@ -113,7 +113,23 @@ func GetUserPermissions(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "data": list})
 }
 
-// SaveUserPermissions saves the checked permissions for a user.
+// knownPermCodes returns a flat set of every permission code in PermissionTree.
+func knownPermCodes() map[string]struct{} {
+	codes := map[string]struct{}{}
+	var walk func([]PermNode)
+	walk = func(ns []PermNode) {
+		for _, n := range ns {
+			codes[n.Code] = struct{}{}
+			walk(n.Children)
+		}
+	}
+	walk(PermissionTree)
+	return codes
+}
+
+// SaveUserPermissions saves the checked permissions for a user. Every submitted
+// permission must appear in PermissionTree, otherwise we reject the request to
+// prevent privilege escalation via arbitrary codes.
 func SaveUserPermissions(c *gin.Context) {
 	userID := c.Param("id")
 	var req struct {
@@ -123,7 +139,21 @@ func SaveUserPermissions(c *gin.Context) {
 		c.JSON(400, gin.H{"code": -1, "error": "参数错误"})
 		return
 	}
-	js, _ := json.Marshal(req.Permissions)
+	known := knownPermCodes()
+	seen := map[string]bool{}
+	cleaned := make([]string, 0, len(req.Permissions))
+	for _, p := range req.Permissions {
+		if _, ok := known[p]; !ok {
+			c.JSON(400, gin.H{"code": -1, "error": "未知权限: " + p})
+			return
+		}
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		cleaned = append(cleaned, p)
+	}
+	js, _ := json.Marshal(cleaned)
 	if _, err := db.DB.Exec("UPDATE users SET permissions=? WHERE id=?", string(js), userID); err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "保存失败"})
 		return

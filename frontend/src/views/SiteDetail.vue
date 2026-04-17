@@ -80,24 +80,40 @@ const intervalHours = ref(24)
 const dailyHour = ref(9)
 const savingSched = ref(false)
 
+const pollTimer = ref(null)
+
+function clearPoll() {
+  if (pollTimer.value) {
+    clearTimeout(pollTimer.value)
+    pollTimer.value = null
+  }
+}
+
 async function loadData() {
+  clearPoll()
   try {
-    const [siteRes, auditsRes, pagesRes] = await Promise.all([
+    const [siteRes, auditsRes, pagesRes] = await Promise.allSettled([
       api.getSite(route.params.id),
       api.listAudits(route.params.id),
-      api.listSitePages(route.params.id).catch(() => ({ data: [] })),
+      api.listSitePages(route.params.id),
     ])
-    site.value = siteRes.data
-    audits.value = auditsRes.data.map(a => ({ ...a, downloading: false }))
-    sitePages.value = (pagesRes.data || []).map(p => ({ ...p, fetching: false }))
-    const s = siteRes.data
-    schedEnabled.value = s.audit_schedule_enabled === 'true'
-    if (s.audit_interval_hours > 0) {
-      schedMode.value = 'interval'
-      intervalHours.value = s.audit_interval_hours
-    } else {
-      schedMode.value = 'daily'
-      dailyHour.value = s.audit_daily_hour >= 0 ? s.audit_daily_hour : 9
+    if (siteRes.status === 'fulfilled') {
+      site.value = siteRes.value.data
+      const s = siteRes.value.data
+      schedEnabled.value = s.audit_schedule_enabled === 'true'
+      if (s.audit_interval_hours > 0) {
+        schedMode.value = 'interval'
+        intervalHours.value = s.audit_interval_hours
+      } else {
+        schedMode.value = 'daily'
+        dailyHour.value = s.audit_daily_hour >= 0 ? s.audit_daily_hour : 9
+      }
+    }
+    if (auditsRes.status === 'fulfilled') {
+      audits.value = auditsRes.value.data.map(a => ({ ...a, downloading: false }))
+    }
+    if (pagesRes.status === 'fulfilled') {
+      sitePages.value = (pagesRes.value.data || []).map(p => ({ ...p, fetching: false }))
     }
   } catch (e) { console.error('加载站点数据失败', e) }
 
@@ -105,30 +121,23 @@ async function loadData() {
   if (hasRunning) pollTimer.value = setTimeout(loadData, 3000)
 }
 
-const pollTimer = ref(null)
-
 onMounted(loadData)
-onUnmounted(() => { if (pollTimer.value) clearTimeout(pollTimer.value) })
-watch(() => route.params.id, () => { if (route.params.id) { if (pollTimer.value) clearTimeout(pollTimer.value); loadData() } })
+onUnmounted(clearPoll)
+watch(() => route.params.id, (id) => { if (id) { clearPoll(); loadData() } })
 
 async function downloadReport(taskId) {
   const audit = audits.value.find(a => a.id === taskId)
   if (audit) audit.downloading = true
   try {
-    const token = localStorage.getItem('token')
-    const resp = await fetch(`/api/v1/audits/${taskId}/report/download`, { headers: { Authorization: `Bearer ${token}` } })
-    if (!resp.ok) { const data = await resp.json(); ElMessage.error(data.error || '下载失败'); return }
-    const blob = await resp.blob()
+    const { blob, filename } = await api.fetchAuditReportBlob(taskId)
     const url = URL.createObjectURL(blob)
     const el = document.createElement('a')
     el.href = url
-    const disp = resp.headers.get('Content-Disposition') || ''
-    const match = disp.match(/filename="(.+)"/)
-    el.download = match ? match[1] : `SEO审计报告_${taskId}.docx`
+    el.download = filename
     document.body.appendChild(el); el.click(); document.body.removeChild(el)
     URL.revokeObjectURL(url)
     ElMessage.success('报告下载成功')
-  } catch (e) { ElMessage.error('下载失败：' + e.message) }
+  } catch (e) { ElMessage.error('下载失败：' + (e?.message || e)) }
   finally { if (audit) audit.downloading = false }
 }
 

@@ -68,26 +68,24 @@ async function copyRaw() {
 async function downloadReport() {
   downloading.value = true
   try {
-    const token = localStorage.getItem('token')
-    const resp = await fetch(`/api/v1/audits/${route.params.taskId}/report/download`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    if (!resp.ok) { const d = await resp.json(); ElMessage.error(d.error || '下载失败'); return }
-    const blob = await resp.blob()
+    const { blob, filename } = await api.fetchAuditReportBlob(route.params.taskId)
     const url = URL.createObjectURL(blob)
     const el = document.createElement('a')
     el.href = url
-    const disp = resp.headers.get('Content-Disposition') || ''
-    const match = disp.match(/filename="(.+)"/)
-    el.download = match ? match[1] : `SEO审计报告_${route.params.taskId}.docx`
+    el.download = filename
     document.body.appendChild(el); el.click(); document.body.removeChild(el)
     URL.revokeObjectURL(url)
     ElMessage.success('报告下载成功')
-  } catch (e) { ElMessage.error('下载失败：' + e.message) }
+  } catch (e) { ElMessage.error('下载失败：' + (e?.message || e)) }
   finally { downloading.value = false }
 }
 
+function clearPoll() {
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = null }
+}
+
 async function loadData() {
+  clearPoll()
   try {
     const res = await api.getAudit(route.params.taskId)
     task.value = res.data.task
@@ -108,9 +106,12 @@ async function loadData() {
         const parsed = JSON.parse(raw)
         if (parsed.chapters && parsed.chapters.length > 0) {
           v6Report.value = parsed
+        } else {
+          ElMessage.warning('审计报告格式异常：缺少章节数据')
         }
       } catch (e) {
         console.warn('v6_report parse error:', e)
+        ElMessage.warning('审计报告解析失败，请重新生成')
       }
     }
     if (task.value.status === 'running' || task.value.status === 'pending') {
@@ -120,7 +121,7 @@ async function loadData() {
 }
 
 onMounted(loadData)
-onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
+onUnmounted(clearPoll)
 </script>
 
 <style scoped>

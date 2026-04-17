@@ -304,16 +304,43 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 
 func DeleteAudit(c *gin.Context) {
 	taskID := c.Param("task_id")
-	// Don't allow deleting running tasks
+	// All checks + deletes run inside a single BEGIN IMMEDIATE transaction so
+	// a concurrent writer can't flip the task to running between the read and
+	// the delete.
+	tx, err := db.DB.Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
+		return
+	}
+
 	var status string
-	db.DB.QueryRow("SELECT status FROM audit_tasks WHERE id = ?", taskID).Scan(&status)
+	if err := tx.QueryRow("SELECT status FROM audit_tasks WHERE id = ?", taskID).Scan(&status); err != nil {
+		_ = tx.Rollback()
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "任务不存在"})
+		return
+	}
 	if status == "running" {
+		_ = tx.Rollback()
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "进行中的任务不能删除"})
 		return
 	}
-	db.DB.Exec("DELETE FROM audit_results WHERE task_id = ?", taskID)
-	db.DB.Exec("DELETE FROM audit_pages WHERE task_id = ?", taskID)
-	db.DB.Exec("DELETE FROM audit_tasks WHERE id = ?", taskID)
+
+	for _, q := range []string{
+		"DELETE FROM audit_results WHERE task_id = ?",
+		"DELETE FROM audit_pages   WHERE task_id = ?",
+		"DELETE FROM audit_tasks   WHERE id = ?",
+	} {
+		if _, err := tx.Exec(q, taskID); err != nil {
+			_ = tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "删除成功"})
 }
 
