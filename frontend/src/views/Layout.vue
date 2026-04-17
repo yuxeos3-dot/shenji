@@ -5,22 +5,38 @@
         <div class="logo-main">☀ {{ siteConfig.title }}</div>
         <div class="logo-sub">管理后台 · <span class="logo-ver">{{ appVersion }}</span></div>
       </div>
-      <ul>
-        <li><router-link to="/dashboard" :class="{active: $route.path==='/dashboard'}"><span class="nav-icon">📊</span>仪表盘</router-link></li>
-        <li><router-link to="/sites" :class="{active: $route.path.startsWith('/sites')}"><span class="nav-icon">🌐</span>站点管理</router-link></li>
-        <li><router-link to="/data-management" :class="{active: $route.path==='/data-management'}"><span class="nav-icon">📡</span>数据管理</router-link></li>
-        <li><router-link to="/spider-management" :class="{active: $route.path==='/spider-management'}"><span class="nav-icon">🕷️</span>蜘蛛管理</router-link></li>
-        <li><router-link to="/geo-management" :class="{active: $route.path==='/geo-management'}"><span class="nav-icon">🤖</span>GEO管理</router-link></li>
-        <li><router-link to="/image-management" :class="{active: $route.path==='/image-management'}"><span class="nav-icon">🎨</span>图片管理</router-link></li>
-        <li><router-link to="/video-management" :class="{active: $route.path==='/video-management'}"><span class="nav-icon">🎬</span>视频管理</router-link></li>
-        <li><router-link to="/dead-links" :class="{active: $route.path==='/dead-links'}"><span class="nav-icon">💀</span>死链管理</router-link></li>
-        <li><router-link to="/content-rewrite" :class="{active: $route.path==='/content-rewrite'}"><span class="nav-icon">✍️</span>二创管理</router-link></li>
-        <li><router-link to="/external-links" :class="{active: $route.path==='/external-links'}"><span class="nav-icon">🔗</span>外链管理</router-link></li>
-        <li><router-link to="/coordination" :class="{active: $route.path.startsWith('/coordination')}"><span class="nav-icon">🤝</span>协同管理</router-link></li>
-        <li><router-link to="/reports" :class="{active: $route.path.startsWith('/reports')}"><span class="nav-icon">📋</span>汇报管理</router-link></li>
-        <li v-if="userStore.isAdmin()"><router-link to="/users" :class="{active: $route.path==='/users'}"><span class="nav-icon">👥</span>用户管理</router-link></li>
-        <li v-if="userStore.isAdmin()"><router-link to="/cache-management" :class="{active: $route.path==='/cache-management'}"><span class="nav-icon">💾</span>缓存管理</router-link></li>
-        <li v-if="userStore.isAdmin()"><router-link to="/settings" :class="{active: $route.path==='/settings'}"><span class="nav-icon">⚙️</span>系统管理</router-link></li>
+      <ul class="nav-list">
+        <!-- Top-level single items go here (no group header). -->
+        <template v-for="item in flatTop" :key="item.path">
+          <li>
+            <router-link
+              :to="item.path"
+              :class="{active: isActive(item)}"
+            >
+              <span class="nav-icon">{{ item.icon }}</span>{{ item.label }}
+            </router-link>
+          </li>
+        </template>
+
+        <!-- Groups -->
+        <template v-for="g in visibleGroups" :key="g.key">
+          <li class="nav-group-header" @click="toggleGroup(g.key)">
+            <span class="grp-title">
+              <span class="grp-icon">{{ g.icon }}</span>{{ g.label }}
+            </span>
+            <span class="grp-chev" :class="{ open: !isCollapsed(g.key) }">▸</span>
+          </li>
+          <ul v-show="!isCollapsed(g.key)" class="nav-sub">
+            <li v-for="item in g.items" :key="item.path">
+              <router-link
+                :to="item.path"
+                :class="{active: isActive(item)}"
+              >
+                <span class="nav-icon">{{ item.icon }}</span>{{ item.label }}
+              </router-link>
+            </li>
+          </ul>
+        </template>
       </ul>
       <div class="sidebar-footer">
         <a href="#" @click.prevent="showPasswordDialog=true">🔑 修改密码</a>
@@ -76,6 +92,115 @@ const siteConfig = useSiteConfigStore()
 const appVersion = APP_VERSION
 const showPasswordDialog = ref(false)
 const pwdForm = ref({ old_password: '', new_password: '' })
+
+// ─── Sidebar navigation structure ────────────────────────────────────────
+//
+// Single source of truth. To reshape the menu:
+//   - move items between groups
+//   - rename a group's `label`
+//   - add/remove groups
+//   - move an item up to `topItems` to remove it from any group
+//
+// An item is active when the current route.path matches its path or
+// (for items with children) starts with it — see isActive() below.
+//
+// Groups are collapsible. Collapse state persists in localStorage so a
+// collapsed group stays collapsed across reloads. Groups whose items
+// contain the current route auto-expand on first visit.
+
+const topItems = [
+  { path: '/dashboard', icon: '📊', label: '仪表盘' },
+]
+
+const groups = [
+  {
+    key: 'sites-data', icon: '🌐', label: '站点与数据',
+    items: [
+      { path: '/sites',             icon: '🌐', label: '站点管理',   activePrefix: '/sites' },
+      { path: '/data-management',   icon: '📡', label: '数据管理' },
+      { path: '/spider-management', icon: '🕷️', label: '蜘蛛管理' },
+      { path: '/dead-links',        icon: '💀', label: '死链管理' },
+    ],
+  },
+  {
+    key: 'content', icon: '🎨', label: '内容生产',
+    items: [
+      { path: '/geo-management',   icon: '🤖', label: 'GEO管理' },
+      { path: '/image-management', icon: '🎨', label: '图片管理' },
+      { path: '/video-management', icon: '🎬', label: '视频管理' },
+      { path: '/content-rewrite',  icon: '✍️', label: '二创管理' },
+    ],
+  },
+  {
+    key: 'ops', icon: '🚀', label: '运营与协作',
+    items: [
+      { path: '/external-links', icon: '🔗', label: '外链管理' },
+      { path: '/coordination',   icon: '🤝', label: '协同管理', activePrefix: '/coordination' },
+      { path: '/reports',        icon: '📋', label: '汇报管理', activePrefix: '/reports' },
+    ],
+  },
+  {
+    key: 'system', icon: '⚙️', label: '系统', adminOnly: true,
+    items: [
+      { path: '/users',            icon: '👥', label: '用户管理' },
+      { path: '/cache-management', icon: '💾', label: '缓存管理' },
+      { path: '/settings',         icon: '⚙️', label: '系统设置' },
+    ],
+  },
+]
+
+const flatTop = computed(() => topItems)
+
+// Filter out admin-only groups for non-admins. Still a group (for
+// structural consistency) — admins see all groups.
+const visibleGroups = computed(() =>
+  groups.filter(g => !g.adminOnly || userStore.isAdmin()))
+
+// Collapse state: keyed by group key. Default = expanded. Persisted
+// in localStorage under 'nav-collapsed'.
+const COLLAPSE_KEY = 'nav-collapsed'
+const collapsed = ref(new Set())
+try {
+  const saved = JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '[]')
+  if (Array.isArray(saved)) collapsed.value = new Set(saved)
+} catch { /* corrupt entry, ignore */ }
+
+function isCollapsed(key) { return collapsed.value.has(key) }
+function toggleGroup(key) {
+  // Mutate via set-replacement so Vue reactivity fires.
+  const next = new Set(collapsed.value)
+  if (next.has(key)) next.delete(key); else next.add(key)
+  collapsed.value = next
+  try {
+    localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...next]))
+  } catch { /* quota / privacy mode, lose state silently */ }
+}
+
+// Auto-expand the group containing the current route. Runs on mount and
+// whenever the route changes. If the user had explicitly collapsed that
+// group we don't override them (collapsed set is sticky); but on first
+// load, if they land directly on a route inside a collapsed group, we
+// pop it open so they can see where they are.
+function ensureCurrentGroupOpen() {
+  const cur = route.path
+  for (const g of groups) {
+    const match = g.items.some(it =>
+      cur === it.path || (it.activePrefix && cur.startsWith(it.activePrefix)))
+    if (match && collapsed.value.has(g.key)) {
+      const next = new Set(collapsed.value)
+      next.delete(g.key)
+      collapsed.value = next
+      try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...next])) } catch {}
+      return
+    }
+  }
+}
+watch(() => route.path, ensureCurrentGroupOpen, { immediate: true })
+
+function isActive(item) {
+  if (item.activePrefix) return route.path.startsWith(item.activePrefix)
+  return route.path === item.path
+}
 
 
 const pageTitles = {
@@ -184,6 +309,7 @@ async function changePassword() {
   font-weight: 700;
 }
 .sidebar ul { list-style: none; padding: 10px; flex: 1; }
+.sidebar ul.nav-list { flex: 1; }
 .sidebar ul li a {
   display: flex;
   align-items: center;
@@ -217,6 +343,50 @@ async function changePassword() {
 }
 .sidebar ul li a.active .nav-icon { opacity: 1; }
 .sidebar ul li a.active:hover { transform: none; }
+
+/* Group headers: click to collapse/expand */
+.sidebar .nav-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 12px 6px;
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--ink-hint);
+  cursor: pointer;
+  user-select: none;
+  border-radius: 6px;
+  transition: color .15s, background .15s;
+}
+.sidebar .nav-group-header:hover {
+  color: var(--sun-deep);
+  background: var(--sun-light);
+}
+.sidebar .nav-group-header .grp-title {
+  display: flex; align-items: center; gap: 7px;
+}
+.sidebar .nav-group-header .grp-icon {
+  font-size: 13px; opacity: .8;
+}
+.sidebar .nav-group-header .grp-chev {
+  font-size: 10px;
+  color: var(--ink-hint);
+  transition: transform .18s;
+  display: inline-block;
+}
+.sidebar .nav-group-header .grp-chev.open {
+  transform: rotate(90deg);
+}
+/* Sub-list: no extra padding beyond the parent list's. Items sit
+   flush with top-level items so indent depth feels consistent. */
+.sidebar ul.nav-sub {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
 
 .sidebar-footer {
   padding: 14px 12px;
