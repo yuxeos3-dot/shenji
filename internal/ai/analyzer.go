@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,7 +19,7 @@ import (
 
 type V6Issue struct {
 	ID            int    `json:"id"`
-	Severity      string `json:"severity"`       // 致命/严重/中等/低
+	Severity      string `json:"severity"` // 致命/严重/中等/低
 	Module        string `json:"module"`
 	Title         string `json:"title"`
 	Scope         string `json:"scope"`
@@ -429,6 +430,121 @@ func BuildTechPromptBatch(batch TechBatch, domain string, sitePages []SitePageFo
 // CallAIChapters calls the AI with a batched prompt and returns just the
 // chapters array (no top-level stats). This is the preferred form for the
 // split-call architecture.
+// ─── Transient-error retry for AI HTTP calls ────────────────────────────────
+//
+// Upstream AI providers (and intermediate routers like ai.router.team)
+// occasionally return 502/503 "upstream_error" blips during Anthropic
+// capacity issues. Without retry, a single unlucky second can fail an
+// entire audit — and users re-trigger the whole thing manually. We saw
+// this cost a full audit run in production.
+//
+// Strategy: exponential backoff with jitter, 3 attempts total, retrying
+// ONLY on transient errors (5xx, connection reset, timeout, context
+// deadlines). 4xx errors (bad key, model not found, request too large)
+// are NOT retried — they'll just fail repeatedly.
+//
+// The total worst-case wait is ~15s (2s + 5s + 8s) before giving up, which
+// is well within the enclosing audit timeouts.
+
+type aiHTTPResponse struct {
+	status int
+	body   []byte
+}
+
+// postAIWithRetry does a POST with JSON body to the given endpoint and
+// retries on transient failures. The httpClient's timeout bounds ONE
+// attempt — the retry loop sits outside that.
+func postAIWithRetry(httpClient *http.Client, apiURL, apiKey string, body []byte, label string) (*aiHTTPResponse, error) {
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		req, err := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			if attempt < maxAttempts && isTransientHTTPErr(err) {
+				wait := retryDelay(attempt)
+				log.Printf("[%s] attempt %d/%d network error: %v; retrying in %v", label, attempt, maxAttempts, err, wait)
+				time.Sleep(wait)
+				continue
+			}
+			return nil, fmt.Errorf("AI 请求失败: %w", err)
+		}
+		data, rerr := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
+		resp.Body.Close()
+		if rerr != nil {
+			lastErr = rerr
+			if attempt < maxAttempts {
+				wait := retryDelay(attempt)
+				log.Printf("[%s] attempt %d/%d read error: %v; retrying in %v", label, attempt, maxAttempts, rerr, wait)
+				time.Sleep(wait)
+				continue
+			}
+			return nil, rerr
+		}
+
+		// Retry on 5xx (including the specific "upstream_error" that
+		// ai.router.team returns when Anthropic is hiccupping) and 429
+		// (rate-limited). Don't retry 4xx — those reflect bad input.
+		if (resp.StatusCode >= 500 || resp.StatusCode == 429) && attempt < maxAttempts {
+			snippet := string(data)
+			if len(snippet) > 300 {
+				snippet = snippet[:300]
+			}
+			wait := retryDelay(attempt)
+			log.Printf("[%s] attempt %d/%d HTTP %d: %s; retrying in %v", label, attempt, maxAttempts, resp.StatusCode, snippet, wait)
+			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, snippet)
+			time.Sleep(wait)
+			continue
+		}
+
+		return &aiHTTPResponse{status: resp.StatusCode, body: data}, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("AI 请求失败：已重试 %d 次", maxAttempts)
+}
+
+// isTransientHTTPErr recognizes net errors that warrant a retry (connection
+// reset, timeout, EOF during response reading). io.ErrUnexpectedEOF is
+// the most common one when an upstream drops mid-response.
+func isTransientHTTPErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	// Cover the practical set: connection reset, timeout, EOF, broken pipe,
+	// context deadline (client-side timeout). We don't import net.Error
+	// interface checks because wrapped errors work easier with string match.
+	return strings.Contains(s, "connection reset") ||
+		strings.Contains(s, "connection refused") ||
+		strings.Contains(s, "timeout") ||
+		strings.Contains(s, "EOF") ||
+		strings.Contains(s, "broken pipe") ||
+		strings.Contains(s, "deadline exceeded") ||
+		strings.Contains(s, "i/o timeout")
+}
+
+// retryDelay returns a conservative backoff: 2s, 5s, 8s.
+// We don't randomize — multiple parallel audits are rare on this system.
+func retryDelay(attempt int) time.Duration {
+	switch attempt {
+	case 1:
+		return 2 * time.Second
+	case 2:
+		return 5 * time.Second
+	default:
+		return 8 * time.Second
+	}
+}
+
 func CallAIChapters(prompt string) ([]V6Chapter, string, string, error) {
 	apiURL := db.GetSetting("ai_api_url")
 	apiKey := db.GetSetting("ai_api_key")
@@ -453,34 +569,28 @@ func CallAIChapters(prompt string) ([]V6Chapter, string, string, error) {
 		"temperature": 0.2,
 	}
 	jsonBody, _ := json.Marshal(reqBody)
-	req, _ := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(jsonBody))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	client := &http.Client{Timeout: 300 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, "", model, fmt.Errorf("AI 请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
+	result, err := postAIWithRetry(client, apiURL, apiKey, jsonBody, "ai-chapters")
 	if err != nil {
 		return nil, "", model, err
 	}
-	if resp.StatusCode != 200 {
-		snippet := string(body)
+	if result.status != 200 {
+		snippet := string(result.body)
 		if len(snippet) > 2000 {
 			snippet = snippet[:2000]
 		}
-		return nil, "", model, fmt.Errorf("AI 错误 HTTP %d: %s", resp.StatusCode, snippet)
+		return nil, "", model, fmt.Errorf("AI 错误 HTTP %d: %s", result.status, snippet)
 	}
 	var apiResp struct {
 		Choices []struct {
-			Message      struct{ Content string `json:"content"` } `json:"message"`
-			FinishReason string                                    `json:"finish_reason"`
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
-	if err := json.Unmarshal(body, &apiResp); err != nil {
+	if err := json.Unmarshal(result.body, &apiResp); err != nil {
 		return nil, "", model, err
 	}
 	if len(apiResp.Choices) == 0 {
@@ -1326,30 +1436,24 @@ func CallAIStrategy(prompt string) (*V6Chapter, string, error) {
 		"temperature": 0.3,
 	}
 	jsonBody, _ := json.Marshal(reqBody)
-	req, _ := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(jsonBody))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	client := &http.Client{Timeout: 240 * time.Second}
-	resp, err := client.Do(req)
+	result, err := postAIWithRetry(client, apiURL, apiKey, jsonBody, "ai-strategy")
 	if err != nil {
 		return nil, model, fmt.Errorf("策略 AI 请求失败: %w", err)
 	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
-	if err != nil {
-		return nil, model, err
-	}
-	if resp.StatusCode != 200 {
-		return nil, model, fmt.Errorf("策略 AI 错误 HTTP %d", resp.StatusCode)
+	if result.status != 200 {
+		return nil, model, fmt.Errorf("策略 AI 错误 HTTP %d", result.status)
 	}
 	var apiResp struct {
 		Choices []struct {
-			Message      struct{ Content string `json:"content"` } `json:"message"`
-			FinishReason string                                    `json:"finish_reason"`
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
-	if err := json.Unmarshal(body, &apiResp); err != nil {
+	if err := json.Unmarshal(result.body, &apiResp); err != nil {
 		return nil, model, err
 	}
 	if len(apiResp.Choices) == 0 {
