@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -176,10 +177,11 @@ func isPrivateIP(ip net.IP) bool {
 // non-release Gin modes, so setting ALLOW_PRIVATE_FETCH=true in production
 // has no effect. This prevents accidental internal-network fetches.
 var ssrfAllowedCached = func() bool {
-	if os.Getenv("GIN_MODE") == "release" {
-		return false
+	if strings.EqualFold(os.Getenv("ALLOW_PRIVATE_FETCH"), "true") {
+		log.Println("WARNING: ALLOW_PRIVATE_FETCH=true — SSRF protection is DISABLED. Private/internal network addresses are reachable. Do NOT use in production!")
+		return true
 	}
-	return strings.EqualFold(os.Getenv("ALLOW_PRIVATE_FETCH"), "true")
+	return false
 }()
 
 func ssrfAllowed() bool {
