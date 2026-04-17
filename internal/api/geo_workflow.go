@@ -54,19 +54,30 @@ type geoWorkflowJob struct {
 	WordCount      int    `json:"word_count"`
 	WritingAngle   string `json:"writing_angle"`
 	KnowledgeID    int64  `json:"knowledge_id"`
-	Status         string `json:"status"`
-	CurrentStep    int    `json:"current_step"`
-	StepLabel      string `json:"step_label"`
-	Draft          string `json:"draft,omitempty"`
-	FinalContent   string `json:"final_content,omitempty"`
-	FinalMetaTitle string `json:"final_meta_title,omitempty"`
-	FinalMetaDesc  string `json:"final_meta_desc,omitempty"`
-	FinalFAQ       string `json:"final_faq,omitempty"`
-	AIModel        string `json:"ai_model,omitempty"`
-	ErrorMsg       string `json:"error_msg,omitempty"`
-	ArticleID      int64  `json:"article_id"`
-	CreatedAt      string `json:"created_at"`
-	UpdatedAt      string `json:"updated_at"`
+	// Wizard-supplied fields (nullable-with-default columns added in
+	// the geo_workflow_jobs migration). All strings so the frontend
+	// can treat them uniformly.
+	DetailType        string `json:"detail_type,omitempty"`
+	Language          string `json:"language,omitempty"`
+	Style             string `json:"style,omitempty"`
+	OutputFormat      string `json:"output_format,omitempty"`
+	ParagraphStruct   string `json:"paragraph_struct,omitempty"`
+	ExtraRequirements string `json:"extra_requirements,omitempty"`
+	ReferenceURL      string `json:"reference_url,omitempty"`
+	CustomPrompt      string `json:"custom_prompt,omitempty"`
+	Status            string `json:"status"`
+	CurrentStep       int    `json:"current_step"`
+	StepLabel         string `json:"step_label"`
+	Draft             string `json:"draft,omitempty"`
+	FinalContent      string `json:"final_content,omitempty"`
+	FinalMetaTitle    string `json:"final_meta_title,omitempty"`
+	FinalMetaDesc     string `json:"final_meta_desc,omitempty"`
+	FinalFAQ          string `json:"final_faq,omitempty"`
+	AIModel           string `json:"ai_model,omitempty"`
+	ErrorMsg          string `json:"error_msg,omitempty"`
+	ArticleID         int64  `json:"article_id"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -78,6 +89,10 @@ func loadGeoJob(jobID int64) (*geoWorkflowJob, error) {
 		SELECT id, user_id, site_id, COALESCE(content_type,'geo'), COALESCE(title_id,0),
 		       keyword, COALESCE(title_text,''), COALESCE(word_count,1500),
 		       COALESCE(writing_angle,''), COALESCE(knowledge_id,0),
+		       COALESCE(detail_type,'article'), COALESCE(language,'zh'),
+		       COALESCE(style,'professional'), COALESCE(output_format,'markdown'),
+		       COALESCE(paragraph_struct,''), COALESCE(extra_requirements,''),
+		       COALESCE(reference_url,''), COALESCE(custom_prompt,''),
 		       status, COALESCE(current_step,0), COALESCE(step_label,''),
 		       COALESCE(draft,''),
 		       COALESCE(final_content,''), COALESCE(final_meta_title,''),
@@ -87,6 +102,8 @@ func loadGeoJob(jobID int64) (*geoWorkflowJob, error) {
 		FROM geo_workflow_jobs WHERE id = ?`, jobID).Scan(
 		&j.ID, &j.UserID, &j.SiteID, &j.ContentType, &j.TitleID,
 		&j.Keyword, &j.TitleText, &j.WordCount, &j.WritingAngle, &j.KnowledgeID,
+		&j.DetailType, &j.Language, &j.Style, &j.OutputFormat,
+		&j.ParagraphStruct, &j.ExtraRequirements, &j.ReferenceURL, &j.CustomPrompt,
 		&j.Status, &j.CurrentStep, &j.StepLabel,
 		&j.Draft,
 		&j.FinalContent, &j.FinalMetaTitle, &j.FinalMetaDesc, &j.FinalFAQ,
@@ -154,6 +171,15 @@ type StartKeywordWorkflowRequest struct {
 	WordCount    int    `json:"word_count"`
 	WritingAngle string `json:"writing_angle"` // "评测" / "攻略" / "对比" / ""
 	KnowledgeID  int64  `json:"knowledge_id"`
+	// ─── Wizard fields (step 1 基础信息 / step 2 生成要求 / step 3 Prompt) ───
+	DetailType        string `json:"detail_type"`        // article | qa | review | tutorial
+	Language          string `json:"language"`           // zh | en | ja | ko | es | other
+	Style             string `json:"style"`              // professional | casual | marketing | technical
+	OutputFormat      string `json:"output_format"`      // markdown | html | plain
+	ParagraphStruct   string `json:"paragraph_struct"`   // 自由文本：段落结构说明
+	ExtraRequirements string `json:"extra_requirements"` // 自由文本：其他要求
+	ReferenceURL      string `json:"reference_url"`      // 可选参考链接
+	CustomPrompt      string `json:"custom_prompt"`      // 用户整段覆盖的 prompt（为空则使用内置默认）
 }
 
 // GeoStartKeywordWorkflow POST /api/v1/geo/keyword/workflow/start
@@ -223,14 +249,33 @@ func GeoStartKeywordWorkflow(c *gin.Context) {
 		return
 	}
 
+	// Wizard defaults — frontend may omit these on ad-hoc calls.
+	if req.DetailType == "" {
+		req.DetailType = "article"
+	}
+	if req.Language == "" {
+		req.Language = "zh"
+	}
+	if req.Style == "" {
+		req.Style = "professional"
+	}
+	if req.OutputFormat == "" {
+		req.OutputFormat = "markdown"
+	}
+
 	uid := c.GetInt64("user_id")
 	res, err := db.DB.Exec(
 		`INSERT INTO geo_workflow_jobs
 		 (user_id, site_id, content_type, title_id, keyword, title_text,
-		  word_count, writing_angle, knowledge_id, status, step_label)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '⏳ 等待启动')`,
+		  word_count, writing_angle, knowledge_id,
+		  detail_type, language, style, output_format,
+		  paragraph_struct, extra_requirements, reference_url, custom_prompt,
+		  status, step_label)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '⏳ 等待启动')`,
 		uid, req.SiteID, req.ContentType, req.TitleID, req.Keyword, req.TitleText,
 		req.WordCount, req.WritingAngle, req.KnowledgeID,
+		req.DetailType, req.Language, req.Style, req.OutputFormat,
+		req.ParagraphStruct, req.ExtraRequirements, req.ReferenceURL, req.CustomPrompt,
 	)
 	if err != nil {
 		<-geoWorkflowSem // release on DB error
@@ -238,7 +283,13 @@ func GeoStartKeywordWorkflow(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "创建任务失败"})
 		return
 	}
-	jobID, _ := res.LastInsertId()
+	jobID, err := res.LastInsertId()
+	if err != nil {
+		<-geoWorkflowSem
+		log.Printf("[geo-workflow] LastInsertId: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "任务 ID 获取失败"})
+		return
+	}
 
 	WriteAuditLog(c, "geo_workflow_start", "geo_workflow_job",
 		fmt.Sprintf("%d", jobID), fmt.Sprintf("[%s] %s", req.ContentType, req.Keyword))
@@ -371,6 +422,40 @@ func GeoApplyWorkflowJob(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"article_id": articleID}})
 }
 
+// GeoDiscardWorkflowJob DELETE /api/v1/geo/keyword/workflow/:id
+//
+// Permanently deletes a workflow job. Used by the wizard step 4
+// "放弃" button when the user decides a generation isn't worth
+// keeping. Only the owner or an admin can discard.
+func GeoDiscardWorkflowJob(c *gin.Context) {
+	id := parseInt64Param(c, "id")
+	job, err := loadGeoJob(id)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "任务不存在"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
+		return
+	}
+	uid := c.GetInt64("user_id")
+	role, _ := c.Get("role")
+	if job.UserID != uid && role != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "无权删除该任务"})
+		return
+	}
+	// If the job has already been applied to an article, the article
+	// stays — user has to delete that separately. Just drop the job.
+	if _, err := db.DB.Exec(`DELETE FROM geo_workflow_jobs WHERE id = ?`, id); err != nil {
+		log.Printf("[geo-workflow] discard %d: %v", id, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
+		return
+	}
+	WriteAuditLog(c, "geo_workflow_discard", "geo_workflow_job",
+		fmt.Sprintf("%d", id), job.Keyword)
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "已放弃"})
+}
+
 // GeoListWorkflowJobs GET /api/v1/geo/keyword/workflow/jobs
 //
 // Returns the caller's recent jobs (last 50). Admins see everyone's
@@ -456,7 +541,14 @@ func runKeywordWorkflow(jobID, userID int64, req StartKeywordWorkflowRequest) {
 	// ───── Step 1: long-form draft ─────────────────────────────────────
 	setJobStep(jobID, 1, "✍️ 正在撰写长文草稿（植入内链 + 去 AI 化）...", "running")
 
-	prompt1 := buildNeutralAntiDetectionPrompt(req, knowledgeText, sitePages)
+	var prompt1 string
+	if strings.TrimSpace(req.CustomPrompt) != "" {
+		// User provided a fully custom prompt via the wizard step 3 —
+		// run it verbatim with variable substitution.
+		prompt1 = applyPromptVariables(req.CustomPrompt, req, knowledgeText, sitePages)
+	} else {
+		prompt1 = buildWizardPrompt(req, knowledgeText, sitePages)
+	}
 	// Tokens ≈ 1.5× target words × 1.2 safety buffer (Chinese/Thai/Viet
 	// chars map roughly 1:1.5 to tokens on most models).
 	mt1 := int(float64(req.WordCount) * 1.8)
@@ -545,6 +637,263 @@ func finishJobWithFallback(jobID int64, draft, keyword, title string) {
 		    final_content = ?, final_meta_title = ?, final_meta_desc = ?, final_faq = '[]',
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`, draft, mt, md, jobID)
+}
+
+// ─── Wizard defaults endpoint ──────────────────────────────────────────────
+
+// GeoGetDefaults GET /api/v1/geo/defaults?content_type=geo|extlink
+//
+// Returns the built-in default prompt template + recommended params
+// so the wizard can pre-fill step 2/3. The frontend can render this
+// as editable text and the user can override it on each generation.
+func GeoGetDefaults(c *gin.Context) {
+	contentType := c.DefaultQuery("content_type", "geo")
+	if contentType != "geo" && contentType != "extlink" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "content_type 非法"})
+		return
+	}
+
+	// Default prompt template — documented variables the UI should
+	// surface in the step 3 editor. Users can delete them or add extras.
+	tmpl := `你是一名资深内容编辑。请根据以下信息撰写内容：
+
+【核心关键词】{{keyword}}
+【建议标题】{{title}}
+【写作语言】{{lang}}
+【行文风格】{{style}}
+【输出格式】{{format}}
+【目标字数】{{wordcount}} 字以上
+【目标年份】{{year}}
+
+【附加要求】
+{{extra}}
+
+━━━━━ 写作原则 ━━━━━
+1. H2 / H3 标题都是"能被独立回答"的问题
+2. 每段首句给结论，后文展开细节
+3. 大量具体数字（比例 / 年份 / 金额）
+4. 至少 1 个表格 + 1 处引用块
+5. 结尾"常见问题"章节，6-8 个 Q&A，每个 ≥ 80 字
+6. 关键词自然分布 4-8 次
+7. 禁止模板连接词（首先 / 其次 / 综上所述）
+8. 至少 1 处第二人称 + 1 处坦承数据局限
+
+━━━━━ 禁用词 ━━━━━
+博彩类：注册、优惠、流水、赔率、转盘、彩金、娱乐城、博彩、赌场
+诱导类：性感、诱人、销魂、激情、火辣、撩人、深夜福利、老司机
+促销类：马上、立即、限时、爆款、必选、最佳、不容错过
+
+直接从标题 / 首段开始输出，不要代码块包裹。`
+
+	defaults := gin.H{
+		"prompt":              tmpl,
+		"default_word_count":  1500,
+		"default_language":    "zh",
+		"default_detail_type": "article",
+		"default_style":       "professional",
+		"default_format":      "markdown",
+		"languages": []gin.H{
+			{"value": "zh", "label": "中文（简体）"},
+			{"value": "en", "label": "English"},
+			{"value": "ja", "label": "日本語"},
+			{"value": "ko", "label": "한국어"},
+			{"value": "es", "label": "Español"},
+			{"value": "other", "label": "其他"},
+		},
+		"detail_types": []gin.H{
+			{"value": "article", "label": "资讯文章"},
+			{"value": "qa", "label": "问答合集"},
+			{"value": "review", "label": "横向对照"},
+			{"value": "tutorial", "label": "入门科普"},
+		},
+		"styles": []gin.H{
+			{"value": "professional", "label": "专业权威"},
+			{"value": "casual", "label": "口语轻松"},
+			{"value": "marketing", "label": "品牌营销"},
+			{"value": "technical", "label": "技术深度"},
+		},
+		"formats": []gin.H{
+			{"value": "markdown", "label": "Markdown"},
+			{"value": "html", "label": "HTML 片段"},
+			{"value": "plain", "label": "纯文本"},
+		},
+		"variables": []gin.H{
+			{"name": "{{keyword}}", "desc": "关键词"},
+			{"name": "{{title}}", "desc": "建议标题"},
+			{"name": "{{wordcount}}", "desc": "目标字数"},
+			{"name": "{{style}}", "desc": "风格"},
+			{"name": "{{format}}", "desc": "格式"},
+			{"name": "{{lang}}", "desc": "语言"},
+			{"name": "{{type}}", "desc": "内容类型"},
+			{"name": "{{extra}}", "desc": "附加要求"},
+			{"name": "{{paragraph}}", "desc": "段落结构"},
+			{"name": "{{reference}}", "desc": "参考链接"},
+			{"name": "{{knowledge}}", "desc": "参考资料"},
+			{"name": "{{pages}}", "desc": "站内页面列表"},
+			{"name": "{{year}}", "desc": "当前年份"},
+		},
+		"content_type": contentType,
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": defaults})
+}
+
+// ─── Wizard prompt assembly ────────────────────────────────────────────────
+
+// applyPromptVariables replaces {{keyword}} / {{title}} / {{wordcount}} /
+// {{style}} / {{format}} / {{lang}} / {{type}} / {{extra}} / {{knowledge}}
+// in a user-supplied custom prompt. Keeps the substitution explicit so a
+// prompt writer can opt into any subset and unknown variables stay visible
+// rather than silently dropped.
+func applyPromptVariables(
+	prompt string,
+	req StartKeywordWorkflowRequest,
+	knowledge string,
+	pages []struct{ Name, URL string },
+) string {
+	repl := map[string]string{
+		"{{keyword}}":      req.Keyword,
+		"{{title}}":        req.TitleText,
+		"{{wordcount}}":    fmt.Sprintf("%d", req.WordCount),
+		"{{style}}":        req.Style,
+		"{{format}}":       req.OutputFormat,
+		"{{lang}}":         req.Language,
+		"{{type}}":         req.DetailType,
+		"{{extra}}":        req.ExtraRequirements,
+		"{{paragraph}}":    req.ParagraphStruct,
+		"{{reference}}":    req.ReferenceURL,
+		"{{knowledge}}":    knowledge,
+		"{{year}}":         fmt.Sprintf("%d", time.Now().Year()),
+		"{{writing_angle}}": req.WritingAngle,
+	}
+	out := prompt
+	for k, v := range repl {
+		out = strings.ReplaceAll(out, k, v)
+	}
+	// Pages list gets rendered only if {{pages}} appears.
+	if strings.Contains(out, "{{pages}}") {
+		var b strings.Builder
+		for _, p := range pages {
+			fmt.Fprintf(&b, "- %s → %s\n", p.Name, p.URL)
+		}
+		out = strings.ReplaceAll(out, "{{pages}}", b.String())
+	}
+	return out
+}
+
+// buildWizardPrompt is the wizard-driven default prompt used when the user
+// does not supply a custom prompt. It's a thinner, more flexible sibling
+// to buildNeutralAntiDetectionPrompt — it respects the 4-step wizard
+// fields (style / format / language / detail type / extra requirements)
+// while keeping the anti-detection and GEO-optimized structure.
+func buildWizardPrompt(
+	req StartKeywordWorkflowRequest,
+	knowledge string,
+	pages []struct{ Name, URL string },
+) string {
+	// When the caller uses the GEO content_type and didn't supply wizard
+	// fields (legacy callers), fall back to the original hard-coded
+	// prompt so we don't regress existing behavior.
+	if req.DetailType == "" && req.Style == "" && req.OutputFormat == "" {
+		return buildNeutralAntiDetectionPrompt(req, knowledge, pages)
+	}
+
+	year := fmt.Sprintf("%d", time.Now().Year())
+
+	langLabel := map[string]string{
+		"zh": "中文（简体）", "en": "English", "ja": "日本語",
+		"ko": "한국어", "es": "Español", "other": "其他（遵循建议标题的语言）",
+	}[req.Language]
+	if langLabel == "" {
+		langLabel = "中文（简体）"
+	}
+
+	detailLabel := map[string]string{
+		"article":  "长文资讯 / 主题解析",
+		"qa":       "问答合集（每个子标题是一个真实问题）",
+		"review":   "横向资料对照（事实陈述，不做价值判断）",
+		"tutorial": "入门科普（定义→背景→常见问题）",
+	}[req.DetailType]
+	if detailLabel == "" {
+		detailLabel = "长文资讯"
+	}
+
+	styleLabel := map[string]string{
+		"professional": "产业观察 / 行业分析，客观克制",
+		"casual":       "口语化对话风，适合社交媒体分发",
+		"marketing":    "品牌故事风，强调信息价值但避免硬广",
+		"technical":    "技术深度，用具体数据和参数支撑",
+	}[req.Style]
+	if styleLabel == "" {
+		styleLabel = "产业观察"
+	}
+
+	formatLabel := map[string]string{
+		"markdown": "Markdown（## / ### 标题 / 表格 / 引用块）",
+		"html":     "HTML 片段（允许 <h2>/<h3>/<p>/<ul>/<table>/<blockquote>），不含 <html>/<body>",
+		"plain":    "纯文本（无格式标记，段落之间空一行）",
+	}[req.OutputFormat]
+	if formatLabel == "" {
+		formatLabel = "Markdown"
+	}
+
+	var pagesBlock strings.Builder
+	if len(pages) > 0 && req.ContentType == "geo" {
+		pagesBlock.WriteString("【站内可用内链清单】（从中挑选 2-4 条，以自然锚文本嵌入）：\n")
+		for _, p := range pages {
+			fmt.Fprintf(&pagesBlock, "- %s → %s\n", p.Name, p.URL)
+		}
+	}
+
+	extraBlock := ""
+	if strings.TrimSpace(req.ExtraRequirements) != "" {
+		extraBlock = "\n【附加要求】\n" + strings.TrimSpace(req.ExtraRequirements) + "\n"
+	}
+	paragraphBlock := ""
+	if strings.TrimSpace(req.ParagraphStruct) != "" {
+		paragraphBlock = "\n【段落结构建议】\n" + strings.TrimSpace(req.ParagraphStruct) + "\n"
+	}
+	referenceBlock := ""
+	if strings.TrimSpace(req.ReferenceURL) != "" {
+		referenceBlock = "\n【参考链接】" + strings.TrimSpace(req.ReferenceURL) + "（可用于启发思路，不得直接复制原文）\n"
+	}
+	knowledgeBlock := ""
+	if strings.TrimSpace(knowledge) != "" {
+		knowledgeBlock = "\n【参考资料（请自然融入事实，不得整段照抄）】\n" + strings.TrimSpace(knowledge) + "\n"
+	}
+
+	return `你是一名资深内容编辑。请根据以下信息撰写内容：
+
+【核心关键词】` + req.Keyword + `
+【建议标题】` + req.TitleText + `
+【内容类型】` + detailLabel + `
+【写作语言】` + langLabel + `
+【行文风格】` + styleLabel + `
+【输出格式】` + formatLabel + `
+【目标字数】` + fmt.Sprintf("%d", req.WordCount) + ` 字以上
+【目标年份】` + year + `
+` + paragraphBlock + extraBlock + referenceBlock + knowledgeBlock + pagesBlock.String() + `
+
+━━━━━ 写作原则 ━━━━━
+1. 所有 H2 / H3 标题都是"能被独立回答"的问题或明确陈述，不使用模糊分类词
+2. 每段首句直接给结论，后文再展开细节，利于 AI 搜索引擎抽取答案
+3. 大量具体数字（比例 / 年份 / 金额 / 人数 / 时间跨度），避免空洞形容词
+4. 至少 1 个表格（对比 / 并列 / 数据聚合）
+5. 至少 1 处引用块（定义 / 数据来源 / 权威陈述）
+6. 结尾必须包含"常见问题"章节，6-8 个 Q&A，每个答案 80 字以上
+7. 关键词自然分布 4-8 次，禁止堆砌
+8. 禁止模板连接词（首先/其次/综上所述/值得注意的是/随着...的发展）
+9. 至少 1 处第二人称对话 + 1 处坦承数据局限
+10. 句长交替：短句（≤10 字）和长句（≥30 字）混用
+
+━━━━━ 禁用词（最高优先级）━━━━━
+博彩类：注册、优惠、流水、赔率、转盘、彩金、娱乐城、博彩、赌场、押注、稳赢、首充、百家乐、体育博彩
+诱导类：性感、诱人、销魂、激情、火辣、欲望、撩人、深夜福利、老司机、懂的都懂
+促销类：马上、立即、限时、爆款、必选、最佳、首选、不容错过、强烈推荐
+
+━━━━━ 输出要求 ━━━━━
+- 直接从首段 / 标题开始输出，不要任何说明或代码块包裹
+- 不要输出本提示中的指令原文
+- 输出前自查一遍禁用词清单，命中即重写该处`
 }
 
 // ─── Prompts ───────────────────────────────────────────────────────────────

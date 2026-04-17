@@ -414,6 +414,12 @@ func main() {
 			geo.GET("/keyword/workflow/jobs", api.RequirePermission("geo.view"), api.GeoListWorkflowJobs)
 			geo.GET("/keyword/workflow/:id", api.RequirePermission("geo.view"), api.GeoGetWorkflowJob)
 			geo.POST("/keyword/workflow/:id/apply", api.RequirePermission("geo.workflow"), api.GeoApplyWorkflowJob)
+			geo.DELETE("/keyword/workflow/:id", api.RequirePermission("geo.workflow"), api.GeoDiscardWorkflowJob)
+
+			// Wizard defaults: built-in prompt template + recommended params.
+			// Viewer permission is enough — doesn't expose anything sensitive,
+			// just lets step-3 of the wizard pre-fill the editor.
+			geo.GET("/defaults", api.RequirePermission("geo.view"), api.GeoGetDefaults)
 		}
 	}
 

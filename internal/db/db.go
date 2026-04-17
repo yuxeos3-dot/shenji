@@ -671,6 +671,23 @@ func Init() {
 		`ALTER TABLE coordination_tasks ADD COLUMN pre_audit_verdict TEXT DEFAULT ''`,
 		`ALTER TABLE coordination_tasks ADD COLUMN pre_audit_result TEXT DEFAULT ''`,
 		`ALTER TABLE coordination_tasks ADD COLUMN pre_audit_at DATETIME`,
+
+		// ─── GEO wizard extensions ────────────────────────────────────────
+		// The per-keyword "AI 生成" flow is being turned into an explicit
+		// 4-step wizard. Instead of a separate drafts table, we extend the
+		// existing geo_workflow_jobs row with wizard-supplied parameters.
+		// When custom_prompt is non-empty we run it verbatim (with
+		// {{keyword}}/{{wordcount}}/… variable substitution); empty means
+		// "use the server default", which lets us keep existing jobs
+		// working unchanged.
+		`ALTER TABLE geo_workflow_jobs ADD COLUMN detail_type TEXT DEFAULT 'article'`,
+		`ALTER TABLE geo_workflow_jobs ADD COLUMN language TEXT DEFAULT 'zh'`,
+		`ALTER TABLE geo_workflow_jobs ADD COLUMN style TEXT DEFAULT 'professional'`,
+		`ALTER TABLE geo_workflow_jobs ADD COLUMN output_format TEXT DEFAULT 'markdown'`,
+		`ALTER TABLE geo_workflow_jobs ADD COLUMN paragraph_struct TEXT DEFAULT ''`,
+		`ALTER TABLE geo_workflow_jobs ADD COLUMN extra_requirements TEXT DEFAULT ''`,
+		`ALTER TABLE geo_workflow_jobs ADD COLUMN reference_url TEXT DEFAULT ''`,
+		`ALTER TABLE geo_workflow_jobs ADD COLUMN custom_prompt TEXT DEFAULT ''`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {
