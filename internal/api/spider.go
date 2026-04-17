@@ -261,19 +261,21 @@ func SpiderOverview(c *gin.Context) {
 func SpiderSiteSummary(c *gin.Context) {
 	day7 := time.Now().UTC().Add(-7 * 24 * time.Hour)
 
+	// Scalar subqueries keep the main query simple — the GROUP-BY + CASE
+	// form was tripping up modernc/sqlite's aggregate handling on an empty
+	// spider_logs table (returning an error instead of a zero row).
 	rows, err := db.DB.Query(
 		`SELECT s.id, s.name, s.domain,
-		        COALESCE(SUM(CASE WHEN sl.visited_at >= ? THEN 1 ELSE 0 END), 0) as hits_7d,
-		        COALESCE(COUNT(DISTINCT CASE WHEN sl.visited_at >= ? THEN sl.spider END), 0) as spiders_7d,
-		        MAX(sl.visited_at) as last_visit
+		        (SELECT COUNT(*)                    FROM spider_logs WHERE site_id = s.id AND visited_at >= ?) AS hits_7d,
+		        (SELECT COUNT(DISTINCT spider)      FROM spider_logs WHERE site_id = s.id AND visited_at >= ?) AS spiders_7d,
+		        (SELECT MAX(visited_at)             FROM spider_logs WHERE site_id = s.id) AS last_visit
 		 FROM sites s
-		 LEFT JOIN spider_logs sl ON sl.site_id = s.id
-		 GROUP BY s.id, s.name, s.domain
 		 ORDER BY hits_7d DESC, s.id`,
 		day7, day7,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
+		log.Printf("[spider] SpiderSiteSummary query failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败: " + err.Error()})
 		return
 	}
 	defer rows.Close()
@@ -282,16 +284,21 @@ func SpiderSiteSummary(c *gin.Context) {
 		SiteID    int64   `json:"site_id"`
 		Name      string  `json:"name"`
 		Domain    string  `json:"domain"`
-		Hits7d    int     `json:"hits_7d"`
-		Spiders7d int     `json:"spiders_7d"`
+		Hits7d    int64   `json:"hits_7d"`
+		Spiders7d int64   `json:"spiders_7d"`
 		LastVisit *string `json:"last_visit"`
 	}
 	var out []siteRow
 	for rows.Next() {
 		var r siteRow
-		if rows.Scan(&r.SiteID, &r.Name, &r.Domain, &r.Hits7d, &r.Spiders7d, &r.LastVisit) == nil {
-			out = append(out, r)
+		if err := rows.Scan(&r.SiteID, &r.Name, &r.Domain, &r.Hits7d, &r.Spiders7d, &r.LastVisit); err != nil {
+			log.Printf("[spider] SpiderSiteSummary scan failed: %v", err)
+			continue
 		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("[spider] SpiderSiteSummary rows.Err: %v", err)
 	}
 	if out == nil {
 		out = []siteRow{}
@@ -323,7 +330,8 @@ func SpiderDailyTrend(c *gin.Context) {
 		siteID, since,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
+		log.Printf("[spider] SpiderDailyTrend query failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败: " + err.Error()})
 		return
 	}
 	defer rows.Close()
@@ -374,7 +382,8 @@ func SpiderLogs(c *gin.Context) {
 	      WHERE ` + where + ` ORDER BY sl.visited_at DESC LIMIT ? OFFSET ?`
 	rows, err := db.DB.Query(q, append(args, perPage, offset)...)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
+		log.Printf("[spider] SpiderLogs query failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败: " + err.Error()})
 		return
 	}
 	defer rows.Close()
