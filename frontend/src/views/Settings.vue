@@ -385,9 +385,13 @@ async function saveSchedule() {
 }
 
 async function testTG() { testing.value.tg = true; try { const res = await api.testTelegram(); ElMessage.success(res.data) } catch (e) { console.error(e) } finally { testing.value.tg = false } }
-async function authGSC() { try { const res = await api.getGSCAuthURL(); window.open(res.data.url, '_blank', 'noopener,noreferrer') } catch (e) { console.error(e) } }
-async function authGA() { try { const res = await api.getGAAuthURL(); window.open(res.data.url, '_blank', 'noopener,noreferrer') } catch (e) { console.error(e) } }
-async function authYandex() { try { const res = await api.getYandexAuthURL(); window.open(res.data.url, '_blank', 'noopener,noreferrer') } catch (e) { console.error(e) } }
+// OAuth authorize handlers. We navigate the CURRENT tab (not
+// window.open) so that Google/Yandex's 302 redirect back to our
+// /oauth/*/callback lands in the same tab the user started from —
+// avoiding the "each authorize spawns a new tab" problem users saw.
+async function authGSC() { try { const res = await api.getGSCAuthURL(); window.location.href = res.data.url } catch (e) { console.error(e) } }
+async function authGA() { try { const res = await api.getGAAuthURL(); window.location.href = res.data.url } catch (e) { console.error(e) } }
+async function authYandex() { try { const res = await api.getYandexAuthURL(); window.location.href = res.data.url } catch (e) { console.error(e) } }
 </script>
 
 <style scoped>

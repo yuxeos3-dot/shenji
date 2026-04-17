@@ -40,6 +40,9 @@
         <span class="meta-item">📅 {{ dateRange[0] }} → {{ dateRange[1] }}</span>
         <span class="meta-item" v-if="dayCount === 1">单日数据</span>
         <span class="meta-item" v-else>共 {{ dayCount }} 天</span>
+        <span class="meta-item meta-warn" v-if="hasLagWarning">
+          ⚠ 所选日期可能因平台数据延迟暂无数据（GSC/GA4 通常延迟 1-2 天）
+        </span>
       </div>
     </div>
 
@@ -264,8 +267,12 @@ function daysAgo(n: number): string {
 }
 const dateRange = ref<[string, string]>([daysAgo(29), daysAgo(2)])
 const activePreset = ref<string>('28d')
+// GSC/GA data has a ~2-day processing lag, so "yesterday" from an SEO-
+// analytics perspective is actually daysAgo(2). We label it "最近一天"
+// (most recent complete day) rather than literally "昨天" to avoid
+// confusion when users see an empty result.
 const presets = [
-  { key: 'yesterday', label: '昨天' },
+  { key: 'recent1', label: '最近一天' },
   { key: '7d', label: '近 7 天' },
   { key: '28d', label: '近 28 天' },
   { key: '90d', label: '近 90 天' },
@@ -273,10 +280,10 @@ const presets = [
 function applyPreset(key: string) {
   activePreset.value = key
   switch (key) {
-    case 'yesterday': dateRange.value = [daysAgo(1), daysAgo(1)]; break
-    case '7d':       dateRange.value = [daysAgo(8), daysAgo(2)]; break
-    case '28d':      dateRange.value = [daysAgo(29), daysAgo(2)]; break
-    case '90d':      dateRange.value = [daysAgo(91), daysAgo(2)]; break
+    case 'recent1': dateRange.value = [daysAgo(2), daysAgo(2)]; break
+    case '7d':      dateRange.value = [daysAgo(8), daysAgo(2)]; break
+    case '28d':     dateRange.value = [daysAgo(29), daysAgo(2)]; break
+    case '90d':     dateRange.value = [daysAgo(91), daysAgo(2)]; break
   }
   refreshCurrent()
 }
@@ -295,6 +302,15 @@ const dayCount = computed(() => {
   const s = new Date(dateRange.value[0]).getTime()
   const e = new Date(dateRange.value[1]).getTime()
   return Math.round((e - s) / 86400000) + 1
+})
+// Triggered when end_date is within the last 2 days. GSC/GA4 data is
+// generally 1-2 days behind, so queries inside that window will return
+// empty. We warn rather than silently confuse the user.
+const hasLagWarning = computed(() => {
+  if (!dateRange.value[1]) return false
+  const end = new Date(dateRange.value[1]).getTime()
+  const now = Date.now()
+  return (now - end) / 86400000 < 2 && (platform.value === 'gsc' || platform.value === 'ga4')
 })
 
 // ── View state ──────────────────────────────────────────────────────────
@@ -681,6 +697,7 @@ onMounted(() => { loadOverview() })
 .tb-date { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-left:auto; }
 .tb-meta { display:flex; gap:16px; margin-top:12px; padding-top:10px; border-top:1px dashed var(--border-light); }
 .meta-item { font-size:12px; color:var(--ink-hint); font-family:'JetBrains Mono', monospace; }
+.meta-warn { color:#92400E; background:#FEF3C7; padding:2px 10px; border-radius:10px; font-family:inherit; }
 
 .pill { padding:6px 16px; border-radius:20px; border:1.5px solid var(--border-light); background:var(--surface-2); font-size:13px; font-weight:700; color:var(--ink-soft); cursor:pointer; font-family:inherit; transition:all .15s; }
 .pill.active { background:linear-gradient(135deg,var(--sun),var(--coral)); color:#fff; border-color:transparent; box-shadow:var(--s-amber); }
