@@ -40,10 +40,75 @@
         <div class="stat-card panel"><div class="stat-label">平均 CTR</div><div class="stat-value sv-orange">{{ ((gscData[0]?.ctr||0)*100).toFixed(2) }}%</div></div>
         <div class="stat-card panel"><div class="stat-label">平均排名</div><div class="stat-value sv-purple">{{ (gscData[0]?.position||0).toFixed(1) }}</div></div>
       </div>
-      <div class="panel" v-if="gscData.length">
-        <div class="section-title">趋势数据（最近 {{ gscData.length }} 次同步）</div>
+      <div class="two-col" v-if="gscData.length">
+        <div class="panel">
+          <div class="section-title">热门关键词 Top 20</div>
+          <table class="table" v-if="gscKeywords.length">
+            <thead><tr><th>关键词</th><th>点击</th><th>展示</th><th>CTR</th><th>排名</th></tr></thead>
+            <tbody>
+              <tr v-for="(k, idx) in gscKeywords" :key="idx">
+                <td class="kw-cell">{{ k.keys?.[0] || '—' }}</td>
+                <td class="num sv-blue">{{ fmt(k.clicks) }}</td>
+                <td class="num sv-green">{{ fmt(k.impressions) }}</td>
+                <td class="num sv-orange">{{ ((k.ctr||0)*100).toFixed(2) }}%</td>
+                <td class="num sv-purple">{{ (k.position||0).toFixed(1) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="empty-hint small">暂无关键词数据</div>
+        </div>
+        <div class="panel">
+          <div class="section-title">热门页面 Top 20</div>
+          <table class="table" v-if="gscPages.length">
+            <thead><tr><th>页面</th><th>点击</th><th>展示</th><th>CTR</th></tr></thead>
+            <tbody>
+              <tr v-for="(p, idx) in gscPages" :key="idx">
+                <td class="path-cell" :title="p.keys?.[0]">{{ (p.keys?.[0]||'').replace(/^https?:\/\/[^/]+/,'') || p.keys?.[0] || '—' }}</td>
+                <td class="num sv-blue">{{ fmt(p.clicks) }}</td>
+                <td class="num sv-green">{{ fmt(p.impressions) }}</td>
+                <td class="num sv-orange">{{ ((p.ctr||0)*100).toFixed(2) }}%</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="empty-hint small">暂无页面数据</div>
+        </div>
+      </div>
+      <div class="two-col" v-if="gscData.length" style="margin-top:16px">
+        <div class="panel">
+          <div class="section-title">设备分布</div>
+          <table class="table" v-if="gscDevices.length">
+            <thead><tr><th>设备</th><th>点击</th><th>展示</th><th>CTR</th></tr></thead>
+            <tbody>
+              <tr v-for="(d, idx) in gscDevices" :key="idx">
+                <td><span class="channel-badge">{{ d.keys?.[0] || '—' }}</span></td>
+                <td class="num sv-blue">{{ fmt(d.clicks) }}</td>
+                <td class="num sv-green">{{ fmt(d.impressions) }}</td>
+                <td class="num sv-orange">{{ ((d.ctr||0)*100).toFixed(2) }}%</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="empty-hint small">暂无设备数据</div>
+        </div>
+        <div class="panel">
+          <div class="section-title">国家/地区 Top 10</div>
+          <table class="table" v-if="gscCountries.length">
+            <thead><tr><th>国家</th><th>点击</th><th>展示</th><th>CTR</th></tr></thead>
+            <tbody>
+              <tr v-for="(c, idx) in gscCountries" :key="idx">
+                <td>{{ (c.keys?.[0] || '').toUpperCase() }}</td>
+                <td class="num sv-blue">{{ fmt(c.clicks) }}</td>
+                <td class="num sv-green">{{ fmt(c.impressions) }}</td>
+                <td class="num sv-orange">{{ ((c.ctr||0)*100).toFixed(2) }}%</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="empty-hint small">暂无国家数据</div>
+        </div>
+      </div>
+      <div class="panel" v-if="gscData.length" style="margin-top:16px">
+        <div class="section-title">同步历史</div>
         <table class="table">
-          <thead><tr><th>日期</th><th>点击</th><th>展示</th><th>CTR</th><th>排名</th><th>热门关键词</th></tr></thead>
+          <thead><tr><th>日期</th><th>点击</th><th>展示</th><th>CTR</th><th>排名</th></tr></thead>
           <tbody>
             <tr v-for="d in gscData" :key="d.date">
               <td class="dc">{{ d.date }}</td>
@@ -51,12 +116,11 @@
               <td class="num sv-green">{{ fmt(d.impressions) }}</td>
               <td class="num sv-orange">{{ ((d.ctr||0)*100).toFixed(2) }}%</td>
               <td class="num sv-purple">{{ (d.position||0).toFixed(1) }}</td>
-              <td class="kw-cell">{{ topKW(d.keywords_json) }}</td>
             </tr>
           </tbody>
         </table>
       </div>
-      <div v-else class="panel empty-hint">暂无 GSC 数据，请点击「同步当前数据源」拉取</div>
+      <div v-if="!gscData.length" class="panel empty-hint">暂无 GSC 数据，请点击「同步当前数据源」拉取</div>
     </template>
 
     <!-- GA4 Tab -->
@@ -195,7 +259,25 @@ const topKW = (kwJson) => {
   } catch { return '—' }
 }
 
+// parseGscArray handles both the raw GSC dimension-array payload and the
+// "rows"-wrapped shape that some paths store.
+function parseGscArray(raw) {
+  try {
+    if (!raw) return []
+    const d = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (Array.isArray(d)) return d
+    if (Array.isArray(d?.rows)) return d.rows
+    return []
+  } catch { return [] }
+}
+
 // ── Computed: parse JSON sub-data ──
+// GSC dimensions — backend stores these as JSON arrays like [{keys,clicks,impressions,ctr,position}]
+const gscKeywords = computed(() => parseGscArray(gscData.value[0]?.keywords_json).slice(0, 20))
+const gscPages = computed(() => parseGscArray(gscData.value[0]?.pages_json).slice(0, 20))
+const gscDevices = computed(() => parseGscArray(gscData.value[0]?.devices_json))
+const gscCountries = computed(() => parseGscArray(gscData.value[0]?.countries_json).slice(0, 10))
+
 const gaChannels = computed(() => {
   try { const rows = (typeof gaData.value[0]?.channels_json === 'string' ? JSON.parse(gaData.value[0].channels_json) : gaData.value[0]?.channels_json)?.rows || []; return rows.map(r => ({ dim: r.dimensionValues?.[0]?.value || '—', sessions: +r.metricValues?.[0]?.value || 0, users: +r.metricValues?.[1]?.value || 0, pageviews: +r.metricValues?.[2]?.value || 0 })).sort((a, b) => b.sessions - a.sessions) } catch { return [] }
 })
