@@ -129,14 +129,14 @@ const groups = [
       { path: '/image-management', icon: '🎨', label: '图片管理' },
       { path: '/video-management', icon: '🎬', label: '视频管理' },
       { path: '/content-rewrite',  icon: '✍️', label: '二创管理' },
+      { path: '/external-links',   icon: '🔗', label: '外链管理' },
     ],
   },
   {
     key: 'ops', icon: '🚀', label: '运营与协作',
     items: [
-      { path: '/external-links', icon: '🔗', label: '外链管理' },
-      { path: '/coordination',   icon: '🤝', label: '协同管理', activePrefix: '/coordination' },
-      { path: '/reports',        icon: '📋', label: '汇报管理', activePrefix: '/reports' },
+      { path: '/coordination', icon: '🤝', label: '协同管理', activePrefix: '/coordination' },
+      { path: '/reports',      icon: '📋', label: '汇报管理', activePrefix: '/reports' },
     ],
   },
   {
@@ -144,7 +144,7 @@ const groups = [
     items: [
       { path: '/users',            icon: '👥', label: '用户管理' },
       { path: '/cache-management', icon: '💾', label: '缓存管理' },
-      { path: '/settings',         icon: '⚙️', label: '系统设置' },
+      { path: '/settings',         icon: '⚙️', label: '系统管理' },
     ],
   },
 ]
