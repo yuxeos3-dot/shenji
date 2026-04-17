@@ -218,6 +218,21 @@ func main() {
 			weekly.DELETE("/:id", api.RequirePermission("reports.write"), api.DeleteWeeklyReport)
 		}
 
+		// Monthly reports (月汇报). Same caveat as weekly: register
+		// before /:date. Sources its content from submitted weekly
+		// reports whose week_start falls in the given (year, month).
+		monthly := v1.Group("/reports/monthly")
+		{
+			monthly.GET("", api.RequirePermission("reports.view"), api.ListMonthlyReports)
+			monthly.GET("/all", api.RequirePermission("reports.view"), api.AdminListAllMonthlyReports)
+			monthly.POST("/generate", api.RequirePermission("reports.write"), api.GenerateMonthlyReport)
+			monthly.GET("/:id", api.RequirePermission("reports.view"), api.GetMonthlyReport)
+			monthly.PUT("/:id", api.RequirePermission("reports.write"), api.UpdateMonthlyReport)
+			monthly.POST("/:id/submit", api.RequirePermission("reports.write"), api.SubmitMonthlyReport)
+			monthly.POST("/:id/polish", api.RequirePermission("reports.polish"), api.PolishMonthlyReport)
+			monthly.DELETE("/:id", api.RequirePermission("reports.write"), api.DeleteMonthlyReport)
+		}
+
 		v1.GET("/reports/:date", api.RequirePermission("reports.view"), api.GetReportByDate)
 
 		// Bing Webmaster

@@ -570,6 +570,25 @@ func Init() {
 			UNIQUE(user_id, week_start, week_end)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_weekly_user_range ON weekly_reports(user_id, week_start DESC)`,
+
+		// ─── Monthly reports ────────────────────────────────────────────────
+		// One row per (user, year, month). Source = submitted weekly
+		// reports whose week_start falls in that month. Same state
+		// machine as weekly: draft → submitted (locked).
+		`CREATE TABLE IF NOT EXISTS monthly_reports (
+			id                INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id           INTEGER NOT NULL REFERENCES users(id),
+			year              INTEGER NOT NULL,
+			month             INTEGER NOT NULL,   -- 1..12
+			content           TEXT DEFAULT '',
+			source_weekly_ids TEXT DEFAULT '[]',
+			status            TEXT DEFAULT 'draft',
+			submitted_at      DATETIME,
+			created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(user_id, year, month)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_monthly_user_ym ON monthly_reports(user_id, year DESC, month DESC)`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {

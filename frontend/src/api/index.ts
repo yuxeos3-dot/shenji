@@ -172,6 +172,16 @@ const api = {
   polishWeeklyReport: (id: Id) => instance.post(`/v1/reports/weekly/${id}/polish`),
   deleteWeeklyReport: (id: Id) => instance.delete(`/v1/reports/weekly/${id}`),
 
+  // Monthly reports (月汇报)
+  listMonthlyReports: (params?: Record<string, any>) => instance.get('/v1/reports/monthly', { params }),
+  listAllMonthlyReports: (params?: Record<string, any>) => instance.get('/v1/reports/monthly/all', { params }),
+  generateMonthlyReport: (data: Record<string, any>) => instance.post('/v1/reports/monthly/generate', data),
+  getMonthlyReport: (id: Id) => instance.get(`/v1/reports/monthly/${id}`),
+  updateMonthlyReport: (id: Id, data: Record<string, any>) => instance.put(`/v1/reports/monthly/${id}`, data),
+  submitMonthlyReport: (id: Id) => instance.post(`/v1/reports/monthly/${id}/submit`),
+  polishMonthlyReport: (id: Id) => instance.post(`/v1/reports/monthly/${id}/polish`),
+  deleteMonthlyReport: (id: Id) => instance.delete(`/v1/reports/monthly/${id}`),
+
   // Bing Webmaster
   syncBing: (siteId: Id) => instance.post(`/v1/sites/${siteId}/bing/sync`),
   getBingData: (siteId: Id, config?: Record<string, any>) =>

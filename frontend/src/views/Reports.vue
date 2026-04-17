@@ -4,6 +4,7 @@
     <div class="tabs">
       <router-link to="/reports" class="tab-btn" active-class="tab-active" exact-active-class="tab-active">📝 日汇报</router-link>
       <router-link to="/reports/weekly" class="tab-btn">📊 周汇报</router-link>
+      <router-link to="/reports/monthly" class="tab-btn">📅 月汇报</router-link>
     </div>
 
     <div class="page-top">

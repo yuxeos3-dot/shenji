@@ -1,0 +1,139 @@
+<template>
+  <div>
+    <div class="tabs">
+      <router-link to="/reports" class="tab-btn">📝 日汇报</router-link>
+      <router-link to="/reports/weekly" class="tab-btn">📊 周汇报</router-link>
+      <router-link to="/reports/monthly" class="tab-btn" active-class="tab-active">📅 月汇报</router-link>
+    </div>
+
+    <div class="page-top">
+      <div class="filter-row">
+        <template v-if="userStore.isAdmin()">
+          <span class="filter-label">成员</span>
+          <el-select v-model="filterUser" placeholder="自己的汇报" clearable size="small" style="width:160px" @change="load">
+            <el-option v-for="u in users" :key="u.id" :label="u.name + (u.department_name ? ' · ' + u.department_name : '')" :value="u.id" />
+          </el-select>
+        </template>
+      </div>
+      <button class="btn btn-primary" @click="$router.push('/reports/monthly/new')">➕ 生成新月汇报</button>
+    </div>
+
+    <div class="panel">
+      <table class="table">
+        <thead>
+          <tr>
+            <th v-if="userStore.isAdmin()">提交人</th>
+            <th>月份</th>
+            <th>状态</th>
+            <th>源周汇报</th>
+            <th>提交时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="r in reports" :key="r.id">
+            <td v-if="userStore.isAdmin()" style="font-weight:700">
+              {{ r.user_name }}
+              <div v-if="r.department_name || r.group_name" class="sub-meta">
+                <span v-if="r.department_name">{{ r.department_name }}</span>
+                <span v-if="r.group_name"> · {{ r.group_name }}</span>
+              </div>
+            </td>
+            <td>
+              <span class="date-badge">{{ r.year }} 年 {{ r.month }} 月</span>
+            </td>
+            <td>
+              <span :class="['status-badge', 'sb-' + r.status]">
+                {{ r.status === 'submitted' ? '✓ 已提交' : '草稿' }}
+              </span>
+            </td>
+            <td class="mono">{{ srcCount(r) }}</td>
+            <td style="font-size:12px;color:var(--ink-soft)">
+              {{ r.submitted_at || '—' }}
+            </td>
+            <td>
+              <button class="btn btn-xs" @click="$router.push('/reports/monthly/' + r.id)">
+                {{ r.status === 'submitted' ? '查看' : '编辑' }}
+              </button>
+            </td>
+          </tr>
+          <tr v-if="!reports.length && !loading">
+            <td :colspan="userStore.isAdmin() ? 6 : 5" class="empty-cell">
+              暂无月汇报。点击「➕ 生成新月汇报」选择一个月份，系统会把你本月已提交的周汇报合并成月度总结。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import { useUserStore } from '../stores/user'
+import api from '../api'
+
+const userStore = useUserStore()
+const reports = ref([])
+const users = ref([])
+const filterUser = ref(null)
+const loading = ref(false)
+
+function srcCount(r) {
+  try {
+    const arr = JSON.parse(r.source_weekly_ids || '[]')
+    return Array.isArray(arr) ? `${arr.length} 篇` : '—'
+  } catch { return '—' }
+}
+
+async function load() {
+  loading.value = true
+  try {
+    const params = {}
+    if (userStore.isAdmin() && filterUser.value) params.user_id = filterUser.value
+    const res = await api.listMonthlyReports(params)
+    reports.value = res.data || []
+  } catch (e) { console.error(e) }
+  finally { loading.value = false }
+}
+
+onMounted(async () => {
+  if (userStore.isAdmin()) {
+    try { users.value = (await api.listUsers()).data || [] } catch { /* ignore */ }
+  }
+  await load()
+})
+</script>
+
+<style scoped>
+.tabs { display:flex; gap:8px; margin-bottom:18px; border-bottom:2px solid var(--border-light); }
+.tab-btn { padding:10px 20px; font-size:14px; font-weight:700; color:var(--ink-soft); text-decoration:none; border-bottom:2px solid transparent; margin-bottom:-2px; transition:all .15s; }
+.tab-btn:hover { color:var(--sun-deep); }
+.tab-active { color:var(--sun); border-bottom-color:var(--sun); }
+
+.page-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; }
+.filter-row { display:flex; align-items:center; gap:10px; }
+.filter-label { font-size:12px; font-weight:700; color:var(--ink-hint); text-transform:uppercase; }
+
+.btn { display:inline-flex; align-items:center; gap:6px; padding:9px 20px; border-radius:9px; border:1.5px solid var(--border); background:var(--surface); cursor:pointer; font-family:inherit; font-size:13.5px; font-weight:700; transition:all .18s; color:var(--ink-mid); }
+.btn-primary { background:linear-gradient(135deg,var(--sun),var(--coral)); color:#fff; border-color:transparent; box-shadow:var(--s-amber); }
+.btn-primary:hover { background:linear-gradient(135deg,var(--sun-deep),var(--sun)); color:#fff; }
+.btn-xs { padding:4px 12px; font-size:12px; border-radius:6px; }
+.btn-xs:hover { background:var(--sun-glow); border-color:var(--sun); color:var(--sun-deep); }
+
+.panel { background:var(--surface); border-radius:var(--r); box-shadow:var(--s1); border:1.5px solid var(--border-light); padding:22px 26px; }
+
+.table { width:100%; border-collapse:collapse; }
+.table th { padding:10px 14px; text-align:left; font-size:11px; font-weight:800; color:var(--ink-mid); text-transform:uppercase; letter-spacing:.08em; border-bottom:2px solid var(--border); background:var(--surface-3); }
+.table td { padding:10px 14px; border-bottom:1px solid var(--border-light); font-size:13px; }
+.table tr:hover td { background:var(--sun-light); }
+
+.date-badge { font-size:13px; font-weight:800; color:var(--sun); background:var(--sun-light); padding:4px 12px; border-radius:14px; border:1px solid var(--peach); font-family:'JetBrains Mono', monospace; }
+.status-badge { font-size:11.5px; font-weight:800; padding:3px 10px; border-radius:12px; }
+.sb-draft { background:#FEF3C7; color:#92400E; border:1px solid #FCD34D; }
+.sb-submitted { background:var(--ok-bg); color:var(--ok); border:1px solid var(--ok-border); }
+
+.sub-meta { font-size:11px; color:var(--ink-hint); font-weight:500; margin-top:2px; }
+.mono { font-family:'JetBrains Mono', monospace; font-size:12px; color:var(--ink-soft); }
+.empty-cell { text-align:center; color:var(--ink-hint); padding:40px !important; line-height:1.7; }
+</style>

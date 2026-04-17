@@ -90,6 +90,8 @@ const pageTitles = {
   '/reports/write': '写汇报',
   '/reports/weekly': '周汇报',
   '/reports/weekly/new': '生成周汇报',
+  '/reports/monthly': '月汇报',
+  '/reports/monthly/new': '生成月汇报',
   '/users': '用户管理',
   '/cache-management': '缓存管理',
   '/settings': '系统管理',
@@ -103,6 +105,7 @@ const pageTitle = computed(() => {
   if (route.path.match(/\/sites\/\d+$/)) return '站点详情'
   if (route.path.match(/\/coordination\/\d+$/)) return '协同任务详情'
   if (route.path.match(/\/reports\/weekly\/\d+$/)) return '周汇报详情'
+  if (route.path.match(/\/reports\/monthly\/\d+$/)) return '月汇报详情'
   return siteConfig.title
 })
 
