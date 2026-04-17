@@ -64,11 +64,10 @@ func CORS() gin.HandlerFunc {
 		c.Header("Access-Control-Max-Age", "86400")
 
 		if c.Request.Method == "OPTIONS" {
-			if allowed {
-				c.AbortWithStatus(204)
-			} else {
-				c.AbortWithStatus(403)
-			}
+			// Always return 204 for preflight; disallowed origins simply
+			// won't receive ACAO headers, so the browser blocks the
+			// response. Returning 403 leaks whitelist membership.
+			c.AbortWithStatus(204)
 			return
 		}
 		c.Next()
