@@ -16,7 +16,7 @@ import (
 
 type RewriteRequest struct {
 	SiteID   int64  `json:"site_id"`
-	Mode     string `json:"mode"`     // "tdk" or "content"
+	Mode     string `json:"mode"` // "tdk" or "content"
 	PageType string `json:"page_type"`
 	Keywords string `json:"keywords"`
 	Title    string `json:"title"`
@@ -144,7 +144,9 @@ func callRewriteAI(prompt string) (interface{}, error) {
 
 	var apiResp struct {
 		Choices []struct {
-			Message struct{ Content string `json:"content"` } `json:"message"`
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(body, &apiResp); err != nil || len(apiResp.Choices) == 0 {

@@ -10,22 +10,22 @@ import (
 )
 
 type CreateSiteRequest struct {
-	Domain                string `json:"domain" binding:"required"`
-	Name                  string `json:"name" binding:"required"`
-	GscSiteURL            string `json:"gsc_site_url"`
-	GaPropertyID          string `json:"ga_property_id"`
-	YandexHostID          string `json:"yandex_host_id"`
-	BingSiteURL           string `json:"bing_site_url"`
-	URLCategory           string `json:"url_category"`
-	URLDetail             string `json:"url_detail"`
-	URLNewsList           string `json:"url_news_list"`
-	URLNewsDetail         string `json:"url_news_detail"`
-	URLSearch             string `json:"url_search"`
-	URLStatic             string `json:"url_static"`
-	URLPagesJSON          string `json:"url_pages_json"`
-	AuditScheduleEnabled  string `json:"audit_schedule_enabled"`
-	AuditIntervalHours    int    `json:"audit_interval_hours"`
-	AuditDailyHour        int    `json:"audit_daily_hour"`
+	Domain               string `json:"domain" binding:"required"`
+	Name                 string `json:"name" binding:"required"`
+	GscSiteURL           string `json:"gsc_site_url"`
+	GaPropertyID         string `json:"ga_property_id"`
+	YandexHostID         string `json:"yandex_host_id"`
+	BingSiteURL          string `json:"bing_site_url"`
+	URLCategory          string `json:"url_category"`
+	URLDetail            string `json:"url_detail"`
+	URLNewsList          string `json:"url_news_list"`
+	URLNewsDetail        string `json:"url_news_detail"`
+	URLSearch            string `json:"url_search"`
+	URLStatic            string `json:"url_static"`
+	URLPagesJSON         string `json:"url_pages_json"`
+	AuditScheduleEnabled string `json:"audit_schedule_enabled"`
+	AuditIntervalHours   int    `json:"audit_interval_hours"`
+	AuditDailyHour       int    `json:"audit_daily_hour"`
 }
 
 func ListSites(c *gin.Context) {

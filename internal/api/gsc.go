@@ -341,11 +341,11 @@ func SyncGSCData(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"data": gin.H{
-			"message":    "GSC数据同步成功",
-			"clicks":     totalClicks,
+			"message":     "GSC数据同步成功",
+			"clicks":      totalClicks,
 			"impressions": totalImpressions,
-			"ctr":        avgCTR,
-			"position":   avgPosition,
+			"ctr":         avgCTR,
+			"position":    avgPosition,
 		},
 	})
 }

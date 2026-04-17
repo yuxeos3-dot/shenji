@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"seo-system/internal/ai"
 	"seo-system/internal/crawler"
 	"seo-system/internal/db"
-	"seo-system/internal/ai"
 	"seo-system/internal/telegram"
 
 	"encoding/json"
@@ -89,12 +89,12 @@ func runPerSiteIntervalCheck() {
 	currentHour := now.Hour()
 
 	type siteInfo struct {
-		ID                   int64
-		Name                 string
-		Config               crawler.SiteConfig
-		ScheduleEnabled      string
-		IntervalHours        int
-		DailyHour            int
+		ID              int64
+		Name            string
+		Config          crawler.SiteConfig
+		ScheduleEnabled string
+		IntervalHours   int
+		DailyHour       int
 	}
 
 	var sitesToCheck []siteInfo

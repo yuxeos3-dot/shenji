@@ -10,12 +10,12 @@ import (
 
 // CacheEntry describes one in-memory cache surface so the admin UI can render it.
 type CacheEntry struct {
-	Key         string `json:"key"`          // stable identifier for clear-target
-	Label       string `json:"label"`        // human name
-	Description string `json:"description"`  // what's in it / what breaks when you clear
-	Size        int    `json:"size"`         // current item count
+	Key         string `json:"key"`             // stable identifier for clear-target
+	Label       string `json:"label"`           // human name
+	Description string `json:"description"`     // what's in it / what breaks when you clear
+	Size        int    `json:"size"`            // current item count
 	Extra       string `json:"extra,omitempty"` // optional second metric
-	CanClear    bool   `json:"can_clear"`    // false = read-only / safety-locked
+	CanClear    bool   `json:"can_clear"`       // false = read-only / safety-locked
 }
 
 // ListCaches returns every in-memory cache the admin can inspect or clear.

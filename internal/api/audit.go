@@ -50,13 +50,13 @@ func TriggerAudit(c *gin.Context) {
 
 	// Run audit asynchronously
 	go runAuditTask(taskID, siteID, crawler.SiteConfig{
-		Domain:       domain,
-		URLCategory:  urlCat,
-		URLDetail:    urlDet,
-		URLNewsList:  urlNL,
+		Domain:        domain,
+		URLCategory:   urlCat,
+		URLDetail:     urlDet,
+		URLNewsList:   urlNL,
 		URLNewsDetail: urlND,
-		URLSearch:    urlSearch,
-		URLStatic:   urlStatic,
+		URLSearch:     urlSearch,
+		URLStatic:     urlStatic,
 	}, name)
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"task_id": taskID}})
@@ -517,7 +517,6 @@ func GetAuditPageByType(c *gin.Context) {
 		"error_msg": errorMsg, "fetched_at": fetchedAt,
 	}})
 }
-
 
 func max(a, b int) int { // nolint:unused - kept for clarity against Go builtin shadowing
 	if a > b {

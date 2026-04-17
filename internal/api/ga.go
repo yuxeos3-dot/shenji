@@ -170,8 +170,8 @@ func SyncGAData(c *gin.Context) {
 	dateRange := []map[string]string{{"startDate": "30daysAgo", "endDate": "yesterday"}}
 
 	type queryDef struct {
-		name    string
-		body    map[string]interface{}
+		name string
+		body map[string]interface{}
 	}
 	queries := []queryDef{
 		// 1. Overview totals
@@ -217,7 +217,7 @@ func SyncGAData(c *gin.Context) {
 			"dimensions": []map[string]string{{"name": "country"}},
 			"metrics":    []map[string]string{{"name": "sessions"}, {"name": "totalUsers"}},
 			"orderBys":   []map[string]interface{}{{"metric": map[string]string{"metricName": "sessions"}, "desc": true}},
-			"limit": 10,
+			"limit":      10,
 		}},
 		// 6. Daily trend
 		{"trend", map[string]interface{}{
@@ -254,7 +254,9 @@ func SyncGAData(c *gin.Context) {
 	if results["overview"] != nil {
 		var ov struct {
 			Rows []struct {
-				MetricValues []struct{ Value string `json:"value"` } `json:"metricValues"`
+				MetricValues []struct {
+					Value string `json:"value"`
+				} `json:"metricValues"`
 			} `json:"rows"`
 		}
 		if err := json.Unmarshal(results["overview"], &ov); err != nil {
@@ -262,18 +264,34 @@ func SyncGAData(c *gin.Context) {
 		}
 		if len(ov.Rows) > 0 {
 			mv := ov.Rows[0].MetricValues
-			if len(mv) > 0 { fmt.Sscanf(mv[0].Value, "%d", &sessions) }
-			if len(mv) > 1 { fmt.Sscanf(mv[1].Value, "%d", &users) }
-			if len(mv) > 2 { fmt.Sscanf(mv[2].Value, "%d", &newUsers) }
-			if len(mv) > 3 { fmt.Sscanf(mv[3].Value, "%d", &pageviews) }
-			if len(mv) > 4 { fmt.Sscanf(mv[4].Value, "%f", &bounceRate) }
-			if len(mv) > 5 { fmt.Sscanf(mv[5].Value, "%f", &avgDuration) }
-			if len(mv) > 6 { fmt.Sscanf(mv[6].Value, "%f", &engagementRate) }
+			if len(mv) > 0 {
+				fmt.Sscanf(mv[0].Value, "%d", &sessions)
+			}
+			if len(mv) > 1 {
+				fmt.Sscanf(mv[1].Value, "%d", &users)
+			}
+			if len(mv) > 2 {
+				fmt.Sscanf(mv[2].Value, "%d", &newUsers)
+			}
+			if len(mv) > 3 {
+				fmt.Sscanf(mv[3].Value, "%d", &pageviews)
+			}
+			if len(mv) > 4 {
+				fmt.Sscanf(mv[4].Value, "%f", &bounceRate)
+			}
+			if len(mv) > 5 {
+				fmt.Sscanf(mv[5].Value, "%f", &avgDuration)
+			}
+			if len(mv) > 6 {
+				fmt.Sscanf(mv[6].Value, "%f", &engagementRate)
+			}
 		}
 	}
 
 	toJSON := func(r json.RawMessage) string {
-		if r == nil { return "null" }
+		if r == nil {
+			return "null"
+		}
 		return string(r)
 	}
 
@@ -300,7 +318,7 @@ func SyncGAData(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
-		"message": "GA4 数据同步成功",
+		"message":  "GA4 数据同步成功",
 		"sessions": sessions, "users": users, "pageviews": pageviews,
 		"bounce_rate": bounceRate, "avg_duration": avgDuration,
 	}})

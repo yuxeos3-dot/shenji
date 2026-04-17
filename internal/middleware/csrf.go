@@ -72,6 +72,7 @@ func ValidateCSRFToken(token string) bool {
 // Any other write request must include both:
 //   - a `csrf_token` cookie
 //   - a matching `X-CSRF-Token` header
+//
 // Both values are HMAC-verified to prevent forgery.
 func CSRFProtect() gin.HandlerFunc {
 	return func(c *gin.Context) {

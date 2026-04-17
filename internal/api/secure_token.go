@@ -21,9 +21,9 @@ import (
 const encryptedPrefix = "enc:v1:"
 
 var (
-	gcmOnce  sync.Once
-	gcmAEAD  cipher.AEAD
-	gcmErr   error
+	gcmOnce sync.Once
+	gcmAEAD cipher.AEAD
+	gcmErr  error
 )
 
 func gcmCipher() (cipher.AEAD, error) {

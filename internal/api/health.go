@@ -21,10 +21,10 @@ func Healthz(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"status":      "ok",
-		"uptime_sec":  int64(time.Since(startTime).Seconds()),
-		"go_version":  runtime.Version(),
-		"goroutines":  runtime.NumGoroutine(),
+		"status":     "ok",
+		"uptime_sec": int64(time.Since(startTime).Seconds()),
+		"go_version": runtime.Version(),
+		"goroutines": runtime.NumGoroutine(),
 	})
 }
 
@@ -42,13 +42,13 @@ var (
 
 // IncHTTPRequests / IncHTTPErrors / ... are cheap atomic increments called from
 // middleware and key handlers. Reading them is done by Metrics below.
-func IncHTTPRequests()      { httpRequestsTotal.Add(1) }
-func IncHTTPErrors()        { httpErrorsTotal.Add(1) }
-func IncLoginFailure()      { loginFailuresTotal.Add(1) }
-func IncLoginLockout()      { loginLockoutsTotal.Add(1) }
-func IncAuditRun()          { auditRunsTotal.Add(1) }
-func IncDeadlinkRun()       { deadlinkRunsTotal.Add(1) }
-func IncAICall()            { aiCallsTotal.Add(1) }
+func IncHTTPRequests() { httpRequestsTotal.Add(1) }
+func IncHTTPErrors()   { httpErrorsTotal.Add(1) }
+func IncLoginFailure() { loginFailuresTotal.Add(1) }
+func IncLoginLockout() { loginLockoutsTotal.Add(1) }
+func IncAuditRun()     { auditRunsTotal.Add(1) }
+func IncDeadlinkRun()  { deadlinkRunsTotal.Add(1) }
+func IncAICall()       { aiCallsTotal.Add(1) }
 
 // MetricsCounter is global middleware that bumps the request/error counters
 // so /metrics has data. Kept in this package to avoid an import cycle with

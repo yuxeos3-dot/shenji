@@ -16,8 +16,8 @@ const (
 )
 
 type lockoutEntry struct {
-	failures     []time.Time
-	lockedUntil  time.Time
+	failures    []time.Time
+	lockedUntil time.Time
 }
 
 var (

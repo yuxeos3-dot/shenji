@@ -206,15 +206,33 @@ func main() {
 		v1.POST("/sites/:id/gsc/sync", api.RequirePermission("data.sync_gsc"), api.SyncGSCData)
 		v1.GET("/sites/:id/gsc", api.RequirePermission("data.view"), api.GetGSCData)
 
+		// GSC Dashboard (account-level overview + detail, date-range aware).
+		// Doesn't write to gsc_data — these endpoints are a live view of
+		// what the Google account can see, keyed by GSC property URL
+		// rather than our local site id.
+		v1.GET("/gsc/sites", api.RequirePermission("data.view"), api.GSCListSites)
+		v1.GET("/gsc/overview", api.RequirePermission("data.view"), api.GSCOverview)
+		v1.GET("/gsc/site-detail", api.RequirePermission("data.view"), api.GSCSiteDetail)
+
 		// GA
 		v1.GET("/oauth/ga", api.GetGAAuthURL)
 		v1.POST("/sites/:id/ga/sync", api.RequirePermission("data.sync_ga"), api.SyncGAData)
 		v1.GET("/sites/:id/ga", api.RequirePermission("data.view"), api.GetGAData)
 
+		// GA4 Dashboard (account-level, date-range). Parallel to GSC dashboard.
+		v1.GET("/ga4/properties", api.RequirePermission("data.view"), api.GAListProperties)
+		v1.GET("/ga4/overview", api.RequirePermission("data.view"), api.GAOverview)
+		v1.GET("/ga4/property-detail", api.RequirePermission("data.view"), api.GAPropertyDetail)
+
 		// Yandex
 		v1.GET("/oauth/yandex", api.GetYandexAuthURL)
 		v1.POST("/sites/:id/yandex/sync", api.RequirePermission("data.sync_yandex"), api.SyncYandexData)
 		v1.GET("/sites/:id/yandex", api.RequirePermission("data.view"), api.GetYandexData)
+
+		// Yandex Dashboard
+		v1.GET("/yandex/hosts", api.RequirePermission("data.view"), api.YandexListHosts)
+		v1.GET("/yandex/overview", api.RequirePermission("data.view"), api.YandexOverview)
+		v1.GET("/yandex/host-detail", api.RequirePermission("data.view"), api.YandexHostDetail)
 
 		// Reports (daily — 日报)
 		v1.GET("/reports", api.RequirePermission("reports.daily.view"), api.ListReports)
@@ -268,6 +286,11 @@ func main() {
 		// Bing Webmaster
 		v1.POST("/sites/:id/bing/sync", api.RequirePermission("data.sync_gsc"), api.SyncBingData)
 		v1.GET("/sites/:id/bing", api.RequirePermission("data.view"), api.GetBingData)
+
+		// Bing Dashboard
+		v1.GET("/bing/sites", api.RequirePermission("data.view"), api.BingListSites)
+		v1.GET("/bing/overview", api.RequirePermission("data.view"), api.BingOverview)
+		v1.GET("/bing/site-detail", api.RequirePermission("data.view"), api.BingSiteDetail)
 
 		// Settings (admin only)
 		settings := v1.Group("/settings")

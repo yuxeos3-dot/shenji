@@ -220,7 +220,9 @@ func callAISlot(apiURL, apiKey, model, prompt string, maxTokens int) (string, er
 	}
 	var parsed struct {
 		Choices []struct {
-			Message struct{ Content string `json:"content"` } `json:"message"`
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(respBody, &parsed); err != nil {

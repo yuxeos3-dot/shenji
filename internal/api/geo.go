@@ -125,8 +125,12 @@ func GeoListTitles(c *gin.Context) {
 	libID := c.Param("id")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "100"))
-	if page < 1 { page = 1 }
-	if perPage < 1 || perPage > 500 { perPage = 100 }
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 || perPage > 500 {
+		perPage = 100
+	}
 	offset := (page - 1) * perPage
 
 	var total int

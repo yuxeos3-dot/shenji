@@ -78,8 +78,12 @@ func GetDeadLinks(c *gin.Context) {
 	// Pagination
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "100"))
-	if page < 1 { page = 1 }
-	if perPage < 1 || perPage > 500 { perPage = 100 }
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 || perPage > 500 {
+		perPage = 100
+	}
 	offset := (page - 1) * perPage
 
 	// Filter
@@ -197,7 +201,9 @@ func RetryDeadLinks(c *gin.Context) {
 		client := &http.Client{
 			Timeout: 15 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) >= 5 { return http.ErrUseLastResponse }
+				if len(via) >= 5 {
+					return http.ErrUseLastResponse
+				}
 				return nil
 			},
 		}

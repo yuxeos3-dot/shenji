@@ -242,11 +242,11 @@ func GetOnlineUsersAPI(c *gin.Context) {
 			name = u.Email
 		}
 		list = append(list, gin.H{
-			"user_id":    u.UserID,
-			"name":       name,
-			"email":      u.Email,
-			"role":       u.Role,
-			"ips":        u.IPs,
+			"user_id":       u.UserID,
+			"name":          name,
+			"email":         u.Email,
+			"role":          u.Role,
+			"ips":           u.IPs,
 			"session_count": len(u.IPs),
 		})
 	}
@@ -254,9 +254,9 @@ func GetOnlineUsersAPI(c *gin.Context) {
 		list = []gin.H{}
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
-		"online_count":   len(entries), // total sessions (user+IP combos)
-		"user_count":     len(userMap), // unique users
-		"users":          list,
+		"online_count": len(entries), // total sessions (user+IP combos)
+		"user_count":   len(userMap), // unique users
+		"users":        list,
 	}})
 }
 
