@@ -360,7 +360,6 @@ func UserRateLimit(maxPerMinute int) gin.HandlerFunc {
 		}
 
 		heavyLimiter.mu.Lock()
-		defer heavyLimiter.mu.Unlock()
 
 		now := time.Now()
 		window := now.Add(-1 * time.Minute)
@@ -373,12 +372,14 @@ func UserRateLimit(maxPerMinute int) gin.HandlerFunc {
 		}
 
 		if len(valid) >= maxPerMinute {
+			heavyLimiter.mu.Unlock()
 			c.JSON(http.StatusTooManyRequests, gin.H{"code": -1, "error": "操作过于频繁，请稍后再试"})
 			c.Abort()
 			return
 		}
 
 		heavyLimiter.requests[userID] = append(valid, now)
+		heavyLimiter.mu.Unlock()
 		c.Next()
 	}
 }
@@ -428,7 +429,6 @@ func LoginRateLimit() gin.HandlerFunc {
 		ip := c.ClientIP()
 
 		loginLimiter.mu.Lock()
-		defer loginLimiter.mu.Unlock()
 
 		now := time.Now()
 		window := now.Add(-1 * time.Minute)
@@ -441,12 +441,14 @@ func LoginRateLimit() gin.HandlerFunc {
 		}
 
 		if len(valid) >= 5 {
+			loginLimiter.mu.Unlock()
 			c.JSON(http.StatusTooManyRequests, gin.H{"code": -1, "error": "登录尝试过于频繁，请1分钟后重试"})
 			c.Abort()
 			return
 		}
 
 		loginLimiter.attempts[ip] = append(valid, now)
+		loginLimiter.mu.Unlock()
 		c.Next()
 	}
 }
