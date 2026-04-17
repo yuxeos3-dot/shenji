@@ -589,6 +589,26 @@ func Init() {
 			UNIQUE(user_id, year, month)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_monthly_user_ym ON monthly_reports(user_id, year DESC, month DESC)`,
+
+		// ─── Report evaluations (汇报评价) ─────────────────────────────────
+		// Polymorphic: one row can point to a daily, weekly, or monthly
+		// report. Admins write these; authors read them on their own
+		// detail page. UNIQUE(report_type, report_id, evaluator_id)
+		// enforces "one evaluator has at most one evaluation per report"
+		// — the POST handler upserts instead of creating duplicates.
+		`CREATE TABLE IF NOT EXISTS report_evaluations (
+			id             INTEGER PRIMARY KEY AUTOINCREMENT,
+			report_type    TEXT NOT NULL,       -- 'daily' | 'weekly' | 'monthly'
+			report_id      INTEGER NOT NULL,
+			evaluator_id   INTEGER NOT NULL REFERENCES users(id),
+			evaluator_name TEXT DEFAULT '',
+			content        TEXT NOT NULL,
+			created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(report_type, report_id, evaluator_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_eval_target ON report_evaluations(report_type, report_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_eval_by ON report_evaluations(evaluator_id)`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {

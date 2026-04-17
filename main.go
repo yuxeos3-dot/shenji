@@ -235,6 +235,13 @@ func main() {
 
 		v1.GET("/reports/:date", api.RequirePermission("reports.view"), api.GetReportByDate)
 
+		// Report evaluations (admin 对日/周/月汇报的评价). GET is gated
+		// by the handler (owner or admin); POST/DELETE are admin-only
+		// via middleware so the handler can assume the role already.
+		v1.GET("/evaluations", api.RequirePermission("reports.view"), api.ListEvaluations)
+		v1.POST("/evaluations", middleware.AdminRequired(), api.CreateEvaluation)
+		v1.DELETE("/evaluations/:id", middleware.AdminRequired(), api.DeleteEvaluation)
+
 		// Bing Webmaster
 		v1.POST("/sites/:id/bing/sync", api.RequirePermission("data.sync_gsc"), api.SyncBingData)
 		v1.GET("/sites/:id/bing", api.RequirePermission("data.view"), api.GetBingData)

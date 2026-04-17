@@ -182,6 +182,11 @@ const api = {
   polishMonthlyReport: (id: Id) => instance.post(`/v1/reports/monthly/${id}/polish`),
   deleteMonthlyReport: (id: Id) => instance.delete(`/v1/reports/monthly/${id}`),
 
+  // Report evaluations (admin 写评价 / 作者查看)
+  listEvaluations: (params: Record<string, any>) => instance.get('/v1/evaluations', { params }),
+  createEvaluation: (data: Record<string, any>) => instance.post('/v1/evaluations', data),
+  deleteEvaluation: (id: Id) => instance.delete(`/v1/evaluations/${id}`),
+
   // Bing Webmaster
   syncBing: (siteId: Id) => instance.post(`/v1/sites/${siteId}/bing/sync`),
   getBingData: (siteId: Id, config?: Record<string, any>) =>

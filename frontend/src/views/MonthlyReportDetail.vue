@@ -68,6 +68,12 @@
         <pre v-else class="content-readonly">{{ task.content || '(空)' }}</pre>
       </div>
 
+      <EvaluationsPanel
+        v-if="task.id"
+        report-type="monthly"
+        :report-id="task.id"
+      />
+
       <el-dialog v-model="showCompare" title="🤖 AI 润色结果" width="920px" top="4vh">
         <div class="compare-wrap">
           <div class="compare-col">
@@ -94,6 +100,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '../stores/user'
 import api from '../api'
+import EvaluationsPanel from '../components/EvaluationsPanel.vue'
 
 const route = useRoute()
 const router = useRouter()

@@ -38,7 +38,7 @@
       </table>
     </div>
 
-    <el-dialog v-model="showDetail" title="📋 汇报详情" width="600px">
+    <el-dialog v-model="showDetail" title="📋 汇报详情" width="720px" top="5vh">
       <div v-if="sel" class="report-detail">
         <div class="report-meta">{{ sel.user_name }} · {{ sel.report_date }}</div>
         <div class="report-content">{{ sel.content }}</div>
@@ -54,6 +54,14 @@
           <h4>⚠️ 问题与风险</h4>
           <p>{{ sel.issues }}</p>
         </div>
+
+        <!-- Evaluations mount. :key ensures the inner component
+             reloads when the user opens a different report. -->
+        <EvaluationsPanel
+          :key="sel.id"
+          report-type="daily"
+          :report-id="sel.id"
+        />
       </div>
     </el-dialog>
   </div>
@@ -63,6 +71,7 @@
 import { ref, onMounted } from 'vue'
 import { useUserStore } from '../stores/user'
 import api from '../api'
+import EvaluationsPanel from '../components/EvaluationsPanel.vue'
 
 const userStore = useUserStore()
 const reports = ref([])

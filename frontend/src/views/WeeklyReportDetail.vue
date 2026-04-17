@@ -73,6 +73,15 @@
         <pre v-else class="content-readonly">{{ task.content || '(空)' }}</pre>
       </div>
 
+      <!-- Evaluations panel: admin writes, author reads. Shown in
+           both draft and submitted states so managers can leave
+           feedback while the draft is still being polished. -->
+      <EvaluationsPanel
+        v-if="task.id"
+        report-type="weekly"
+        :report-id="task.id"
+      />
+
       <!-- Compare dialog: shown after AI polish returns a candidate. -->
       <el-dialog v-model="showCompare" title="🤖 AI 润色结果" width="920px" top="4vh">
         <div class="compare-wrap">
@@ -100,6 +109,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '../stores/user'
 import api from '../api'
+import EvaluationsPanel from '../components/EvaluationsPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
