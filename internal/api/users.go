@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 
 	"seo-system/internal/db"
@@ -20,6 +22,11 @@ type CreateUserRequest struct {
 	Role         string `json:"role"`
 	DepartmentID int64  `json:"department_id"`
 	GroupID      int64  `json:"group_id"`
+	// Optional: initial permissions for member users. If the caller passed
+	// this along with the create request, we'll persist them right after
+	// the INSERT so the admin doesn't have to open a second dialog.
+	// Ignored for admins (they implicitly have all perms).
+	Permissions []string `json:"permissions"`
 }
 
 type UpdateUserRequest struct {
@@ -136,6 +143,23 @@ func CreateUser(c *gin.Context) {
 	}
 
 	id, _ := result.LastInsertId()
+
+	// Initial permissions — skip entirely for admins (they have all
+	// perms implicitly) and when the caller didn't send any (empty
+	// list = "apply no perms", nil = "don't touch").
+	//
+	// If the permission validation fails here we've already inserted
+	// the user, so we return 200 with a warning rather than rolling
+	// back — the admin can fix perms from the row action instead.
+	if req.Role != "admin" && len(req.Permissions) > 0 {
+		cleaned, permErr := cleanPermissionList(req.Permissions)
+		if permErr == nil {
+			js, _ := json.Marshal(cleaned)
+			db.DB.Exec("UPDATE users SET permissions=? WHERE id=?", string(js), id)
+		} else {
+			log.Printf("[create_user] id=%d perms rejected: %v", id, permErr)
+		}
+	}
 
 	WriteAuditLog(c, "create_user", "user", fmt.Sprintf("%d", id), req.Email)
 

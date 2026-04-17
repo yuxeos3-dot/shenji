@@ -93,7 +93,7 @@
       </div>
       <div class="form-group">
         <label>角色</label>
-        <el-select v-model="form.role" style="width:100%">
+        <el-select v-model="form.role" style="width:100%" @change="onRoleChange">
           <el-option label="管理员" value="admin" />
           <el-option label="成员" value="member" />
         </el-select>
@@ -113,6 +113,50 @@
         </div>
       </div>
       <div class="form-group"><label>Telegram ID</label><input v-model="form.telegram_id" /></div>
+
+      <!-- Initial permissions (新建时可选; 管理员不需要，自带全权限) -->
+      <div v-if="!editId && form.role !== 'admin'" class="form-group">
+        <label>
+          权限
+          <span style="font-weight:400;color:var(--ink-hint);font-size:12px;margin-left:8px">
+            可选；不勾选则保存后在列表里点「权限」再设置
+          </span>
+        </label>
+        <div class="inline-perm-box">
+          <div class="inline-perm-head">
+            <span class="inline-perm-count">
+              已选 {{ initialPerms.length }} 项
+            </span>
+            <span class="inline-perm-links">
+              <a @click.prevent="initialPerms = allPermCodes()">全选</a>
+              <a @click.prevent="initialPerms = []">清空</a>
+            </span>
+          </div>
+          <div class="inline-perm-groups">
+            <div v-for="g in permTree" :key="g.code" class="inline-perm-group">
+              <div class="ipg-head">
+                <el-checkbox
+                  :model-value="isInlineGroupChecked(g)"
+                  :indeterminate="isInlineGroupIndeterminate(g)"
+                  @change="toggleInlineGroup(g, $event)">
+                  <span class="ipg-label">{{ g.label }}</span>
+                </el-checkbox>
+              </div>
+              <div class="ipg-children">
+                <el-checkbox
+                  v-for="child in g.children"
+                  :key="child.code"
+                  :model-value="initialPerms.includes(child.code)"
+                  @change="toggleInlinePerm(child.code, $event)"
+                  class="ipg-item">
+                  {{ child.label }}
+                </el-checkbox>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <template #footer>
         <el-button @click="showDialog=false">取消</el-button>
         <el-button type="primary" @click="saveUser">保存</el-button>
@@ -205,6 +249,36 @@ const form = ref({ name:'', email:'', password:'', role:'member', telegram_id:''
 const fieldErrs = ref({})
 function clearFieldErrors() { fieldErrs.value = {} }
 
+// Inline permission picker state (only used when creating a NEW member).
+// Reuses the same permTree fetched for the stand-alone permission dialog
+// further down — we just need to make sure it's loaded by the time the
+// user opens the create dialog.
+const initialPerms = ref([])
+function isInlineGroupChecked(g) {
+  return g.children.length > 0 && g.children.every(c => initialPerms.value.includes(c.code))
+}
+function isInlineGroupIndeterminate(g) {
+  const n = g.children.filter(c => initialPerms.value.includes(c.code)).length
+  return n > 0 && n < g.children.length
+}
+function toggleInlineGroup(g, val) {
+  const codes = g.children.map(c => c.code)
+  if (val) {
+    initialPerms.value = [...new Set([...initialPerms.value, ...codes])]
+  } else {
+    initialPerms.value = initialPerms.value.filter(c => !codes.includes(c))
+  }
+}
+function toggleInlinePerm(code, val) {
+  if (val) initialPerms.value = [...initialPerms.value, code]
+  else initialPerms.value = initialPerms.value.filter(c => c !== code)
+}
+function allPermCodes() {
+  const out = []
+  for (const g of permTree.value) for (const c of g.children) out.push(c.code)
+  return out
+}
+
 // Group-by-department map so the form's cascading dropdown and the
 // dept panel below can both render groups under the right parent.
 const groupsByDept = computed(() => {
@@ -236,10 +310,20 @@ async function loadAll() {
   }
 }
 
-function openAdd() {
+async function openAdd() {
   editId.value = null
   form.value = { name:'', email:'', password:'', role:'member', telegram_id:'', department_id:null, group_id:null }
   clearFieldErrors()
+  initialPerms.value = []
+  // Load the permission tree lazily the first time the dialog is opened
+  // for creation. We don't block the dialog on it — the checkboxes just
+  // render empty until the fetch completes.
+  if (!permTree.value.length) {
+    try {
+      const res = await api.getPermissionTree()
+      permTree.value = res.data || []
+    } catch (e) { console.error('加载权限树失败', e) }
+  }
   showDialog.value = true
 }
 function openEdit(u) {
@@ -261,6 +345,12 @@ function openEdit(u) {
 function onDeptChange() {
   form.value.group_id = null
 }
+// Admins don't have checked permissions (they have all implicitly).
+// Clear the inline picker when user flips to admin so we don't silently
+// keep stale selections behind a v-if.
+function onRoleChange(v) {
+  if (v === 'admin') initialPerms.value = []
+}
 
 async function saveUser() {
   clearFieldErrors()
@@ -270,6 +360,12 @@ async function saveUser() {
     ...form.value,
     department_id: form.value.department_id || 0,
     group_id: form.value.group_id || 0,
+  }
+  // Initial permissions are only meaningful on CREATE and only for
+  // non-admin users. Admins get every perm implicitly; skipping the
+  // field tells the backend "don't try to apply any".
+  if (!editId.value && form.value.role !== 'admin') {
+    payload.permissions = [...initialPerms.value]
   }
   // _silent tells the axios interceptor to skip the global toast so we
   // can render field-level errors inline. On unexpected errors (no
@@ -505,6 +601,41 @@ onMounted(loadAll)
 .perm-group-label { font-weight:700; font-size:14px; }
 .perm-children { padding:10px 14px 10px 32px; display:grid; grid-template-columns:1fr 1fr; gap:6px 20px; }
 .perm-item { font-size:13px; }
+
+/* ── Inline permission picker (embedded in 添加用户 dialog) ── */
+/* Tighter than .perm-tree/.perm-group because it sits inside a 480px
+   dialog next to other form fields. Max-height caps growth so the
+   dialog doesn't balloon when there are many perms. */
+.inline-perm-box {
+  border:1.5px solid var(--border-light);
+  border-radius:9px;
+  background:var(--surface-2, #fafafa);
+}
+.inline-perm-head {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:8px 12px;
+  border-bottom:1px solid var(--border-light);
+  font-size:12px;
+  background:var(--surface-3, #f3f4f6);
+}
+.inline-perm-count { color:var(--ink-mid); font-weight:700; }
+.inline-perm-links { display:flex; gap:12px; }
+.inline-perm-links a {
+  color:var(--sun-deep); font-weight:700; cursor:pointer;
+  text-decoration:none; user-select:none;
+}
+.inline-perm-links a:hover { text-decoration:underline; }
+
+.inline-perm-groups { padding:10px; max-height:280px; overflow-y:auto; }
+.inline-perm-group { margin-bottom:10px; }
+.inline-perm-group:last-child { margin-bottom:0; }
+.ipg-head { padding:4px 6px; background:var(--surface-3, #f3f4f6); border-radius:6px; }
+.ipg-label { font-weight:700; font-size:13px; }
+.ipg-children {
+  padding:6px 6px 4px 24px;
+  display:grid; grid-template-columns:1fr 1fr; gap:2px 12px;
+}
+.ipg-item { font-size:12.5px; }
 
 /* ── Department + group panel (sits above the users table) ── */
 .dept-panel { margin-bottom:18px; padding:16px 22px; }

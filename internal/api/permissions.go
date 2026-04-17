@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -297,19 +298,10 @@ func SaveUserPermissions(c *gin.Context) {
 		c.JSON(400, gin.H{"code": -1, "error": "参数错误"})
 		return
 	}
-	known := knownPermCodes()
-	seen := map[string]bool{}
-	cleaned := make([]string, 0, len(req.Permissions))
-	for _, p := range req.Permissions {
-		if _, ok := known[p]; !ok {
-			c.JSON(400, gin.H{"code": -1, "error": "未知权限: " + p})
-			return
-		}
-		if seen[p] {
-			continue
-		}
-		seen[p] = true
-		cleaned = append(cleaned, p)
+	cleaned, err := cleanPermissionList(req.Permissions)
+	if err != nil {
+		c.JSON(400, gin.H{"code": -1, "error": err.Error()})
+		return
 	}
 	js, _ := json.Marshal(cleaned)
 	if _, err := db.DB.Exec("UPDATE users SET permissions=? WHERE id=?", string(js), userID); err != nil {
@@ -320,6 +312,27 @@ func SaveUserPermissions(c *gin.Context) {
 	WriteAuditLog(c, "save_permissions", "user", userID, string(js))
 
 	c.JSON(200, gin.H{"code": 0, "data": "权限已保存"})
+}
+
+// cleanPermissionList validates that every code is in the permission tree
+// and de-duplicates. Returns the cleaned slice or an error naming the
+// first unknown code. Exposed here so both SaveUserPermissions and the
+// initial-perms flow on CreateUser go through the same guardrail.
+func cleanPermissionList(codes []string) ([]string, error) {
+	known := knownPermCodes()
+	seen := map[string]bool{}
+	out := make([]string, 0, len(codes))
+	for _, p := range codes {
+		if _, ok := known[p]; !ok {
+			return nil, fmt.Errorf("未知权限: %s", p)
+		}
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 // HasPermission checks if the current user has a specific permission.
