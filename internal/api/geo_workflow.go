@@ -526,10 +526,14 @@ func runKeywordWorkflow(jobID, userID int64, req StartKeywordWorkflowRequest) {
 // finishJobWithFallback completes a job with safe meta defaults when
 // step 2 fails. We never discard the draft — the whole reason we
 // store it is to survive later errors.
+//
+// Fallbacks use purely informational phrasing (no "指南" / "评测" /
+// "对比" which carry commercial overtones). Keep in sync with the
+// tone in buildMetaExtractPrompt.
 func finishJobWithFallback(jobID int64, draft, keyword, title string) {
 	year := fmt.Sprintf("%d", time.Now().Year())
-	mt := fmt.Sprintf("【%s】%s完整指南", year, keyword)
-	md := fmt.Sprintf("%s年%s深度评测与实操攻略，汇总真实数据、对比分析与常见问题解答。", year, keyword)
+	mt := fmt.Sprintf("【%s】%s：概述与常见问题", year, keyword)
+	md := fmt.Sprintf("【%s】%s 相关信息整理：定义、背景、常见疑问与资料来源。内容为事实陈述，不作商业推荐。", year, keyword)
 	db.DB.Exec(`UPDATE geo_workflow_jobs
 		SET status = 'done', current_step = 2,
 		    step_label = '⚠️ 完成（SEO 元数据使用默认值，建议手动编辑）',
@@ -541,18 +545,28 @@ func finishJobWithFallback(jobID int64, draft, keyword, title string) {
 // ─── Prompts ───────────────────────────────────────────────────────────────
 
 // buildNeutralAntiDetectionPrompt is the heart of the pipeline. It
-// combines three goals at once:
+// combines four goals at once:
 //
-//  1. NEUTRAL VOICE — the site may deal with adult/sensitive keywords,
-//     but the output must read like a professional review or reference
-//     article. No explicit/graphic wording. Think "consumer report"
-//     tone, not "fan site" tone.
-//  2. LOW AI-DETECTION RATE — concrete humanization techniques
-//     borrowed from the jx reference implementation: ban formulaic
-//     connectors, force second-person voice, require at least one
-//     admitted drawback, require uneven sentence lengths.
-//  3. NATURAL INTERNAL LINKING — uses the site's real page list so
-//     the AI embeds [anchor](/real/url) rather than hallucinating URLs.
+//  1. PURPOSE CLARITY — this article is an external-facing informational
+//     piece meant for GEO (AI-search retrieval) and backlink sites,
+//     not a landing page for a product/platform/brand. No sales push.
+//  2. NEUTRAL + CLINICAL TONE — the keyword universe is adult-industry,
+//     but output must read like an encyclopedia entry or lifestyle column:
+//     informational, educational, culturally curious — never titillating,
+//     never explicit, never promotional.
+//  3. LOW AI-DETECTION — concrete humanization techniques: ban formulaic
+//     connectors, force second-person voice, require one admitted
+//     drawback, require uneven sentence lengths, require concrete numbers.
+//  4. NATURAL INTERNAL LINKING — uses the site's real page list so the
+//     AI embeds [anchor](/real/url) rather than hallucinating URLs.
+//
+// Critical non-negotiables enforced by explicit 禁用词 blocklists:
+//   - NO gambling jargon (平台 / 注册 / 优惠 / 流水 / 赔率 / 转盘 / 博彩 / 娱乐城)
+//     — the workflow originally forked from a 博彩 template, we scrub
+//     every trace of it because those keywords poison rankings and
+//     mismatch the actual adult content vertical.
+//   - NO sensory descriptions (身体部位 / 行为过程 / 感官刺激 / 暗示性比喻)
+//   - NO promotional/sales CTAs (立即 / 马上 / 限时 / 爆款 / 最佳推荐)
 func buildNeutralAntiDetectionPrompt(
 	req StartKeywordWorkflowRequest,
 	knowledge string,
@@ -580,21 +594,20 @@ func buildNeutralAntiDetectionPrompt(
 	angleBlock := ""
 	switch req.WritingAngle {
 	case "评测":
-		angleBlock = "【写作视角】第三方评测——以观察者身份做客观分析，交替正反面评价，避免过度美化。\n"
+		angleBlock = "【写作视角】资料汇总与中立对比——以信息整理者身份呈现多方观点，避免任何推销、避免打分结论。\n"
 	case "攻略":
-		angleBlock = "【写作视角】实操攻略——以过来人口吻给出具体步骤、注意点、避坑指南。\n"
+		angleBlock = "【写作视角】知识科普——解释关键概念、讨论常见误区、给出一般性注意事项，语气像百科条目或生活方式专栏。\n"
 	case "对比":
-		angleBlock = "【写作视角】横向对比——至少点名 2-3 个同领域竞品，做具体字段对比表。\n"
+		angleBlock = "【写作视角】横向信息对比——把同主题下不同类别/流派/做法并列呈现，只做事实描述，不下好坏判断。\n"
 	case "新手":
-		angleBlock = "【写作视角】新手入门——术语白话化、步骤尽量拆细、语气温和耐心。\n"
+		angleBlock = "【写作视角】入门科普——用通俗语言拆解术语，讲清楚概念由来和社会背景，语气温和包容。\n"
 	}
 
-	// The prompt. Big, but each line earns its place — we're engineering
-	// against both AI content detectors and the user's adult-topic
-	// neutrality constraint.
-	return `你是一名资深行业编辑，有十年以上内容创作经验，擅长把专业话题写成信息密度高又易读的长文。
+	// NOTE: string concatenation (not Sprintf) because the user-supplied
+	// keyword could contain '%' which would otherwise mangle formatting.
+	return `你是一名资深内容编辑，常年为生活方式、健康科普、文化研究类媒体撰稿，擅长把敏感或小众话题写成信息量高、语气克制的长文。
 
-现在请围绕以下关键词写一篇 Markdown 长文：
+现在请围绕以下关键词写一篇 Markdown 文章：
 
 【核心关键词】` + req.Keyword + `
 【建议标题】` + req.TitleText + `
@@ -603,34 +616,70 @@ func buildNeutralAntiDetectionPrompt(
 
 ` + angleBlock + knowledgeBlock + pagesBlock.String() + `
 
-━━━━━ 强制约束：中性化表达（重中之重）━━━━━
-该关键词可能涉及成人 / 敏感话题，但本文的受众是普通信息检索用户，因此请严格执行：
-1. 全文使用中性、专业、信息性的措辞——像消费者报告或行业研究文章，不是粉丝站或营销文案
-2. 严禁任何露骨、挑逗、煽情、感官化描写
-3. 不得使用身体部位的具体描写、性行为细节、暗示性俚语
-4. 涉及成人话题时，只讨论行业层面的事实：市场规模、平台特点、用户结构、合规状况、价格区间、安全注意事项等
-5. 语气保持平视、冷静、理性——既不批判也不推销，像一篇"值得收藏的工具性文章"
+━━━━━ 文章定位（必读！）━━━━━
+这是一篇用于 SEO/GEO/外链目的的信息型文章，发布在第三方内容站点或资讯站。
+它不是任何平台、品牌、产品的推广页，也不是销售页。
+核心目的是：
+- 让搜索引擎（Google/Bing）把这篇内容识别为权威信息源
+- 让生成式 AI（ChatGPT/Gemini/Perplexity）抓取时能从中提取结构化答案
+- 以自然密度布局关键词，建立主题相关性
+禁止任何促销口吻（"马上""立即""限时"）、禁止任何"推荐某某"的定性表达。
+
+━━━━━ 选题角度（关键）━━━━━
+该关键词可能涉及成人话题。你的写作定位不是面向从业者或消费者，而是面向：
+- 对该话题感兴趣的普通读者（想了解"这是什么""为什么存在""社会怎么看"）
+- 研究型/学术型检索者（查定义、查历史、查数据）
+- 通过 AI 搜索该话题的一般用户（想要事实、概念、常识）
+
+所以内容必须围绕以下之一切入：
+- 话题的定义、起源、历史演变
+- 相关的文化、社会、心理、语言学背景
+- 现象层面的客观描述（而非操作层面的指南）
+- 常见误区的澄清、学术或媒体视角的观点汇总
+- 相关的法律法规、行业现状、市场规模等宏观数据
+
+绝不允许：
+- 教读者如何获取、使用、操作任何产品或服务
+- 任何带动作指令的"步骤教学"（"第一步...第二步..."除非是抽象流程）
+- 感官性、刺激性、煽动性的描写
+
+━━━━━ 禁用词清单（严格）━━━━━
+【博彩/游戏类】以下词一律禁止出现（哪怕只是比喻）：
+平台、注册、优惠、流水、赔率、转盘、彩金、娱乐城、博彩、赌场、跑路、赔付、押注、下注、线上游戏、电子游艺、真人视讯、百家乐、老虎机、体育博彩、即时返水
+
+【露骨/感官类】以下词一律禁止出现：
+具体身体部位的直接描写、任何行为过程的细节、"性感"、"诱人"、"销魂"、"激情"、"火辣"、任何俚语化的性暗示表达
+
+【促销类】以下词一律禁止出现：
+马上、立即、限时、爆款、必选、最佳推荐、首选、不容错过、抓紧、赶紧、值得拥有
+
+━━━━━ 语言基调 ━━━━━
+- 整体像一本百科词条、一篇生活方式专栏、或一份行业报告的摘要
+- 涉及敏感内容时使用中性术语（例如："成年内容产业"而不是任何俚语；"亲密关系"而不是行为动词）
+- 可以出现医学、社会学、心理学、法学、经济学的专业术语（符合学术杂志风格）
+- 描写事实时只谈现象不谈感受，绝不代入第一人称经验性描写
 
 ━━━━━ 反 AI 检测要求（逐条执行）━━━━━
-1. 禁用陈词滥调：不要出现"首先""其次""然后""最后""综上所述""值得注意的是""众所周知""在数字时代"
-2. 连接词口语化：不要用"然而""此外""并且"，改用"不过""另外""再说"
+1. 禁用模板连接词：不要"首先""其次""然后""最后""综上所述""值得注意的是""众所周知""在数字时代""随着...的发展"
+2. 连接词口语化：不要"然而""此外""并且"，改用"不过""另外""再说""换句话讲"
 3. 句子长短交替：不要连续 3 句都是相近长度；短句（10 字以内）和长句（30 字以上）要混着来
-4. 至少 1 次用第二人称直接对话读者：如"你可能会问..."、"想清楚这一点..."、"如果你刚入门..."
-5. 至少 1 次坦承缺点或局限：哪怕对整体评价正面，也要点出 1-2 个需要注意的问题
-6. 至少 2 个具体数字（金额 / 时间 / 比例 / 数量等）——数字越具体越像真人写的，例如"约 87%"而不是"大多数"
-7. 严禁空洞形容词：不要用"丰富的""多元的""优质的""专业的"作结论，全部换成具体事实
+4. 至少 1 次用第二人称直接对话读者：如"你可能会问..."、"想清楚这一点..."、"如果你第一次接触这个话题..."
+5. 至少 1 次坦承局限或边界：哪怕话题本身中性，也要点出 1 个需要读者自行判断的地方（例如"数据来源差异较大"、"不同地区认定标准不同"）
+6. 至少 2 个具体数字（比例 / 年份 / 金额 / 数量等）——数字越具体越像真人写的，例如"约 87%"而不是"大多数"
+7. 严禁空洞形容词：不要"丰富的""多元的""优质的""专业的"作结论，全部换成具体事实
 
-━━━━━ 结构与格式要求 ━━━━━
-1. 全文 Markdown 格式，从 ## 二级标题开始，不要 # 一级标题（留给网站模板）
-2. 至少 1 个 Markdown 表格（| 格式，含表头分隔行）——用于对比 / 数据聚合
+━━━━━ 结构与格式 ━━━━━
+1. 全文 Markdown，从 ## 二级标题开始（不要 # 一级标题，留给网站模板）
+2. 至少 1 个 Markdown 表格（| 格式，含表头分隔行）——用于并列/对比/数据聚合
 3. 至少 1 个有序或无序列表段落
 4. 标题或首段出现"` + year + `"年份标签（增强时效感）
-5. 结尾包含 3-5 个 FAQ（以"## 常见问题"开头，每问每答为 ### 小标题 + 段落，答案不少于 60 字）
-6. 禁止前言（"在这篇文章中我将...""让我们开始吧"之类），直接进入第一个 ## 标题
+5. 结尾包含 3-5 个 FAQ（以"## 常见问题"开头，每问每答用 ### 小标题 + 段落，答案不少于 60 字）
+6. 关键词以自然密度分布 4-8 次（含变体），不要机械重复
+7. 禁止前言（"在这篇文章中我将...""让我们开始吧"之类），直接进入第一个 ## 标题
 
 ━━━━━ 内链处理 ━━━━━
 - 只能使用上面【站内可用内链清单】里的 URL
-- 锚文本必须是 2-8 字的自然词组，和上下文衔接
+- 锚文本必须是 2-8 字的自然词组，与上下文语义衔接
 - 禁止堆砌锚文本或在同一段出现 2 个以上内链
 - 如果清单为空，本篇允许不包含内链
 
@@ -645,7 +694,7 @@ func buildNeutralAntiDetectionPrompt(
 // containing "%" would otherwise corrupt the format directives.
 func buildMetaExtractPrompt(keyword, title, excerpt string) string {
 	year := fmt.Sprintf("%d", time.Now().Year())
-	return `你是 SEO 元数据生成助手。下面是一篇已写好的文章的开头摘要，请根据它生成 SEO 标题 / 描述 / FAQ 问答。
+	return `你是 SEO 元数据生成助手。下面是一篇信息型文章的开头摘要，请据此生成 SEO 标题 / 描述 / FAQ。
 
 【核心关键词】` + keyword + `
 【建议标题】` + title + `
@@ -655,16 +704,28 @@ func buildMetaExtractPrompt(keyword, title, excerpt string) string {
 
 任务：输出一个 JSON 对象（注意是纯 JSON，不要 markdown 代码块，不要解释文字），字段如下：
 - meta_title：SEO 标题，50 字以内，必须包含核心关键词和年份【` + year + `】
-- meta_description：Meta 描述，140-160 字，开头带【` + year + `】，结尾有行动号召
-- faq：一个数组，含 3-5 个问答，每个元素 {"q":"问题","a":"回答，60 字以上，信息性表述"}
+                     语气客观中立，像词典条目或百科标题，禁止任何推销口吻
+- meta_description：Meta 描述，140-160 字，开头带【` + year + `】标签
+                     内容必须是信息性、知识性陈述，不得有行动号召（如"马上""立即"）
+                     不得使用"平台""注册""优惠""评测""首选""最佳"等词
+- faq：一个数组，含 3-5 个问答，每个元素 {"q":"问题","a":"回答，60 字以上，事实陈述不推销"}
 
-要求：
-- 所有内容保持中性、专业语气，不得使用露骨词汇
-- faq 问题必须是真实用户可能搜索的长尾问题
-- 直接输出 JSON，不要任何其他字符
+━━━━━ 硬性禁用词（所有字段都不能出现）━━━━━
+博彩类：平台、注册、优惠、流水、赔率、转盘、彩金、娱乐城、博彩、赌场、押注、下注
+露骨类：任何身体部位、性感、诱人、销魂、激情、火辣、各类性暗示俚语
+促销类：马上、立即、限时、爆款、必选、最佳推荐、首选、抓紧
+
+━━━━━ 语气要求 ━━━━━
+- 全部字段保持中性、学术化、信息化语气
+- 像维基百科条目、像研究报告摘要、像专业杂志的 FAQ 栏目
+- 标题可以用"概述""发展""现状""常见问题""社会视角""文化背景"这类中性词汇作引子
+- faq 问题必须是信息检索型长尾（"什么是..."、"为什么..."、"...的历史是怎样"、"...在不同国家有什么差异"）
+- 绝不出现"哪家好""哪个值得买""如何选择推荐"这类导购式问题
+
+直接输出 JSON，不要任何其他字符。
 
 示例格式（字段示意，请生成真实内容而不是复制示例）：
-{"meta_title":"【` + year + `】XX完整指南：价格/特点/常见问题","meta_description":"【` + year + `年】...","faq":[{"q":"XX 是什么","a":"60 字以上回答..."}]}`
+{"meta_title":"【` + year + `】XX概述：定义、历史与常见问题","meta_description":"【` + year + `】本文梳理 XX 的定义、社会背景与常见疑问，数据来源包括...","faq":[{"q":"什么是 XX","a":"60 字以上的事实陈述..."}]}`
 }
 
 // parseMetaResponse extracts meta_title, meta_desc, faq JSON from the
@@ -697,18 +758,18 @@ func parseMetaResponse(raw, keyword, title string) (mt, md, faqJSON string) {
 	year := fmt.Sprintf("%d", time.Now().Year())
 	if err := json.Unmarshal([]byte(s), &parsed); err != nil || strings.TrimSpace(parsed.MetaTitle) == "" {
 		log.Printf("[geo-workflow] meta JSON parse failed: %v", err)
-		mt = fmt.Sprintf("【%s】%s完整指南", year, keyword)
-		md = fmt.Sprintf("%s年%s深度指南，涵盖常见问题、操作要点、对比分析，内容中立客观。", year, keyword)
+		mt = fmt.Sprintf("【%s】%s：概述与常见问题", year, keyword)
+		md = fmt.Sprintf("【%s】%s 相关信息整理，内容为事实陈述，不作商业推荐。", year, keyword)
 		faqJSON = "[]"
 		return
 	}
 	mt = strings.TrimSpace(parsed.MetaTitle)
 	md = strings.TrimSpace(parsed.MetaDescription)
 	if mt == "" {
-		mt = fmt.Sprintf("【%s】%s完整指南", year, keyword)
+		mt = fmt.Sprintf("【%s】%s：概述与常见问题", year, keyword)
 	}
 	if md == "" {
-		md = fmt.Sprintf("%s年%s深度指南，涵盖常见问题、操作要点、对比分析。", year, keyword)
+		md = fmt.Sprintf("【%s】%s 相关信息整理，内容为事实陈述，不作商业推荐。", year, keyword)
 	}
 	// Re-marshal FAQ to ensure it's valid JSON; on failure use '[]'.
 	if parsed.FAQ == nil {

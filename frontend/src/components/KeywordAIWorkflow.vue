@@ -33,10 +33,10 @@
         <div class="form-field">
           <label>写作视角</label>
           <el-select v-model="form.writing_angle" style="width:100%" clearable placeholder="（不指定）">
-            <el-option value="评测" label="评测 · 第三方客观分析" />
-            <el-option value="攻略" label="攻略 · 实操步骤避坑" />
-            <el-option value="对比" label="对比 · 横向 2-3 家同类" />
-            <el-option value="新手" label="新手入门 · 白话化讲解" />
+            <el-option value="评测" label="资料汇总 · 中立并列多方观点" />
+            <el-option value="攻略" label="知识科普 · 百科式概念解释" />
+            <el-option value="对比" label="横向信息 · 不同类别并列陈述" />
+            <el-option value="新手" label="入门科普 · 通俗讲解术语" />
           </el-select>
         </div>
         <div class="form-field" v-if="knowledgeOptions.length">
@@ -50,9 +50,11 @@
       <div class="hint-block">
         <div class="hint-title">🎯 本次生成的核心约束</div>
         <ul class="hint-list">
-          <li>✅ 中性表达 — 即使关键词偏敏感/成人话题，也只输出信息性、行业层面的中性内容，不得露骨</li>
-          <li>✅ 去 AI 化 — 禁用"首先/其次/综上所述"等模板连接词，句长交替，至少一处第二人称对话</li>
-          <li>✅ 自然内链 — 从该站点已配置的页面 URL 中自动挑选 2-4 条嵌入（若无页面则跳过）</li>
+          <li>✅ 信息型定位 — 输出为第三方资讯/百科类文章，用于外链或 GEO 收录，<b>非</b>品牌推广页</li>
+          <li>✅ 中性语气 — 即使关键词敏感，也只谈定义/历史/文化/行业数据，禁止露骨、禁止促销</li>
+          <li>✅ 去 AI 化 — 禁用"首先/其次/综上所述"，句长交替，至少一处第二人称对话</li>
+          <li>✅ 博彩零容忍 — 禁止"平台/注册/优惠/流水/赔率/娱乐城"等词</li>
+          <li>✅ 自然内链 — 从该站点已配置的页面 URL 中自动挑选 2-4 条嵌入</li>
         </ul>
         <div v-if="!sitePageCount" class="warn-line">
           ⚠ 当前站点还没添加页面，本次不会自动插入站内链接。建议去「站点详情 → 页面」添加主要栏目页后再来。
