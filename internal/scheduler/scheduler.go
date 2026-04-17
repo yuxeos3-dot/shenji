@@ -134,7 +134,11 @@ func runPerSiteIntervalCheck() {
 				if lastTime != nil {
 					t, err := time.Parse("2006-01-02T15:04:05Z", *lastTime)
 					if err != nil {
-						t, _ = time.Parse("2006-01-02 15:04:05", *lastTime)
+						t, err = time.Parse("2006-01-02 15:04:05", *lastTime)
+					}
+					if err != nil {
+						log.Printf("站点 %d 日期解析失败，跳过: %s", s.ID, *lastTime)
+						continue
 					}
 					if now.Sub(t) < 23*time.Hour {
 						continue // already ran within 23h
@@ -157,7 +161,11 @@ func runPerSiteIntervalCheck() {
 			} else {
 				t, err := time.Parse("2006-01-02T15:04:05Z", *lastTime)
 				if err != nil {
-					t, _ = time.Parse("2006-01-02 15:04:05", *lastTime)
+					t, err = time.Parse("2006-01-02 15:04:05", *lastTime)
+				}
+				if err != nil {
+					log.Printf("站点 %d 日期解析失败，跳过: %s", s.ID, *lastTime)
+					continue
 				}
 				if now.Sub(t) >= time.Duration(s.IntervalHours)*time.Hour {
 					shouldRun = true
