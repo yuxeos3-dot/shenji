@@ -34,7 +34,9 @@ func csrfKey() []byte {
 // cookies.
 func IssueCSRFToken(c *gin.Context, secure bool) string {
 	nonce := make([]byte, 16)
-	_, _ = rand.Read(nonce)
+	if _, err := rand.Read(nonce); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
 	mac := hmac.New(sha256.New, csrfKey())
 	mac.Write(nonce)
 	sig := mac.Sum(nil)
