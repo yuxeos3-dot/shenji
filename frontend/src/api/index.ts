@@ -155,6 +155,24 @@ const api = {
   getYandexData: (siteId: Id, config?: Record<string, any>) =>
     instance.get(`/v1/sites/${siteId}/yandex`, config),
 
+  // ── Dashboard (data-management page): account-level overview + per-site
+  // detail, date-range aware. No DB persistence — live view from upstream.
+  dashGSCListSites: () => instance.get('/v1/gsc/sites'),
+  dashGSCOverview: (params: Record<string, any>) => instance.get('/v1/gsc/overview', { params }),
+  dashGSCSiteDetail: (params: Record<string, any>) => instance.get('/v1/gsc/site-detail', { params }),
+
+  dashGAListProperties: () => instance.get('/v1/ga4/properties'),
+  dashGAOverview: (params: Record<string, any>) => instance.get('/v1/ga4/overview', { params }),
+  dashGAPropertyDetail: (params: Record<string, any>) => instance.get('/v1/ga4/property-detail', { params }),
+
+  dashYandexListHosts: () => instance.get('/v1/yandex/hosts'),
+  dashYandexOverview: (params: Record<string, any>) => instance.get('/v1/yandex/overview', { params }),
+  dashYandexHostDetail: (params: Record<string, any>) => instance.get('/v1/yandex/host-detail', { params }),
+
+  dashBingListSites: () => instance.get('/v1/bing/sites'),
+  dashBingOverview: (params: Record<string, any>) => instance.get('/v1/bing/overview', { params }),
+  dashBingSiteDetail: (params: Record<string, any>) => instance.get('/v1/bing/site-detail', { params }),
+
   // Reports
   listReports: (params?: Record<string, any>) => instance.get('/v1/reports', { params }),
   submitReport: (data: Record<string, any>) => instance.post('/v1/reports', data),
