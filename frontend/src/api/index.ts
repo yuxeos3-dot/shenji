@@ -162,6 +162,16 @@ const api = {
   getReport: (date: string) => instance.get(`/v1/reports/${date}`),
   exportReports: (params?: Record<string, any>) => instance.get('/v1/reports/export', { params }),
 
+  // Weekly reports (周汇报)
+  listWeeklyReports: (params?: Record<string, any>) => instance.get('/v1/reports/weekly', { params }),
+  listAllWeeklyReports: (params?: Record<string, any>) => instance.get('/v1/reports/weekly/all', { params }),
+  generateWeeklyReport: (data: Record<string, any>) => instance.post('/v1/reports/weekly/generate', data),
+  getWeeklyReport: (id: Id) => instance.get(`/v1/reports/weekly/${id}`),
+  updateWeeklyReport: (id: Id, data: Record<string, any>) => instance.put(`/v1/reports/weekly/${id}`, data),
+  submitWeeklyReport: (id: Id) => instance.post(`/v1/reports/weekly/${id}/submit`),
+  polishWeeklyReport: (id: Id) => instance.post(`/v1/reports/weekly/${id}/polish`),
+  deleteWeeklyReport: (id: Id) => instance.delete(`/v1/reports/weekly/${id}`),
+
   // Bing Webmaster
   syncBing: (siteId: Id) => instance.post(`/v1/sites/${siteId}/bing/sync`),
   getBingData: (siteId: Id, config?: Record<string, any>) =>

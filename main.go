@@ -201,6 +201,23 @@ func main() {
 		v1.POST("/reports", api.RequirePermission("reports.write"), api.SubmitReport)
 		v1.POST("/reports/polish", api.RequirePermission("reports.polish"), api.PolishReport)
 		v1.GET("/reports/export", api.RequirePermission("reports.export"), api.ExportReports) // must be before /:date
+
+		// Weekly reports (周汇报). MUST be registered before /:date or
+		// else gin routes /reports/weekly to the daily GetReportByDate
+		// handler with :date="weekly" — the weekly sub-paths like
+		// /reports/weekly/123 would also misroute.
+		weekly := v1.Group("/reports/weekly")
+		{
+			weekly.GET("", api.RequirePermission("reports.view"), api.ListWeeklyReports)
+			weekly.GET("/all", api.RequirePermission("reports.view"), api.AdminListAllWeeklyReports)
+			weekly.POST("/generate", api.RequirePermission("reports.write"), api.GenerateWeeklyReport)
+			weekly.GET("/:id", api.RequirePermission("reports.view"), api.GetWeeklyReport)
+			weekly.PUT("/:id", api.RequirePermission("reports.write"), api.UpdateWeeklyReport)
+			weekly.POST("/:id/submit", api.RequirePermission("reports.write"), api.SubmitWeeklyReport)
+			weekly.POST("/:id/polish", api.RequirePermission("reports.polish"), api.PolishWeeklyReport)
+			weekly.DELETE("/:id", api.RequirePermission("reports.write"), api.DeleteWeeklyReport)
+		}
+
 		v1.GET("/reports/:date", api.RequirePermission("reports.view"), api.GetReportByDate)
 
 		// Bing Webmaster

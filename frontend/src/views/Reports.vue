@@ -1,5 +1,11 @@
 <template>
   <div>
+    <!-- Tab switcher between daily and weekly reports -->
+    <div class="tabs">
+      <router-link to="/reports" class="tab-btn" active-class="tab-active" exact-active-class="tab-active">📝 日汇报</router-link>
+      <router-link to="/reports/weekly" class="tab-btn">📊 周汇报</router-link>
+    </div>
+
     <div class="page-top">
       <div class="filter-row">
         <span class="filter-label">日期筛选</span>
@@ -87,6 +93,11 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.tabs { display:flex; gap:8px; margin-bottom:18px; border-bottom:2px solid var(--border-light); }
+.tab-btn { padding:10px 20px; font-size:14px; font-weight:700; color:var(--ink-soft); text-decoration:none; border-bottom:2px solid transparent; margin-bottom:-2px; transition:all .15s; }
+.tab-btn:hover { color:var(--sun-deep); }
+.tab-active { color:var(--sun); border-bottom-color:var(--sun); }
+
 .page-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; }
 .filter-row { display:flex; align-items:center; gap:10px; }
 .filter-label { font-size:12px; font-weight:700; color:var(--ink-hint); text-transform:uppercase; }

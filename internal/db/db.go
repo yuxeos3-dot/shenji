@@ -549,6 +549,27 @@ func Init() {
 		`ALTER TABLE users ADD COLUMN department_id INTEGER DEFAULT 0`,
 		`ALTER TABLE users ADD COLUMN group_id INTEGER DEFAULT 0`,
 		`CREATE INDEX IF NOT EXISTS idx_users_dept_group ON users(department_id, group_id)`,
+
+		// ─── Weekly reports ─────────────────────────────────────────────────
+		// Aggregate view of a user's week: AI summary of their 5-7 daily
+		// reports for that window. Content is free-form markdown that the
+		// user polishes in the editor before submitting. Once submitted
+		// the row is locked (status='submitted') — anyone trying to edit
+		// gets a 409.
+		`CREATE TABLE IF NOT EXISTS weekly_reports (
+			id               INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id          INTEGER NOT NULL REFERENCES users(id),
+			week_start       TEXT NOT NULL,   -- YYYY-MM-DD inclusive
+			week_end         TEXT NOT NULL,   -- YYYY-MM-DD inclusive
+			content          TEXT DEFAULT '',
+			source_daily_ids TEXT DEFAULT '[]',  -- JSON array of daily_reports.id used as source
+			status           TEXT DEFAULT 'draft', -- draft / submitted
+			submitted_at     DATETIME,
+			created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(user_id, week_start, week_end)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_weekly_user_range ON weekly_reports(user_id, week_start DESC)`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {

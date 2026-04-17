@@ -53,6 +53,27 @@ func ListReports(c *gin.Context) {
 		query += " AND r.report_date = ?"
 		args = append(args, normalized)
 	}
+
+	// Optional date range filter — used by the weekly report preview
+	// (NewWeeklyReport.vue) to show which dailies would be pulled in.
+	// Accepts either bound independently; both together = closed range.
+	if start := c.Query("start"); start != "" {
+		if _, err := parseISODate(start); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "start 日期格式需为 YYYY-MM-DD"})
+			return
+		}
+		query += " AND r.report_date >= ?"
+		args = append(args, start)
+	}
+	if end := c.Query("end"); end != "" {
+		if _, err := parseISODate(end); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "end 日期格式需为 YYYY-MM-DD"})
+			return
+		}
+		query += " AND r.report_date <= ?"
+		args = append(args, end)
+	}
+
 	query += " ORDER BY r.report_date DESC, r.user_id LIMIT 200"
 
 	rows, err := db.DB.Query(query, args...)
@@ -146,10 +167,10 @@ func GetReportByDate(c *gin.Context) {
 // ─── AI 日报润色 ──────────────────────────────────────────────────────────────
 
 type PolishRequest struct {
-	DoneRaw      string `json:"done_raw"`      // 今天做的事情，流水账
-	CoreData     string `json:"core_data"`     // 核心数据（GSC / GA / 流量等）
-	TomorrowRaw  string `json:"tomorrow_raw"`  // 明天的计划
-	Issues       string `json:"issues"`        // 遇到的问题
+	DoneRaw      string `json:"done_raw"`     // 今天做的事情，流水账
+	CoreData     string `json:"core_data"`    // 核心数据（GSC / GA / 流量等）
+	TomorrowRaw  string `json:"tomorrow_raw"` // 明天的计划
+	Issues       string `json:"issues"`       // 遇到的问题
 	AgentEntries []struct {
 		Scenario   string `json:"scenario"`    // 跑通场景
 		Flow       string `json:"flow"`        // 自动化流程
@@ -317,7 +338,9 @@ Agent自动化应用（必须有）：
 	}
 	var parsed struct {
 		Choices []struct {
-			Message struct{ Content string `json:"content"` } `json:"message"`
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
