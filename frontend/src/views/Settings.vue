@@ -19,144 +19,11 @@
         </div>
       </el-tab-pane>
 
-      <!-- ── AI 配置 ── -->
-      <el-tab-pane label="🤖 人工智能" name="ai">
-        <div class="tab-content">
-          <div class="section-card">
-            <div class="section-title">AI 接口配置（个人）</div>
-            <div class="section-desc">每个用户使用自己的 API Key，最多配 3 组。第一组不可用时自动切换到第二组。</div>
-            <div v-for="(slot, idx) in aiSlots" :key="idx" class="ai-slot-card">
-              <div class="ai-slot-head">API {{ idx + 1 }} <span v-if="idx===0" class="ai-slot-tag">主用</span><span v-else class="ai-slot-tag backup">备用</span></div>
-              <div class="field-row">
-                <label class="field-label">接口地址</label>
-                <input class="field-input" v-model="slot.api_url" placeholder="https://api.openai.com/v1" />
-              </div>
-              <div class="field-row">
-                <label class="field-label">API Key</label>
-                <input class="field-input" v-model="slot.api_key" type="password" placeholder="sk-..." autocomplete="new-password" />
-              </div>
-              <div class="field-row">
-                <label class="field-label">模型名称</label>
-                <input class="field-input" v-model="slot.model" placeholder="claude-sonnet-4-6 / gpt-4o" />
-              </div>
-            </div>
-            <div class="action-row" style="display:flex;gap:10px">
-              <button class="btn btn-test" @click="testMyAI" :disabled="testing.ai">{{ testing.ai ? '检测中...' : '🔌 测试所有 API 连通性' }}</button>
-            </div>
-            <div v-if="aiTestResults.length" class="ai-test-results">
-              <div v-for="r in aiTestResults" :key="r.slot" :class="['ai-test-item', r.status==='ok'?'test-ok':'test-fail']">
-                API {{ r.slot }}: {{ r.status==='ok' ? '✅ 连通 ('+r.model+')' : r.status==='skip' ? '⏭ 未填写' : '❌ '+r.error }}
-              </div>
-            </div>
-          </div>
-          <div class="save-bar">
-            <button class="btn btn-primary" @click="saveAll" :disabled="saving">{{ saving ? '保存中...' : '💾 保存配置' }}</button>
-          </div>
-        </div>
-      </el-tab-pane>
-
-      <!-- ── 数据平台 ── -->
-      <el-tab-pane label="🔗 数据平台" name="platforms">
-        <div class="tab-content">
-
-          <!-- Google -->
-          <div class="section-card">
-            <div class="section-title">
-              <span class="platform-icon">G</span> Google 平台（GSC + GA）
-            </div>
-            <div class="section-desc">Google Search Console 与 Google Analytics 共用一套 OAuth 授权</div>
-            <div class="field-row">
-              <label class="field-label">客户端 ID（Client ID）</label>
-              <input class="field-input" v-model="settings.gsc_client_id" placeholder="xxxx.apps.googleusercontent.com" />
-            </div>
-            <div class="field-row">
-              <label class="field-label">客户端密钥（Client Secret）</label>
-              <input class="field-input" v-model="settings.gsc_client_secret" type="password" placeholder="••••••" autocomplete="new-password" />
-            </div>
-            <div class="field-row">
-              <label class="field-label">回调地址（Redirect URI）</label>
-              <input class="field-input" v-model="settings.gsc_redirect_uri" placeholder="https://yourdomain.com/api/v1/oauth/gsc/callback" />
-              <div class="field-hint">需要在 Google Cloud Console 的已授权重定向 URI 中填写此地址</div>
-            </div>
-            <div class="action-row">
-              <button class="btn btn-google" @click="authGSC">📊 授权 Search Console</button>
-              <button class="btn btn-google" @click="authGA">📈 授权 Analytics</button>
-            </div>
-          </div>
-
-          <!-- Yandex -->
-          <div class="section-card">
-            <div class="section-title">
-              <span class="platform-icon" style="background:#FF0000">Я</span> Yandex 平台
-            </div>
-            <div class="section-desc">Yandex Webmaster 数据接入</div>
-            <div class="field-row">
-              <label class="field-label">应用 ID（Client ID）</label>
-              <input class="field-input" v-model="settings.yandex_client_id" placeholder="Yandex 应用 ID" />
-            </div>
-            <div class="field-row">
-              <label class="field-label">应用密钥（Client Secret）</label>
-              <input class="field-input" v-model="settings.yandex_client_secret" type="password" placeholder="••••••" autocomplete="new-password" />
-            </div>
-            <div class="action-row">
-              <button class="btn btn-yandex" @click="authYandex">🔗 授权 Yandex Webmaster</button>
-            </div>
-          </div>
-
-          <!-- Bing Webmaster -->
-          <div class="platform-block">
-            <div class="platform-name">🔷 Bing Webmaster Tools</div>
-            <div class="field-row">
-              <label class="field-label">API Key &nbsp;<a href="https://www.bing.com/webmasters/home" target="_blank" rel="noopener noreferrer" style="font-size:11.5px;color:var(--info);font-weight:600">Bing站长后台 →</a></label>
-              <input class="field-input" v-model="settings.bing_api_key" type="password" placeholder="在 Bing 站长工具 → 设置 → API 访问 中生成" autocomplete="new-password" />
-              <div class="field-hint">填写后在各站点数据中心可同步 Bing 搜索数据（点击/展示/关键词/收录）</div>
-            </div>
-          </div>
-
-          <!-- FRW AI 图片/视频生成 -->
-          <div class="platform-block">
-            <div class="platform-name">🎨 FRW AI 图片 / 视频生成</div>
-            <div class="field-row">
-              <label class="field-label">全局 API Key</label>
-              <input class="field-input" v-model="settings.frw_apikey" type="password" placeholder="每个用户可在个人中心单独配置，这里填全局回退值" autocomplete="new-password" />
-              <div class="field-hint">
-                如果用户在「图片管理 → 我的 FRW 配置」里没填自己的 apikey，系统会用这里的全局值。
-                Bearer token 和 User ID 必须由每个用户在浏览器自行登录后复制到个人中心。
-              </div>
-            </div>
-          </div>
-
-          <div class="save-bar">
-            <button class="btn btn-primary" @click="save" :disabled="saving">{{ saving ? '保存中...' : '💾 保存配置' }}</button>
-          </div>
-        </div>
-      </el-tab-pane>
-
-      <!-- ── 消息通知 ── -->
-      <el-tab-pane label="📱 消息通知" name="notify">
-        <div class="tab-content">
-          <div class="section-card">
-            <div class="section-title">Telegram 机器人推送</div>
-            <div class="section-desc">审计完成、发现问题时自动向 Telegram 发送消息</div>
-            <div class="field-row">
-              <label class="field-label">机器人令牌（Bot Token）</label>
-              <input class="field-input" v-model="settings.telegram_bot_token" type="password" placeholder="••••••" autocomplete="new-password" />
-              <div class="field-hint">在 Telegram 中找 @BotFather 创建机器人后获取</div>
-            </div>
-            <div class="field-row">
-              <label class="field-label">聊天 ID（Chat ID）</label>
-              <input class="field-input" v-model="settings.telegram_chat_id" placeholder="-100xxxxxxxxxx 或个人 ID" />
-              <div class="field-hint">可通过 @userinfobot 或 @getidsbot 获取</div>
-            </div>
-            <div class="action-row">
-              <button class="btn btn-test" @click="testTG" :disabled="testing.tg">{{ testing.tg ? '发送中...' : '📨 发送测试消息' }}</button>
-            </div>
-          </div>
-          <div class="save-bar">
-            <button class="btn btn-primary" @click="save" :disabled="saving">{{ saving ? '保存中...' : '💾 保存配置' }}</button>
-          </div>
-        </div>
-      </el-tab-pane>
+      <!-- Per-user platform credentials (AI / OAuth / Telegram / Bing /
+           FRW) were moved to 「个人中心」— the platform architecture is
+           now "every user is their own system", so global keys would
+           leak one user's credentials to everyone. Settings keeps only
+           the truly platform-level knobs below. -->
 
       <!-- ── 安全设置 ── -->
       <el-tab-pane label="🔒 安全设置" name="security">
@@ -289,9 +156,6 @@ const siteConfig = useSiteConfigStore()
 const activeTab = ref('basic')
 const saving = ref(false)
 const settings = ref({})
-const testing = ref({ ai: false, tg: false, gsc: false, ga: false, yandex: false })
-const aiSlots = ref([{api_url:'',api_key:'',model:''},{api_url:'',api_key:'',model:''},{api_url:'',api_key:'',model:''}])
-const aiTestResults = ref([])
 const clientIP = ref('')
 
 const scheduleMode = ref('daily')
@@ -326,12 +190,6 @@ onMounted(async () => {
       scheduleMode.value = 'interval'
     }
   } catch (e) { console.error(e) }
-  // Load user AI config
-  try {
-    const aiRes = await api.getMyAIConfig()
-    const slots = aiRes.data?.slots || []
-    for (let i = 0; i < 3; i++) aiSlots.value[i] = slots[i] || {api_url:'',api_key:'',model:''}
-  } catch (e) { console.error(e) }
   // Load client IP for whitelist hint
   try {
     const ipRes = await api.getMyIP()
@@ -363,29 +221,6 @@ async function save() {
   finally { saving.value = false }
 }
 
-async function saveAll() {
-  saving.value = true
-  try {
-    await Promise.all([
-      api.saveSettings(settings.value),
-      api.saveMyAIConfig({ slots: aiSlots.value }),
-    ])
-    siteConfig.refresh()
-    ElMessage.success('全部保存成功')
-  } catch { ElMessage.error('保存失败') }
-  finally { saving.value = false }
-}
-
-async function testMyAI() {
-  testing.value.ai = true
-  aiTestResults.value = []
-  try {
-    const res = await api.testMyAI()
-    aiTestResults.value = res.data || []
-  } catch { ElMessage.error('测试失败') }
-  finally { testing.value.ai = false }
-}
-
 async function saveSchedule() {
   if (scheduleMode.value === 'daily') {
     settings.value.auto_audit_cron = `0 ${dailyHour.value} * * *`
@@ -395,47 +230,6 @@ async function saveSchedule() {
     settings.value.auto_audit_interval_hours = String(intervalHours.value)
   }
   await save()
-}
-
-async function testTG() { testing.value.tg = true; try { const res = await api.testTelegram(); ElMessage.success(res.data) } catch (e) { console.error(e) } finally { testing.value.tg = false } }
-// OAuth authorize handlers. We navigate the CURRENT tab (not
-// window.open) so that Google/Yandex's 302 redirect back to our
-// /oauth/*/callback lands in the same tab the user started from —
-// avoiding the "each authorize spawns a new tab" problem users saw.
-// Each handler flips a loading flag and surfaces any API error to the user
-// so a failed authorize attempt doesn't look like a silent no-op.
-async function authGSC() {
-  testing.value.gsc = true
-  try {
-    const res = await api.getGSCAuthURL()
-    if (res?.data?.url) window.location.href = res.data.url
-    else ElMessage.error('GSC 授权 URL 为空')
-  } catch (e) {
-    console.error(e)
-    ElMessage.error(e?.response?.data?.error || 'GSC 授权发起失败')
-  } finally { testing.value.gsc = false }
-}
-async function authGA() {
-  testing.value.ga = true
-  try {
-    const res = await api.getGAAuthURL()
-    if (res?.data?.url) window.location.href = res.data.url
-    else ElMessage.error('GA 授权 URL 为空')
-  } catch (e) {
-    console.error(e)
-    ElMessage.error(e?.response?.data?.error || 'GA 授权发起失败')
-  } finally { testing.value.ga = false }
-}
-async function authYandex() {
-  testing.value.yandex = true
-  try {
-    const res = await api.getYandexAuthURL()
-    if (res?.data?.url) window.location.href = res.data.url
-    else ElMessage.error('Yandex 授权 URL 为空')
-  } catch (e) {
-    console.error(e)
-    ElMessage.error(e?.response?.data?.error || 'Yandex 授权发起失败')
-  } finally { testing.value.yandex = false }
 }
 </script>
 

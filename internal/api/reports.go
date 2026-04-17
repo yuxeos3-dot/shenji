@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"seo-system/internal/db"
-	"seo-system/internal/telegram"
 
 	"github.com/gin-gonic/gin"
 )
@@ -129,10 +128,13 @@ func SubmitReport(c *gin.Context) {
 		return
 	}
 
-	// Get user name for notification
+	// Per-user model: send the confirmation to the report writer's own
+	// Telegram bot. (Previously this fired a system-wide notification
+	// off the shared bot, which leaked every user's activity to whoever
+	// happened to own the global bot.)
 	var userName string
 	db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName)
-	telegram.SendNotification("每日汇报", userName+" 提交了 "+reportDate+" 的工作汇报")
+	NotifyUser(userID, "每日汇报已提交", userName+" 提交了 "+reportDate+" 的工作汇报")
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "汇报提交成功"})
 }

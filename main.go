@@ -35,6 +35,14 @@ func main() {
 	// on every subsequent boot.
 	api.MigrateLegacyPermissions()
 
+	// One-time migration of ALL global platform credentials (Telegram
+	// bot, Bing key, FRW apikey, OAuth client + access tokens) onto a
+	// designated per-user record (沈万三, fallback first-admin). After
+	// this runs the shared-platform fields are gone from settings and
+	// every user manages their own credentials. Idempotent via
+	// `perm_migrated_personal_v1` flag.
+	api.MigrateGlobalToPersonalConfig()
+
 	// Warm the 4-platform data cache right after the DB is ready so first
 	// request hits a primed cache. Done in a goroutine — the HTTP server
 	// comes up immediately; if an early read loses the race it'll lazy-load
@@ -132,6 +140,20 @@ func main() {
 		v1.PUT("/auth/my-ai-config", api.SaveMyAIConfig)
 		v1.POST("/auth/test-my-ai", api.TestMyAI)
 
+		// Personal platform credentials (every logged-in user can
+		// manage their own). No permission gate — "my own keys" is
+		// the point of the per-user model.
+		v1.GET("/auth/my-oauth-config", api.GetMyOAuthConfigs)
+		v1.PUT("/auth/my-oauth-config", api.PutMyOAuthConfig)
+		v1.DELETE("/auth/my-oauth-token", api.UnbindMyOAuthToken)
+		v1.GET("/auth/my-telegram", api.GetMyTelegram)
+		v1.PUT("/auth/my-telegram", api.PutMyTelegram)
+		v1.POST("/auth/my-telegram/test", api.TestTelegram)
+		v1.GET("/auth/my-bing", api.GetMyBing)
+		v1.PUT("/auth/my-bing", api.PutMyBing)
+		v1.GET("/auth/my-frw-apikey", api.GetMyFrw)
+		v1.PUT("/auth/my-frw-apikey", api.PutMyFrw)
+
 		// Users (admin only)
 		users := v1.Group("/users")
 		users.Use(middleware.AdminRequired())
@@ -143,6 +165,9 @@ func main() {
 			users.GET("/:id/permissions", api.GetUserPermissions)
 			users.PUT("/:id/permissions", api.SaveUserPermissions)
 			users.GET("/permission-tree", api.GetPermissionTree)
+			// Admin monitoring: see which platforms a user has configured
+			// without exposing the plaintext secrets themselves.
+			users.GET("/:id/platform-status", api.GetUserPlatformStatus)
 		}
 
 		// Organization structure — admin only. Matches the /users pattern

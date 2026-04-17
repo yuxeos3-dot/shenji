@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"seo-system/internal/db"
+	"seo-system/internal/secure"
 )
 
 // escapeMD escapes Telegram Markdown V1 special characters.
@@ -20,27 +21,43 @@ func escapeMD(s string) string {
 	return s
 }
 
-func SendNotification(title, message string) {
-	botToken := db.GetSetting("telegram_bot_token")
-	chatID := db.GetSetting("telegram_chat_id")
-
+// Send delivers a formatted notification via the supplied bot token and
+// chat id. The caller is responsible for resolving credentials.
+func Send(botToken, chatID, title, message string) {
 	if botToken == "" || chatID == "" {
 		log.Printf("Telegram not configured, skipping notification: %s", title)
 		return
 	}
-
 	text := fmt.Sprintf("*%s*\n%s", escapeMD(title), escapeMD(message))
 	sendMessage(botToken, chatID, text)
 }
 
-func SendToUser(telegramID, title, message string) {
-	botToken := db.GetSetting("telegram_bot_token")
-	if botToken == "" || telegramID == "" {
+// NotifyUser looks up the given user's per-user bot token + chat id from
+// user_telegram and delivers the notification via their own bot. Used
+// from non-request contexts like the audit scheduler where we don't
+// have a gin.Context but still want notifications routed correctly.
+// No-op when the user hasn't configured Telegram.
+func NotifyUser(userID int64, title, message string) {
+	if userID <= 0 {
 		return
 	}
-
-	text := fmt.Sprintf("*%s*\n%s", escapeMD(title), escapeMD(message))
-	sendMessage(botToken, telegramID, text)
+	var enc, chatID string
+	err := db.DB.QueryRow(
+		`SELECT COALESCE(bot_token,''), COALESCE(chat_id,'') FROM user_telegram WHERE user_id = ?`,
+		userID,
+	).Scan(&enc, &chatID)
+	if err != nil {
+		return
+	}
+	if enc == "" || chatID == "" {
+		return
+	}
+	botToken, err := secure.Decrypt(enc)
+	if err != nil {
+		log.Printf("[telegram] decrypt bot_token for user %d failed: %v", userID, err)
+		return
+	}
+	Send(botToken, chatID, title, message)
 }
 
 // redactToken replaces the bot token in a string with a placeholder.
@@ -75,10 +92,10 @@ func sendMessage(botToken, chatID, text string) {
 	}
 }
 
-func TestConnection() error {
-	botToken := db.GetSetting("telegram_bot_token")
-	chatID := db.GetSetting("telegram_chat_id")
-
+// Test verifies the given bot token + chat id by actually posting a
+// tiny message. Returns nil on HTTP 200. Used by the PersonalCenter UI
+// so each user can sanity-check their own bot before relying on it.
+func Test(botToken, chatID string) error {
 	if botToken == "" || chatID == "" {
 		return fmt.Errorf("Telegram未配置")
 	}

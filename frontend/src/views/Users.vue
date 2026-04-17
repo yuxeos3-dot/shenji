@@ -66,6 +66,7 @@
               <div class="action-btns">
                 <button class="btn btn-xs" @click="openEdit(u)">编辑</button>
                 <button class="btn btn-xs btn-perm" @click="openPerms(u)" v-if="u.role!=='admin'">权限</button>
+                <button class="btn btn-xs btn-status" @click="openStatus(u)">配置状态</button>
                 <button class="btn btn-xs btn-danger-xs" @click="deleteUser(u)">删除</button>
               </div>
             </td>
@@ -223,6 +224,58 @@
         <el-button type="warning" @click="checkAll">全选</el-button>
         <el-button @click="checkedPerms=[]">清空</el-button>
         <el-button type="primary" @click="savePerms" :loading="savingPerms">保存权限</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Platform status (admin monitoring). Read-only summary of which
+         platforms the target user has configured. Secrets never leave
+         the server — we only show booleans + token expiry. -->
+    <el-dialog v-model="showStatus" :title="'📡 配置状态 — ' + (statusUser?.name || '')" width="540px">
+      <div v-if="!statusData" class="empty-cell" style="padding:30px">加载中...</div>
+      <div v-else class="status-list">
+        <div class="status-row">
+          <span class="status-name">🤖 AI 接口</span>
+          <span :class="['status-tag', statusData.ai?.bound ? 'ok' : 'off']">
+            {{ statusData.ai?.bound ? `已配置 (${statusData.ai.slots} 组)` : '未配置' }}
+          </span>
+        </div>
+        <div class="status-row" v-for="svc in ['gsc', 'ga', 'yandex']" :key="svc">
+          <span class="status-name">
+            {{ svc === 'gsc' ? '🟦 Google Search Console' : svc === 'ga' ? '🟩 Google Analytics' : '🟥 Yandex' }}
+          </span>
+          <span :class="['status-tag', statusData[svc]?.bound ? 'ok' : (statusData[svc]?.has_client_id ? 'partial' : 'off')]">
+            <template v-if="statusData[svc]?.bound">
+              已授权{{ statusData[svc].expires_at ? ' · 至 ' + String(statusData[svc].expires_at).slice(0, 16) : '' }}
+            </template>
+            <template v-else-if="statusData[svc]?.has_client_id">仅填写应用凭据</template>
+            <template v-else>未配置</template>
+          </span>
+        </div>
+        <div class="status-row">
+          <span class="status-name">🟦 Bing Webmaster</span>
+          <span :class="['status-tag', statusData.bing?.bound ? 'ok' : 'off']">
+            {{ statusData.bing?.bound ? '已配置' : '未配置' }}
+          </span>
+        </div>
+        <div class="status-row">
+          <span class="status-name">📱 Telegram</span>
+          <span :class="['status-tag', statusData.telegram?.bound ? 'ok' : 'off']">
+            {{ statusData.telegram?.bound ? '已配置' : '未配置' }}
+          </span>
+        </div>
+        <div class="status-row">
+          <span class="status-name">🎨 FRW 图/视频</span>
+          <span :class="['status-tag', statusData.frw?.bound ? 'ok' : 'off']">
+            {{ statusData.frw?.bound ? '已配置' : '未配置' }}
+          </span>
+        </div>
+        <div class="status-row">
+          <span class="status-name">🌐 管理的站点数</span>
+          <span class="status-tag muted">{{ statusData.sites || 0 }} 个</span>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showStatus = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
@@ -496,6 +549,23 @@ async function deleteGroup(g) {
   } catch { /* interceptor */ }
 }
 
+// ── Platform status (admin monitoring) ──
+const showStatus = ref(false)
+const statusUser = ref(null)
+const statusData = ref(null)
+
+async function openStatus(u) {
+  statusUser.value = u
+  statusData.value = null
+  showStatus.value = true
+  try {
+    const res = await api.getUserPlatformStatus(u.id)
+    statusData.value = res.data
+  } catch (e) {
+    ElMessage.error('加载失败')
+  }
+}
+
 // ── Permissions ──
 const showPerms = ref(false)
 const permUser = ref(null)
@@ -594,6 +664,17 @@ onMounted(loadAll)
 .field-err { margin-top:6px; font-size:12px; color:#DC2626; font-weight:600; }
 .btn-perm { background:#EEF2FF; border-color:#C7D2FE; color:#4338CA; }
 .btn-perm:hover { background:#E0E7FF; border-color:#A5B4FC; }
+.btn-status { background:#F0F9FF; border-color:#BAE6FD; color:#0369A1; }
+.btn-status:hover { background:#E0F2FE; border-color:#7DD3FC; }
+
+.status-list { display:flex; flex-direction:column; gap:8px; padding:6px 0; }
+.status-row { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--surface-3); border-radius:8px; border:1px solid var(--border-light); }
+.status-name { font-size:13px; font-weight:600; color:var(--ink); }
+.status-tag { font-size:12px; font-weight:700; padding:3px 12px; border-radius:14px; }
+.status-tag.ok { background:var(--ok-bg); color:var(--ok); border:1px solid var(--ok-border); }
+.status-tag.partial { background:var(--warn-bg); color:var(--warn); border:1px solid var(--warn-border); }
+.status-tag.off { background:var(--surface); color:var(--ink-hint); border:1px solid var(--border); }
+.status-tag.muted { background:var(--surface); color:var(--ink-mid); border:1px solid var(--border); font-weight:600; }
 .perm-hint { font-size:13px; color:var(--ink-hint); margin-bottom:16px; padding:8px 12px; background:#FFFBEB; border:1px solid #FDE68A; border-radius:8px; }
 .perm-tree { max-height:55vh; overflow-y:auto; }
 .perm-group { margin-bottom:14px; border:1px solid var(--border-light); border-radius:10px; overflow:hidden; }

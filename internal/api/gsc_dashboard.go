@@ -74,7 +74,7 @@ func parseDateRange(c *gin.Context, defaultDays int) (start, end string, err err
 // frontend can filter siteFullUser vs siteRestrictedUser if needed —
 // users with only "restrictedUser" can't query searchAnalytics.
 func GSCListSites(c *gin.Context) {
-	token, err := getGoogleAccessToken()
+	token, err := getGoogleAccessToken(c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
 		return
@@ -137,7 +137,7 @@ func GSCOverview(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	token, err := getGoogleAccessToken()
+	token, err := getGoogleAccessToken(c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
 		return
@@ -249,7 +249,7 @@ func GSCSiteDetail(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	token, err := getGoogleAccessToken()
+	token, err := getGoogleAccessToken(c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
 		return

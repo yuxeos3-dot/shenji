@@ -229,6 +229,21 @@ const api = {
 
   getMyAIConfig: () => instance.get('/v1/auth/my-ai-config'),
   saveMyAIConfig: (data: Record<string, any>) => instance.put('/v1/auth/my-ai-config', data),
+
+  // Personal platform credentials (per-user OAuth client + tokens,
+  // Telegram bot, Bing key, FRW apikey). Everyone can manage their
+  // own; admin uses /users/:id/platform-status for read-only monitoring.
+  getMyOAuthConfigs: () => instance.get('/v1/auth/my-oauth-config'),
+  saveMyOAuthConfig: (data: Record<string, any>) => instance.put('/v1/auth/my-oauth-config', data),
+  unbindMyOAuthToken: (service: string) => instance.delete('/v1/auth/my-oauth-token', { params: { service } }),
+  getMyTelegram: () => instance.get('/v1/auth/my-telegram'),
+  saveMyTelegram: (data: Record<string, any>) => instance.put('/v1/auth/my-telegram', data),
+  testMyTelegram: () => instance.post('/v1/auth/my-telegram/test'),
+  getMyBing: () => instance.get('/v1/auth/my-bing'),
+  saveMyBing: (data: Record<string, any>) => instance.put('/v1/auth/my-bing', data),
+  getMyFrwApiKey: () => instance.get('/v1/auth/my-frw-apikey'),
+  saveMyFrwApiKey: (data: Record<string, any>) => instance.put('/v1/auth/my-frw-apikey', data),
+  getUserPlatformStatus: (userId: Id) => instance.get(`/v1/users/${userId}/platform-status`),
   testMyAI: () => instance.post('/v1/auth/test-my-ai'),
 
   listExtlinkPool: () => instance.get('/v1/extlink-pool'),

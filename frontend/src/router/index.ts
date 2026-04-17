@@ -32,6 +32,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'reports/monthly/new', name: 'NewMonthlyReport', component: () => import('../views/NewMonthlyReport.vue') },
       { path: 'reports/monthly/:id', name: 'MonthlyReportDetail', component: () => import('../views/MonthlyReportDetail.vue') },
       { path: 'settings', name: 'Settings', component: () => import('../views/Settings.vue') },
+      { path: 'personal-center', name: 'PersonalCenter', component: () => import('../views/PersonalCenter.vue') },
       { path: 'users', name: 'Users', component: () => import('../views/Users.vue') },
       { path: 'cache-management', name: 'CacheManagement', component: () => import('../views/CacheManagement.vue') },
       { path: 'spider-management', name: 'SpiderManagement', component: () => import('../views/SpiderManagement.vue') },

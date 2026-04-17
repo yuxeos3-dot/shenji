@@ -23,22 +23,39 @@ const gscAPI = "https://www.googleapis.com/webmasters/v3"
 // maxOAuthResponseBytes caps provider response size to prevent memory blow-ups.
 const maxOAuthResponseBytes = 1 << 20 // 1 MiB
 
-// tokenRefreshMu serializes token refresh per-service so two concurrent
-// requests that both see an expired token don't double-refresh and race on
-// the oauth_tokens row (which would lose the newer refresh_token if Google
-// rotates it).
-var tokenRefreshMu sync.Mutex
+// tokenRefreshMu serializes token refresh so two concurrent requests that
+// both see an expired token don't double-refresh. Keyed per (user_id,
+// service) since each user has their own token row.
+var (
+	tokenRefreshMu     sync.Mutex
+	tokenRefreshLocks  = map[string]*sync.Mutex{}
+	tokenRefreshLocksM sync.Mutex
+)
+
+// perUserTokenLock returns a mutex keyed by (user_id, service). Kept in
+// a map so each (user, service) refresh path serializes independently
+// without blocking unrelated refreshes.
+func perUserTokenLock(userID int64, service string) *sync.Mutex {
+	key := fmt.Sprintf("%d:%s", userID, service)
+	tokenRefreshLocksM.Lock()
+	defer tokenRefreshLocksM.Unlock()
+	if m, ok := tokenRefreshLocks[key]; ok {
+		return m
+	}
+	m := &sync.Mutex{}
+	tokenRefreshLocks[key] = m
+	return m
+}
 
 func GetGSCAuthURL(c *gin.Context) {
-	clientID := db.GetSetting("gsc_client_id")
-	redirectURI := db.GetSetting("gsc_redirect_uri")
-
-	if clientID == "" || redirectURI == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "GSC OAuth未配置"})
+	uid := c.GetInt64("user_id")
+	clientID, _, redirectURI, err := LoadUserOAuthClient(uid, "gsc")
+	if err != nil || clientID == "" || redirectURI == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "请先在「个人中心 → GSC」填写 Client ID / Client Secret / Redirect URI"})
 		return
 	}
 
-	state, err := newOAuthState(c.GetInt64("user_id"))
+	state, err := newOAuthState(uid)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "state 生成失败"})
 		return
@@ -54,7 +71,9 @@ func GetGSCAuthURL(c *gin.Context) {
 }
 
 func GSCCallback(c *gin.Context) {
-	if !requireValidState(c) {
+	uid, ok := consumeOAuthState(c.Query("state"))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "OAuth state 无效或已过期，请重新发起授权"})
 		return
 	}
 	code := c.Query("code")
@@ -63,17 +82,14 @@ func GSCCallback(c *gin.Context) {
 		return
 	}
 
-	token, err := exchangeGoogleToken(code)
+	token, err := exchangeGoogleToken(uid, "gsc", code)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "Token交换失败: " + err.Error()})
 		return
 	}
 
-	if _, err := db.DB.Exec(
-		"INSERT OR REPLACE INTO oauth_tokens (service, access_token, refresh_token, expires_at) VALUES ('gsc', ?, ?, ?)",
-		MustEncryptToken(token.AccessToken), MustEncryptToken(token.RefreshToken), token.ExpiresAt,
-	); err != nil {
-		log.Printf("[gsc] persist token failed: %v", err)
+	if err := saveUserOAuthToken(uid, "gsc", token); err != nil {
+		log.Printf("[gsc] persist token uid=%d: %v", uid, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "Token 存储失败"})
 		return
 	}
@@ -87,41 +103,45 @@ type OAuthToken struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
-// SaveGSCToken receives the access token obtained by browser-side OAuth (gsc-dashboard.html)
-// and stores it in the DB so server-side GSC sync can use it. Admin-only because
-// the token is global: a non-admin push would hijack sync for every site.
-func SaveGSCToken(c *gin.Context) {
-	if role, _ := c.Get("role"); role != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "需要管理员权限"})
-		return
+// saveUserOAuthToken upserts the access/refresh/expires row for
+// (user_id, service). Encrypts both tokens at rest.
+func saveUserOAuthToken(userID int64, service string, tok *OAuthToken) error {
+	encAccess := MustEncryptToken(tok.AccessToken)
+	encRefresh := ""
+	if tok.RefreshToken != "" {
+		encRefresh = MustEncryptToken(tok.RefreshToken)
 	}
-	var req struct {
-		AccessToken string `json:"access_token" binding:"required"`
-		ExpiresIn   int    `json:"expires_in"` // seconds remaining
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "access_token 必填"})
-		return
-	}
-	expiresAt := time.Now().Add(time.Duration(req.ExpiresIn) * time.Second)
-	if req.ExpiresIn <= 0 {
-		expiresAt = time.Now().Add(55 * time.Minute) // default 55 min
-	}
-	if _, err := db.DB.Exec(
-		"INSERT OR REPLACE INTO oauth_tokens (service, access_token, refresh_token, expires_at) VALUES ('gsc', ?, '', ?)",
-		MustEncryptToken(req.AccessToken), expiresAt,
-	); err != nil {
-		log.Printf("[gsc] save token failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "Token 存储失败"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "GSC token 已保存"})
+	_, err := db.DB.Exec(
+		`INSERT INTO user_oauth_tokens (user_id, service, access_token, refresh_token, expires_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(user_id, service) DO UPDATE SET
+		   access_token = excluded.access_token,
+		   refresh_token = CASE WHEN excluded.refresh_token != '' THEN excluded.refresh_token ELSE user_oauth_tokens.refresh_token END,
+		   expires_at = excluded.expires_at,
+		   updated_at = CURRENT_TIMESTAMP`,
+		userID, service, encAccess, encRefresh, tok.ExpiresAt,
+	)
+	return err
 }
 
-func exchangeGoogleToken(code string) (*OAuthToken, error) {
-	clientID := db.GetSetting("gsc_client_id")
-	clientSecret := db.GetSetting("gsc_client_secret")
-	redirectURI := db.GetSetting("gsc_redirect_uri")
+// SaveGSCToken (browser-side OAuth backfill) is deprecated under the
+// per-user model — each user must go through the normal Authorize flow
+// so their credentials land in user_oauth_tokens under their own
+// user_id. Kept as a 410 stub so old clients get a clear error.
+func SaveGSCToken(c *gin.Context) {
+	c.JSON(http.StatusGone, gin.H{"code": -1, "error": "该接口已停用，请在「个人中心 → GSC」完成 OAuth 授权"})
+}
+
+// exchangeGoogleToken swaps an authorization code for access + refresh
+// tokens using the user's own OAuth app credentials.
+func exchangeGoogleToken(userID int64, service, code string) (*OAuthToken, error) {
+	clientID, clientSecret, redirectURI, err := LoadUserOAuthClient(userID, service)
+	if err != nil {
+		return nil, fmt.Errorf("未配置 %s OAuth: %w", service, err)
+	}
+	if clientID == "" || clientSecret == "" || redirectURI == "" {
+		return nil, fmt.Errorf("请先在「个人中心 → %s」填写 Client ID / Secret / Redirect URI", strings.ToUpper(service))
+	}
 
 	resp, err := http.PostForm("https://oauth2.googleapis.com/token", map[string][]string{
 		"grant_type":    {"authorization_code"},
@@ -142,7 +162,7 @@ func exchangeGoogleToken(code string) (*OAuthToken, error) {
 		Error        string `json:"error"`
 		ErrorDesc    string `json:"error_description"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOAuthResponseBytes)).Decode(&result); err != nil {
 		return nil, err
 	}
 	if result.Error != "" {
@@ -156,22 +176,38 @@ func exchangeGoogleToken(code string) (*OAuthToken, error) {
 	}, nil
 }
 
-func getGoogleAccessToken() (string, error) {
+// getGoogleAccessToken loads the given user's current GSC access token,
+// refreshing with their own refresh_token + app credentials when needed.
+// Pass userID = 0 is rejected — every sync request must identify the
+// owner of the token.
+func getGoogleAccessToken(userID int64) (string, error) {
+	if userID <= 0 {
+		return "", fmt.Errorf("未登录")
+	}
+	return loadAndRefreshOAuth(userID, "gsc")
+}
+
+// loadAndRefreshOAuth is shared by GSC / GA / Yandex.
+func loadAndRefreshOAuth(userID int64, service string) (string, error) {
 	loadToken := func() (access, refresh string, expiresAt time.Time, err error) {
 		var storedAccess, storedRefresh string
 		err = db.DB.QueryRow(
-			"SELECT access_token, refresh_token, expires_at FROM oauth_tokens WHERE service = 'gsc' ORDER BY id DESC LIMIT 1",
+			`SELECT access_token, COALESCE(refresh_token,''), expires_at
+			 FROM user_oauth_tokens WHERE user_id = ? AND service = ?`,
+			userID, service,
 		).Scan(&storedAccess, &storedRefresh, &expiresAt)
 		if err != nil {
-			return "", "", time.Time{}, fmt.Errorf("GSC未授权")
+			return "", "", time.Time{}, fmt.Errorf("%s 未授权，请在「个人中心」完成授权", strings.ToUpper(service))
 		}
 		access, err = DecryptToken(storedAccess)
 		if err != nil {
-			return "", "", time.Time{}, fmt.Errorf("GSC token 解密失败: %w", err)
+			return "", "", time.Time{}, fmt.Errorf("%s token 解密失败: %w", service, err)
 		}
-		refresh, err = DecryptToken(storedRefresh)
-		if err != nil {
-			return "", "", time.Time{}, fmt.Errorf("GSC refresh token 解密失败: %w", err)
+		if storedRefresh != "" {
+			refresh, err = DecryptToken(storedRefresh)
+			if err != nil {
+				return "", "", time.Time{}, fmt.Errorf("%s refresh token 解密失败: %w", service, err)
+			}
 		}
 		return access, refresh, expiresAt, nil
 	}
@@ -183,21 +219,28 @@ func getGoogleAccessToken() (string, error) {
 	if time.Now().Before(expiresAt) {
 		return accessToken, nil
 	}
+	if refreshToken == "" {
+		return "", fmt.Errorf("%s token 已过期且无 refresh_token，请在「个人中心 → %s」重新授权", service, strings.ToUpper(service))
+	}
 
-	// Two concurrent callers that both see an expired token must not both
-	// hit Google's /token endpoint — the first wins, the second re-reads
-	// the row.
-	tokenRefreshMu.Lock()
-	defer tokenRefreshMu.Unlock()
+	lock := perUserTokenLock(userID, service)
+	lock.Lock()
+	defer lock.Unlock()
 
-	// Re-check under the lock in case another goroutine just refreshed.
+	// Re-check under the lock.
 	if accessToken, _, expiresAt, err = loadToken(); err == nil && time.Now().Before(expiresAt) {
 		return accessToken, nil
 	}
 
-	// Refresh token
-	clientID := db.GetSetting("gsc_client_id")
-	clientSecret := db.GetSetting("gsc_client_secret")
+	// Yandex refresh endpoint differs; GSC and GA both use Google's.
+	if service == "yandex" {
+		return refreshYandexToken(userID, refreshToken)
+	}
+
+	clientID, clientSecret, _, err := LoadUserOAuthClient(userID, service)
+	if err != nil || clientID == "" || clientSecret == "" {
+		return "", fmt.Errorf("%s OAuth 应用凭据缺失，请在「个人中心」填写 Client ID / Secret", service)
+	}
 
 	resp, err := http.PostForm("https://oauth2.googleapis.com/token", map[string][]string{
 		"grant_type":    {"refresh_token"},
@@ -218,14 +261,17 @@ func getGoogleAccessToken() (string, error) {
 		return "", err
 	}
 	if result.AccessToken == "" {
-		return "", fmt.Errorf("GSC token refresh 返回为空 (HTTP %d)", resp.StatusCode)
+		return "", fmt.Errorf("%s token refresh 返回为空 (HTTP %d)", service, resp.StatusCode)
 	}
 
 	newExpiry := time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
-	if _, err := db.DB.Exec("UPDATE oauth_tokens SET access_token = ?, expires_at = ? WHERE service = 'gsc'",
-		MustEncryptToken(result.AccessToken), newExpiry); err != nil {
-		log.Printf("[gsc] persist refreshed token failed: %v", err)
-		return "", fmt.Errorf("GSC token 存储失败: %w", err)
+	if _, err := db.DB.Exec(
+		`UPDATE user_oauth_tokens SET access_token = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
+		 WHERE user_id = ? AND service = ?`,
+		MustEncryptToken(result.AccessToken), newExpiry, userID, service,
+	); err != nil {
+		log.Printf("[%s] persist refreshed token uid=%d: %v", service, userID, err)
+		return "", fmt.Errorf("%s token 存储失败: %w", service, err)
 	}
 
 	return result.AccessToken, nil
@@ -277,7 +323,7 @@ func SyncGSCData(c *gin.Context) {
 		return
 	}
 
-	token, err := getGoogleAccessToken()
+	token, err := getGoogleAccessToken(c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
 		return

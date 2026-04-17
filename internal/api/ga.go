@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -19,13 +18,13 @@ import (
 )
 
 func GetGAAuthURL(c *gin.Context) {
-	clientID := db.GetSetting("gsc_client_id")
-	redirectURI := strings.Replace(db.GetSetting("gsc_redirect_uri"), "/gsc/", "/ga/", 1)
-	if clientID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "Google OAuth未配置"})
+	uid := c.GetInt64("user_id")
+	clientID, _, redirectURI, err := LoadUserOAuthClient(uid, "ga")
+	if err != nil || clientID == "" || redirectURI == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "请先在「个人中心 → GA」填写 Client ID / Secret / Redirect URI"})
 		return
 	}
-	state, err := newOAuthState(c.GetInt64("user_id"))
+	state, err := newOAuthState(uid)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "state 生成失败"})
 		return
@@ -39,7 +38,9 @@ func GetGAAuthURL(c *gin.Context) {
 }
 
 func GACallback(c *gin.Context) {
-	if !requireValidState(c) {
+	uid, ok := consumeOAuthState(c.Query("state"))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "OAuth state 无效或已过期，请重新发起授权"})
 		return
 	}
 	code := c.Query("code")
@@ -47,106 +48,24 @@ func GACallback(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "缺少授权码"})
 		return
 	}
-	clientID := db.GetSetting("gsc_client_id")
-	clientSecret := db.GetSetting("gsc_client_secret")
-	redirectURI := strings.Replace(db.GetSetting("gsc_redirect_uri"), "/gsc/", "/ga/", 1)
-
-	resp, err := http.PostForm("https://oauth2.googleapis.com/token", map[string][]string{
-		"grant_type":    {"authorization_code"},
-		"code":          {code},
-		"client_id":     {clientID},
-		"client_secret": {clientSecret},
-		"redirect_uri":  {redirectURI},
-	})
+	tok, err := exchangeGoogleToken(uid, "ga", code)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "Token交换失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "Token交换失败: " + err.Error()})
 		return
 	}
-	defer resp.Body.Close()
-	var result struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		ExpiresIn    int    `json:"expires_in"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOAuthResponseBytes)).Decode(&result); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "解析Token响应失败"})
-		return
-	}
-	if _, err := db.DB.Exec(
-		"INSERT OR REPLACE INTO oauth_tokens (service, access_token, refresh_token, expires_at) VALUES ('ga', ?, ?, ?)",
-		MustEncryptToken(result.AccessToken), MustEncryptToken(result.RefreshToken),
-		time.Now().Add(time.Duration(result.ExpiresIn)*time.Second),
-	); err != nil {
-		log.Printf("[ga] persist token failed: %v", err)
+	if err := saveUserOAuthToken(uid, "ga", tok); err != nil {
+		log.Printf("[ga] persist token uid=%d: %v", uid, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "Token 存储失败"})
 		return
 	}
 	c.Redirect(http.StatusFound, "/?oauth=ga&status=success")
 }
 
-func getGAAccessToken() (string, error) {
-	loadToken := func() (access, refresh string, expiresAt time.Time, err error) {
-		var storedAccess, storedRefresh string
-		err = db.DB.QueryRow(
-			"SELECT access_token, refresh_token, expires_at FROM oauth_tokens WHERE service = 'ga' ORDER BY id DESC LIMIT 1",
-		).Scan(&storedAccess, &storedRefresh, &expiresAt)
-		if err != nil {
-			return "", "", time.Time{}, fmt.Errorf("GA未授权，请先完成 Google Analytics OAuth")
-		}
-		access, err = DecryptToken(storedAccess)
-		if err != nil {
-			return "", "", time.Time{}, fmt.Errorf("GA token 解密失败: %w", err)
-		}
-		refresh, err = DecryptToken(storedRefresh)
-		if err != nil {
-			return "", "", time.Time{}, fmt.Errorf("GA refresh token 解密失败: %w", err)
-		}
-		return access, refresh, expiresAt, nil
+func getGAAccessToken(userID int64) (string, error) {
+	if userID <= 0 {
+		return "", fmt.Errorf("未登录")
 	}
-
-	accessToken, refreshToken, expiresAt, err := loadToken()
-	if err != nil {
-		return "", err
-	}
-	if time.Now().Before(expiresAt) {
-		return accessToken, nil
-	}
-
-	tokenRefreshMu.Lock()
-	defer tokenRefreshMu.Unlock()
-
-	if accessToken, _, expiresAt, err = loadToken(); err == nil && time.Now().Before(expiresAt) {
-		return accessToken, nil
-	}
-
-	clientID := db.GetSetting("gsc_client_id")
-	clientSecret := db.GetSetting("gsc_client_secret")
-	resp, err := http.PostForm("https://oauth2.googleapis.com/token", map[string][]string{
-		"grant_type":    {"refresh_token"},
-		"refresh_token": {refreshToken},
-		"client_id":     {clientID},
-		"client_secret": {clientSecret},
-	})
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	var result struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOAuthResponseBytes)).Decode(&result); err != nil {
-		return "", fmt.Errorf("GA Token 响应解析失败: %w", err)
-	}
-	if result.AccessToken == "" {
-		return "", fmt.Errorf("GA Token刷新失败，请重新授权")
-	}
-	if _, err := db.DB.Exec("UPDATE oauth_tokens SET access_token=?, expires_at=? WHERE service='ga'",
-		MustEncryptToken(result.AccessToken), time.Now().Add(time.Duration(result.ExpiresIn)*time.Second)); err != nil {
-		log.Printf("[ga] persist refreshed token failed: %v", err)
-		return "", fmt.Errorf("GA token 存储失败: %w", err)
-	}
-	return result.AccessToken, nil
+	return loadAndRefreshOAuth(userID, "ga")
 }
 
 func ga4Fetch(token, propertyID string, body map[string]interface{}) (json.RawMessage, error) {
@@ -182,7 +101,7 @@ func SyncGAData(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点不存在或无域名"})
 		return
 	}
-	token, err := getGAAccessToken()
+	token, err := getGAAccessToken(c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
 		return

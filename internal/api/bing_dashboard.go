@@ -28,9 +28,9 @@ import (
 // a URL and a verification status; we pass both through so the UI can
 // gray out unverified ones.
 func BingListSites(c *gin.Context) {
-	apiKey := db.GetSetting("bing_api_key")
+	apiKey, _ := LoadUserBingKey(c.GetInt64("user_id"))
 	if apiKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "Bing API Key 未配置，请在系统设置中添加"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "请先在「个人中心 → Bing」填写 API Key"})
 		return
 	}
 	raw, err := bingFetch(apiKey, "GetUserSites", nil)
@@ -88,9 +88,9 @@ func BingOverview(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	apiKey := db.GetSetting("bing_api_key")
+	apiKey, _ := LoadUserBingKey(c.GetInt64("user_id"))
 	if apiKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "Bing API Key 未配置"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "请先在「个人中心 → Bing」填写 API Key"})
 		return
 	}
 	// List sites first.
@@ -202,9 +202,9 @@ func BingSiteDetail(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	apiKey := db.GetSetting("bing_api_key")
+	apiKey, _ := LoadUserBingKey(c.GetInt64("user_id"))
 	if apiKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "Bing API Key 未配置"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "请先在「个人中心 → Bing」填写 API Key"})
 		return
 	}
 	startDate := sd + "T00:00:00"

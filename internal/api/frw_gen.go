@@ -30,16 +30,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// frwConfig is what we persist in users.frw_config. apikey is optional
-// per-user; empty means "fall back to the system-wide frw_apikey setting".
+// frwConfig is what we persist in users.frw_config. Under the per-user
+// model there is NO global fallback — each user must configure their
+// own apikey via 个人中心. apikey now lives in users.frw_apikey
+// (encrypted); bearer token + frw user_id stay in frw_config since
+// they're short-lived browser credentials the user re-pastes every
+// few hours.
 type frwConfig struct {
 	APIKey string `json:"apikey"`
 	Token  string `json:"token"`   // Bearer
 	UserID string `json:"user_id"` // FRW user id
 }
 
-// loadFRWConfig reads and JSON-decodes users.frw_config. It also applies
-// the global apikey fallback so callers can just use the returned struct.
+// loadFRWConfig reads the user's FRW config: apikey from the dedicated
+// users.frw_apikey column (encrypted), bearer + user id from
+// users.frw_config. No global fallback.
 func loadFRWConfig(userID int64) frwConfig {
 	var raw string
 	db.DB.QueryRow("SELECT COALESCE(frw_config,'') FROM users WHERE id=?", userID).Scan(&raw)
@@ -47,8 +52,11 @@ func loadFRWConfig(userID int64) frwConfig {
 	if raw != "" {
 		_ = json.Unmarshal([]byte(raw), &cfg)
 	}
-	if cfg.APIKey == "" {
-		cfg.APIKey = db.GetSetting("frw_apikey")
+	// apikey now comes from the encrypted per-user column, never a
+	// global setting. Callers get "" when the user hasn't configured it
+	// and should refuse to call FRW rather than using a shared key.
+	if v := LoadUserFrwApiKey(userID); v != "" {
+		cfg.APIKey = v
 	}
 	return cfg
 }
@@ -91,13 +99,12 @@ func SaveMyFRWConfig(c *gin.Context) {
 		c.JSON(400, gin.H{"code": -1, "error": "参数错误"})
 		return
 	}
-	// "****" means "keep existing". Empty string means "clear" only
-	// when user sends explicit empty with an explicit header. Simpler:
-	// empty = keep (we only write non-empty fields). If user really
-	// wants to clear they can re-submit a single-char and re-paste.
 	old := loadFRWConfig(userID)
+	// apikey goes to the encrypted users.frw_apikey column; bearer +
+	// user_id stay in frw_config (non-secret browser session bits).
+	newAPIKey := firstNonEmpty(stripMask(in.APIKey, old.APIKey), old.APIKey)
 	cfg := frwConfig{
-		APIKey: firstNonEmpty(stripMask(in.APIKey, old.APIKey), old.APIKey),
+		APIKey: "", // never stored in frw_config anymore
 		Token:  firstNonEmpty(stripMask(in.Token, old.Token), old.Token),
 		UserID: firstNonEmpty(strings.TrimSpace(in.UserID), old.UserID),
 	}
@@ -105,6 +112,17 @@ func SaveMyFRWConfig(c *gin.Context) {
 	if _, err := db.DB.Exec("UPDATE users SET frw_config=? WHERE id=?", string(js), userID); err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "保存失败"})
 		return
+	}
+	if newAPIKey != "" {
+		enc, err := EncryptToken(newAPIKey)
+		if err != nil {
+			c.JSON(500, gin.H{"code": -1, "error": "加密失败"})
+			return
+		}
+		if _, err := db.DB.Exec("UPDATE users SET frw_apikey=? WHERE id=?", enc, userID); err != nil {
+			c.JSON(500, gin.H{"code": -1, "error": "保存失败"})
+			return
+		}
 	}
 	c.JSON(200, gin.H{"code": 0, "data": "FRW 配置已保存"})
 }

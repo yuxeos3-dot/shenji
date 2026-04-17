@@ -72,9 +72,9 @@ func SyncBingData(c *gin.Context) {
 		return
 	}
 
-	apiKey := db.GetSetting("bing_api_key")
+	apiKey, _ := LoadUserBingKey(c.GetInt64("user_id"))
 	if apiKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "Bing Webmaster API Key未配置，请在系统设置中添加"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "请先在「个人中心 → Bing」填写 API Key"})
 		return
 	}
 

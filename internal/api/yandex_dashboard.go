@@ -26,7 +26,7 @@ import (
 
 // YandexListHosts GET /api/v1/yandex/hosts
 func YandexListHosts(c *gin.Context) {
-	token, err := getYandexAccessToken()
+	token, err := getYandexAccessToken(c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
 		return
@@ -79,7 +79,7 @@ func YandexOverview(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	token, err := getYandexAccessToken()
+	token, err := getYandexAccessToken(c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
 		return
@@ -218,7 +218,7 @@ func YandexHostDetail(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	token, err := getYandexAccessToken()
+	token, err := getYandexAccessToken(c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
 		return

@@ -49,7 +49,7 @@ func parseFloatSafe(s string) float64 {
 // account, with its account name for grouping. A user typically has
 // 1-5 properties so the UI shows them as a flat sortable list.
 func GAListProperties(c *gin.Context) {
-	token, err := getGAAccessToken()
+	token, err := getGAAccessToken(c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
 		return
@@ -133,7 +133,7 @@ func GAOverview(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	token, err := getGAAccessToken()
+	token, err := getGAAccessToken(c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
 		return
@@ -259,7 +259,7 @@ func GAPropertyDetail(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	token, err := getGAAccessToken()
+	token, err := getGAAccessToken(c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
 		return

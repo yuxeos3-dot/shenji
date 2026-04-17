@@ -748,6 +748,71 @@ func Init() {
 		`CREATE INDEX IF NOT EXISTS idx_geo_articles_review_ct ON geo_articles(review_status, content_type)`,
 		`CREATE INDEX IF NOT EXISTS idx_bing_data_site_date ON bing_data(site_id, date DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_dead_link_results_site_status ON dead_link_results(site_id, status_code)`,
+
+		// ─── Per-user platform credentials (pre-launch privacy refactor) ──
+		// Before this change, OAuth client credentials, Telegram bot tokens,
+		// Bing API key, and FRW apikey lived in the global `settings` table
+		// which was readable by any admin. Users also shared one OAuth token
+		// per provider, meaning whichever user last clicked "Authorize Google"
+		// effectively logged everyone else's dashboards into their own GSC
+		// account. The launch model is "every user is their own system"
+		// (每一个用户相当于自己一个单独的系统), so all of this moves to
+		// per-user storage. Admin keeps monitoring-only visibility via
+		// /users/:id/platform-status.
+
+		// OAuth application credentials (client_id / client_secret /
+		// redirect_uri) — each user registers their own app in Google Cloud
+		// Console / Yandex Console. Values are stored encrypted.
+		`CREATE TABLE IF NOT EXISTS user_oauth_config (
+			id            INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id       INTEGER NOT NULL,
+			service       TEXT NOT NULL,
+			client_id     TEXT DEFAULT '',
+			client_secret TEXT DEFAULT '',
+			redirect_uri  TEXT DEFAULT '',
+			created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(user_id, service)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_oauth_config_user ON user_oauth_config(user_id)`,
+
+		// OAuth access + refresh tokens, per user per service. Replaces
+		// the old global oauth_tokens table (which we keep around as a
+		// migration source but stop reading from once the migration flag
+		// is set).
+		`CREATE TABLE IF NOT EXISTS user_oauth_tokens (
+			id            INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id       INTEGER NOT NULL,
+			service       TEXT NOT NULL,
+			access_token  TEXT NOT NULL,
+			refresh_token TEXT DEFAULT '',
+			expires_at    DATETIME,
+			created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(user_id, service)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_oauth_tokens_user ON user_oauth_tokens(user_id)`,
+
+		// Telegram: each user has their own bot + chat. Audit completion
+		// notifications and rejected-fix pings are sent via the triggering
+		// user's bot (see telegram.SendNotificationFor(userID, ...)).
+		`CREATE TABLE IF NOT EXISTS user_telegram (
+			user_id    INTEGER PRIMARY KEY,
+			bot_token  TEXT DEFAULT '',
+			chat_id    TEXT DEFAULT '',
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+
+		// Bing uses a plain API key (not OAuth). One per user.
+		`CREATE TABLE IF NOT EXISTS user_bing (
+			user_id    INTEGER PRIMARY KEY,
+			api_key    TEXT DEFAULT '',
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+
+		// FRW apikey: added per-user. Drop the global fallback once we
+		// read this column everywhere.
+		`ALTER TABLE users ADD COLUMN frw_apikey TEXT DEFAULT ''`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {

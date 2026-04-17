@@ -270,6 +270,12 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		}
 	}()
 
+	// Route notifications to the site's owner (sites.created_by). Under
+	// the per-user model every user has their own Telegram bot; scheduled
+	// audits fire off the creator's bot rather than a shared one.
+	var ownerUserID int64
+	db.DB.QueryRow("SELECT COALESCE(created_by,0) FROM sites WHERE id = ?", siteID).Scan(&ownerUserID)
+
 	result, err := db.DB.Exec(
 		"INSERT INTO audit_tasks (site_id, triggered_by, status, progress) VALUES (?, 0, 'running', 10)", siteID,
 	)
@@ -407,7 +413,7 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 			time.Now(), taskID); err != nil {
 			log.Printf("[audit %d] scheduler mark-failed failed: %v", taskID, err)
 		}
-		telegram.SendNotification("巡检失败", siteName+": 所有技术审计批次均失败")
+		telegram.NotifyUser(ownerUserID, "巡检失败", siteName+": 所有技术审计批次均失败")
 		return
 	}
 
@@ -474,5 +480,5 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		return
 	}
 
-	telegram.SendNotification("巡检完成", siteName+": "+analysisResult.Summary)
+	telegram.NotifyUser(ownerUserID, "巡检完成", siteName+": "+analysisResult.Summary)
 }

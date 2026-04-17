@@ -20,13 +20,14 @@ import (
 const yandexAPI = "https://api.webmaster.yandex.net/v4"
 
 func GetYandexAuthURL(c *gin.Context) {
-	clientID := db.GetSetting("yandex_client_id")
-	if clientID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "Yandex OAuth未配置"})
+	uid := c.GetInt64("user_id")
+	clientID, _, _, err := LoadUserOAuthClient(uid, "yandex")
+	if err != nil || clientID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "请先在「个人中心 → Yandex」填写 Client ID / Client Secret"})
 		return
 	}
 
-	state, err := newOAuthState(c.GetInt64("user_id"))
+	state, err := newOAuthState(uid)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "state 生成失败"})
 		return
@@ -39,7 +40,9 @@ func GetYandexAuthURL(c *gin.Context) {
 }
 
 func YandexCallback(c *gin.Context) {
-	if !requireValidState(c) {
+	uid, ok := consumeOAuthState(c.Query("state"))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "OAuth state 无效或已过期，请重新发起授权"})
 		return
 	}
 	code := c.Query("code")
@@ -48,8 +51,11 @@ func YandexCallback(c *gin.Context) {
 		return
 	}
 
-	clientID := db.GetSetting("yandex_client_id")
-	clientSecret := db.GetSetting("yandex_client_secret")
+	clientID, clientSecret, _, err := LoadUserOAuthClient(uid, "yandex")
+	if err != nil || clientID == "" || clientSecret == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "Yandex Client ID / Secret 未填写"})
+		return
+	}
 
 	resp, err := http.PostForm("https://oauth.yandex.ru/token", map[string][]string{
 		"grant_type":    {"authorization_code"},
@@ -77,17 +83,56 @@ func YandexCallback(c *gin.Context) {
 		return
 	}
 
-	if _, err := db.DB.Exec(
-		"INSERT OR REPLACE INTO oauth_tokens (service, access_token, refresh_token, expires_at) VALUES ('yandex', ?, ?, ?)",
-		MustEncryptToken(result.AccessToken), MustEncryptToken(result.RefreshToken),
-		time.Now().Add(time.Duration(result.ExpiresIn)*time.Second),
-	); err != nil {
-		log.Printf("[yandex] persist token failed: %v", err)
+	tok := &OAuthToken{
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresAt:    time.Now().Add(time.Duration(result.ExpiresIn) * time.Second),
+	}
+	if err := saveUserOAuthToken(uid, "yandex", tok); err != nil {
+		log.Printf("[yandex] persist token uid=%d: %v", uid, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "Token 存储失败"})
 		return
 	}
 
 	c.Redirect(http.StatusFound, "/?oauth=yandex&status=success")
+}
+
+// refreshYandexToken performs a refresh_token grant using the user's own
+// Yandex OAuth app credentials. Called from loadAndRefreshOAuth.
+func refreshYandexToken(userID int64, refreshToken string) (string, error) {
+	clientID, clientSecret, _, err := LoadUserOAuthClient(userID, "yandex")
+	if err != nil || clientID == "" || clientSecret == "" {
+		return "", fmt.Errorf("Yandex OAuth 应用凭据缺失，请在「个人中心 → Yandex」填写")
+	}
+	resp, err := http.PostForm("https://oauth.yandex.ru/token", map[string][]string{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {refreshToken},
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+	})
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var result struct {
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOAuthResponseBytes)).Decode(&result); err != nil {
+		return "", err
+	}
+	if result.AccessToken == "" {
+		return "", fmt.Errorf("Yandex token refresh 返回为空 (HTTP %d)", resp.StatusCode)
+	}
+	newExpiry := time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
+	if _, err := db.DB.Exec(
+		`UPDATE user_oauth_tokens SET access_token = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
+		 WHERE user_id = ? AND service = 'yandex'`,
+		MustEncryptToken(result.AccessToken), newExpiry, userID,
+	); err != nil {
+		return "", fmt.Errorf("Yandex token 存储失败: %w", err)
+	}
+	return result.AccessToken, nil
 }
 
 // yandexFetch wraps Yandex Webmaster API calls (like yf() in gsc-dashboard.html)
@@ -173,19 +218,11 @@ func getYandexUserID(token string) (string, error) {
 	return fmt.Sprintf("%d", u.UserID), nil
 }
 
-func getYandexAccessToken() (string, error) {
-	var stored string
-	err := db.DB.QueryRow(
-		"SELECT access_token FROM oauth_tokens WHERE service = 'yandex' ORDER BY id DESC LIMIT 1",
-	).Scan(&stored)
-	if err != nil {
-		return "", fmt.Errorf("Yandex未授权")
+func getYandexAccessToken(userID int64) (string, error) {
+	if userID <= 0 {
+		return "", fmt.Errorf("未登录")
 	}
-	plain, err := DecryptToken(stored)
-	if err != nil {
-		return "", fmt.Errorf("Yandex token 解密失败: %w", err)
-	}
-	return plain, nil
+	return loadAndRefreshOAuth(userID, "yandex")
 }
 
 // yandexUserIDCacheTTL bounds how long a cached Yandex user id is trusted.
@@ -250,7 +287,7 @@ func SyncYandexData(c *gin.Context) {
 		return
 	}
 
-	token, err := getYandexAccessToken()
+	token, err := getYandexAccessToken(c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
 		return

@@ -10,7 +10,6 @@ import (
 	"seo-system/internal/ai"
 	"seo-system/internal/crawler"
 	"seo-system/internal/db"
-	"seo-system/internal/telegram"
 
 	"github.com/gin-gonic/gin"
 )
@@ -56,8 +55,10 @@ func TriggerAudit(c *gin.Context) {
 		return
 	}
 
-	// Run audit asynchronously
-	go runAuditTask(taskID, siteID, crawler.SiteConfig{
+	// Run audit asynchronously. Pass the triggering user's id so
+	// completion / failure notices go to *their* Telegram bot rather
+	// than a global firehose.
+	go runAuditTask(taskID, siteID, userID, crawler.SiteConfig{
 		Domain:        domain,
 		URLCategory:   urlCat,
 		URLDetail:     urlDet,
@@ -70,7 +71,7 @@ func TriggerAudit(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"task_id": taskID}})
 }
 
-func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName string) {
+func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.SiteConfig, siteName string) {
 	IncAuditRun()
 	defer func() {
 		if r := recover(); r != nil {
@@ -250,7 +251,7 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
 			"所有技术审计批次均失败", time.Now(), taskID)
 		log.Printf("[audit %d] 所有技术审计批次均失败", taskID)
-		telegram.SendNotification("审计失败", siteName+" 审计失败：AI 调用异常")
+		NotifyUser(ownerUserID, "审计失败", siteName+" 审计失败：AI 调用异常")
 		return
 	}
 
@@ -318,7 +319,7 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 	}
 
 	log.Printf("[audit %d] 完成: %s", taskID, analysisResult.Summary)
-	telegram.SendNotification("审计完成", siteName+" 审计完成: "+analysisResult.Summary)
+	NotifyUser(ownerUserID, "审计完成", siteName+" 审计完成: "+analysisResult.Summary)
 }
 
 func DeleteAudit(c *gin.Context) {

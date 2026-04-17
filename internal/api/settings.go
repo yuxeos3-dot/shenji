@@ -21,6 +21,28 @@ var sensitiveKeys = map[string]bool{
 	"bing_api_key":         true,
 }
 
+// perUserOnlyKeys lists setting names that no longer live in the global
+// settings table — every user owns their own copy via user_oauth_config /
+// user_telegram / user_bing / users.frw_apikey. GetSettings filters them
+// out of the admin response; SaveSettings silently drops them on write.
+// Keeps the old shared-platform fields from sneaking back in via a stale
+// frontend payload after migration.
+var perUserOnlyKeys = map[string]bool{
+	"gsc_client_id":        true,
+	"gsc_client_secret":    true,
+	"gsc_redirect_uri":     true,
+	"yandex_client_id":     true,
+	"yandex_client_secret": true,
+	"yandex_redirect_uri":  true,
+	"bing_api_key":         true,
+	"telegram_bot_token":   true,
+	"telegram_chat_id":     true,
+	"frw_apikey":           true,
+	"ai_api_key":           true,
+	"ai_api_url":           true,
+	"ai_model":             true,
+}
+
 func maskValue(key, value string) string {
 	if !sensitiveKeys[key] || value == "" {
 		return value
@@ -43,6 +65,11 @@ func GetSettings(c *gin.Context) {
 	for rows.Next() {
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil {
+			continue
+		}
+		// Per-user keys never belong in the global admin view anymore;
+		// drop even if something left residue in the table.
+		if perUserOnlyKeys[key] {
 			continue
 		}
 		settings[key] = maskValue(key, value)
@@ -100,6 +127,12 @@ func SaveSettings(c *gin.Context) {
 			value = strings.TrimSpace(strings.Trim(fmt.Sprintf("%v", x), "[]"))
 		}
 
+		// Reject per-user-only keys: these moved to user_oauth_config /
+		// user_telegram / user_bing / users.frw_apikey and must not be
+		// writable via the admin settings page.
+		if perUserOnlyKeys[key] {
+			continue
+		}
 		// Skip masked values for sensitive keys (user didn't change them).
 		if sensitiveKeys[key] && strings.HasPrefix(value, "****") {
 			continue
@@ -139,8 +172,16 @@ func TestAI(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "AI接口连接成功"})
 }
 
+// TestTelegram exercises the CALLER'S own bot — each user has their own
+// under the per-user model. The admin-only legacy /settings/test-telegram
+// endpoint therefore tests the admin's Telegram config.
 func TestTelegram(c *gin.Context) {
-	if err := telegram.TestConnection(); err != nil {
+	botToken, chatID, err := LoadUserTelegram(c.GetInt64("user_id"))
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "error": "Telegram未配置"})
+		return
+	}
+	if err := telegram.Test(botToken, chatID); err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "error": err.Error()})
 		return
 	}

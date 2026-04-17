@@ -110,6 +110,7 @@ const pwdForm = ref({ old_password: '', new_password: '' })
 
 const topItems = [
   { path: '/dashboard', icon: '📊', label: '仪表盘' },
+  { path: '/personal-center', icon: '🧑', label: '个人中心' },
 ]
 
 const groups = [
@@ -237,6 +238,7 @@ const pageTitles = {
   '/users': '用户管理',
   '/cache-management': '缓存管理',
   '/settings': '系统管理',
+  '/personal-center': '个人中心',
 }
 const pageTitle = computed(() => {
   for (const [path, title] of Object.entries(pageTitles)) {
