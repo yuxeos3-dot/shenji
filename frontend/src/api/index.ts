@@ -234,6 +234,19 @@ const api = {
   coordSubmitTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/submit`, data),
   coordVerifyTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/verify`, data),
   coordAddComment: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/comments`, data),
+  // Developer ↔ creator Q&A: ask pauses dev, answer resumes it.
+  coordAskTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/ask`, data),
+  coordAnswerTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/answer`, data),
+  // Attachments. Upload uses multipart; we override the Content-Type
+  // so axios lets the browser set the multipart boundary correctly.
+  coordUploadAttachment: (id: Id, formData: FormData) =>
+    instance.post(`/v1/coord/tasks/${id}/attachments`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+  coordDeleteAttachment: (id: Id) => instance.delete(`/v1/coord/attachments/${id}`),
+  // Absolute URL for <img src=...> / <a href=...>. The Content-Disposition
+  // from the server decides inline vs download.
+  coordAttachmentUrl: (id: Id) => `/api/v1/coord/attachments/${id}/file`,
 }
 
 export default api

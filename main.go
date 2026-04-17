@@ -229,6 +229,18 @@ func main() {
 			coord.POST("/tasks/:id/submit", api.RequirePermission("coord.submit"), api.SubmitCoordTask)
 			coord.POST("/tasks/:id/verify", api.RequirePermission("coord.verify"), api.VerifyCoordTask)
 			coord.POST("/tasks/:id/comments", api.RequirePermission("coord.comment"), api.AddCoordComment)
+			// Developer raises a question → creator answers → back to dev.
+			// Both require coord.comment since they're conversational actions;
+			// dev doesn't need elevated privileges to ask, admin doesn't
+			// need elevated privileges to answer.
+			coord.POST("/tasks/:id/ask", api.RequirePermission("coord.comment"), api.AskCoordTask)
+			coord.POST("/tasks/:id/answer", api.RequirePermission("coord.comment"), api.AnswerCoordTask)
+			// Attachment upload is tied to the task id (so we know what
+			// it belongs to). Viewing a single file is addressed by
+			// attachment id — same coord.view gate.
+			coord.POST("/tasks/:id/attachments", api.RequirePermission("coord.comment"), api.UploadCoordAttachment)
+			coord.GET("/attachments/:id/file", api.RequirePermission("coord.view"), api.ServeCoordAttachment)
+			coord.DELETE("/attachments/:id", api.RequirePermission("coord.comment"), api.DeleteCoordAttachment)
 		}
 
 		// Cache management (admin only)

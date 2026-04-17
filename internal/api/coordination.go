@@ -34,16 +34,18 @@ import (
 // ─── Domain types ───────────────────────────────────────────────────────────
 
 const (
-	coordStatusPending     = "pending"
-	coordStatusInProgress  = "in_progress"
-	coordStatusUnderReview = "under_review"
-	coordStatusDone        = "done"
+	coordStatusPending        = "pending"
+	coordStatusInProgress     = "in_progress"
+	coordStatusAwaitingAnswer = "awaiting_answer" // developer raised a question, waiting on creator
+	coordStatusUnderReview    = "under_review"
+	coordStatusDone           = "done"
 )
 
-// validCoordStatus reports whether s is one of the four legal states.
+// validCoordStatus reports whether s is one of the legal states.
 func validCoordStatus(s string) bool {
 	switch s {
-	case coordStatusPending, coordStatusInProgress, coordStatusUnderReview, coordStatusDone:
+	case coordStatusPending, coordStatusInProgress, coordStatusAwaitingAnswer,
+		coordStatusUnderReview, coordStatusDone:
 		return true
 	}
 	return false
@@ -303,11 +305,12 @@ func ListCoordTasks(c *gin.Context) {
 		WHERE ` + strings.Join(where, " AND ") + `
 		ORDER BY
 			CASE t.status
-				WHEN 'under_review' THEN 0
-				WHEN 'in_progress'  THEN 1
-				WHEN 'pending'      THEN 2
-				WHEN 'done'         THEN 3
-				ELSE 4
+				WHEN 'awaiting_answer' THEN 0
+				WHEN 'under_review'    THEN 1
+				WHEN 'in_progress'     THEN 2
+				WHEN 'pending'         THEN 3
+				WHEN 'done'            THEN 4
+				ELSE 5
 			END,
 			t.created_at DESC
 		LIMIT ? OFFSET ?`
@@ -503,7 +506,9 @@ func AssignCoordTask(c *gin.Context) {
 }
 
 // SubmitCoordTask is the "修改完毕" button — developer marks the fix as
-// ready for re-audit. Requires current status = in_progress.
+// ready for re-audit. Accepts transitions from in_progress OR
+// awaiting_answer (dev might resolve the question themselves after
+// thinking, and then finish).
 func SubmitCoordTask(c *gin.Context) {
 	id := parseInt64Param(c, "id")
 	var body transitionBody
@@ -513,8 +518,8 @@ func SubmitCoordTask(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if t.Status != coordStatusInProgress {
-		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "只有「开发中」的任务才能标记为修改完毕"})
+	if t.Status != coordStatusInProgress && t.Status != coordStatusAwaitingAnswer {
+		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "只有「开发中」或「待回复」的任务才能标记为修改完毕"})
 		return
 	}
 
@@ -523,14 +528,14 @@ func SubmitCoordTask(c *gin.Context) {
 	_, err := db.DB.Exec(
 		`UPDATE coordination_tasks
 		 SET status = ?, submitted_at = ?
-		 WHERE id = ? AND status = ?`,
-		coordStatusUnderReview, now, id, coordStatusInProgress)
+		 WHERE id = ? AND (status = ? OR status = ?)`,
+		coordStatusUnderReview, now, id, coordStatusInProgress, coordStatusAwaitingAnswer)
 	if err != nil {
 		log.Printf("[coord] SubmitCoordTask(%d) update failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "提交失败"})
 		return
 	}
-	recordEvent(id, "submit", coordStatusInProgress, coordStatusUnderReview, uid, uname, body.Note)
+	recordEvent(id, "submit", t.Status, coordStatusUnderReview, uid, uname, body.Note)
 	WriteAuditLog(c, "coord_submit", "coordination_task", fmt.Sprintf("%d", id), "")
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status": coordStatusUnderReview}})
 }
@@ -568,6 +573,84 @@ func VerifyCoordTask(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status": coordStatusDone}})
 }
 
+// AskCoordTask is the developer's "我有个问题" button — pauses their work
+// and flips the ball back to the task creator for clarification.
+//
+//	in_progress → awaiting_answer
+//
+// The question text is required (otherwise there's nothing for the
+// creator to respond to).
+func AskCoordTask(c *gin.Context) {
+	id := parseInt64Param(c, "id")
+	var body transitionBody
+	if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.Note) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "请填写你要问的问题"})
+		return
+	}
+
+	t, ok := assertEditable(c, id)
+	if !ok {
+		return
+	}
+	if t.Status != coordStatusInProgress {
+		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "只有「开发中」的任务才能发起提问"})
+		return
+	}
+
+	uid, uname := currentUser(c)
+	_, err := db.DB.Exec(
+		`UPDATE coordination_tasks SET status = ?
+		 WHERE id = ? AND status = ?`,
+		coordStatusAwaitingAnswer, id, coordStatusInProgress)
+	if err != nil {
+		log.Printf("[coord] AskCoordTask(%d) update failed: %v", id, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "提交失败"})
+		return
+	}
+	recordEvent(id, "ask", coordStatusInProgress, coordStatusAwaitingAnswer, uid, uname, body.Note)
+	WriteAuditLog(c, "coord_ask", "coordination_task", fmt.Sprintf("%d", id), "")
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status": coordStatusAwaitingAnswer}})
+}
+
+// AnswerCoordTask is the creator's reply — flips the task back to the
+// developer so they can continue.
+//
+//	awaiting_answer → in_progress
+//
+// Answer text is required; the timeline will pair it with the preceding
+// ask event for context.
+func AnswerCoordTask(c *gin.Context) {
+	id := parseInt64Param(c, "id")
+	var body transitionBody
+	if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.Note) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "请填写回复内容"})
+		return
+	}
+
+	t, ok := assertEditable(c, id)
+	if !ok {
+		return
+	}
+	if t.Status != coordStatusAwaitingAnswer {
+		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "只有「待回复」的任务才能回复"})
+		return
+	}
+
+	uid, uname := currentUser(c)
+	_, err := db.DB.Exec(
+		`UPDATE coordination_tasks SET status = ?
+		 WHERE id = ? AND status = ?`,
+		coordStatusInProgress, id, coordStatusAwaitingAnswer)
+	if err != nil {
+		log.Printf("[coord] AnswerCoordTask(%d) update failed: %v", id, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "回复失败"})
+		return
+	}
+	recordEvent(id, "answer", coordStatusAwaitingAnswer, coordStatusInProgress, uid, uname, body.Note)
+	WriteAuditLog(c, "coord_answer", "coordination_task", fmt.Sprintf("%d", id), "")
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status": coordStatusInProgress}})
+}
+
 // AddCoordComment appends a free-form note to the timeline without
 // changing state. Disabled once the task is done.
 func AddCoordComment(c *gin.Context) {
@@ -602,7 +685,16 @@ func UpdateCoordTask(c *gin.Context) {
 		return
 	}
 
-	if _, ok := assertEditable(c, id); !ok {
+	t, ok := assertEditable(c, id)
+	if !ok {
+		return
+	}
+	// Per spec: issue title / note can only be polished by the creator
+	// BEFORE it's handed to a developer. Once started, the issue is the
+	// contract — changing it mid-stream would confuse the developer.
+	// Attachments and comments remain allowed in later states.
+	if t.Status != coordStatusPending {
+		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "任务已进入开发流程，问题描述不可再修改；如需补充信息，请在评论里留言"})
 		return
 	}
 
@@ -617,6 +709,8 @@ func UpdateCoordTask(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "更新失败"})
 		return
 	}
+	uid, uname := currentUser(c)
+	recordEvent(id, "edit", t.Status, t.Status, uid, uname, "")
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "已更新"})
 }
 
@@ -693,10 +787,11 @@ func CoordStats(c *gin.Context) {
 	defer rows.Close()
 
 	counts := map[string]int{
-		coordStatusPending:     0,
-		coordStatusInProgress:  0,
-		coordStatusUnderReview: 0,
-		coordStatusDone:        0,
+		coordStatusPending:        0,
+		coordStatusInProgress:     0,
+		coordStatusAwaitingAnswer: 0,
+		coordStatusUnderReview:    0,
+		coordStatusDone:           0,
 	}
 	for rows.Next() {
 		var r row

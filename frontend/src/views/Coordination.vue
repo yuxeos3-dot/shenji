@@ -14,6 +14,10 @@
         <div class="stat-num">{{ stats.in_progress || 0 }}</div>
         <div class="stat-label">🛠 开发中</div>
       </div>
+      <div class="stat-cell answer" :class="{active: filter.status==='awaiting_answer'}" @click="setStatus('awaiting_answer')">
+        <div class="stat-num">{{ stats.awaiting_answer || 0 }}</div>
+        <div class="stat-label">❓ 待回复</div>
+      </div>
       <div class="stat-cell review" :class="{active: filter.status==='under_review'}" @click="setStatus('under_review')">
         <div class="stat-num">{{ stats.under_review || 0 }}</div>
         <div class="stat-label">🔍 待验收</div>
@@ -107,6 +111,7 @@ const total = ref(0)
 
 const totalAll = computed(() =>
   (stats.value.pending || 0) + (stats.value.in_progress || 0) +
+  (stats.value.awaiting_answer || 0) +
   (stats.value.under_review || 0) + (stats.value.done || 0)
 )
 
@@ -132,6 +137,7 @@ function statusLabel(s) {
   return {
     pending: '📋 待分配',
     in_progress: '🛠 开发中',
+    awaiting_answer: '❓ 待回复',
     under_review: '🔍 待验收',
     done: '✅ 已完成',
   }[s] || s
@@ -203,7 +209,7 @@ onMounted(async () => {
 .coord-page { display:flex; flex-direction:column; gap:16px; }
 .panel { background:var(--surface); border-radius:var(--r); box-shadow:var(--s1); border:1.5px solid var(--border-light); padding:16px 22px; }
 
-.stats-bar { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; padding:14px; }
+.stats-bar { display:grid; grid-template-columns:repeat(6,1fr); gap:12px; padding:14px; }
 .stat-cell { text-align:center; padding:16px 12px; border-radius:var(--r-sm); cursor:pointer; transition:all .18s; border:1.5px solid var(--border-light); background:var(--surface-2); }
 .stat-cell:hover { transform:translateY(-1px); box-shadow:var(--s1); border-color:var(--peach); }
 .stat-cell.active { background:linear-gradient(135deg,var(--sun-light),#FFF); border-color:var(--sun); box-shadow:0 3px 12px rgba(249,115,22,.2); }
@@ -211,6 +217,7 @@ onMounted(async () => {
 .stat-cell .stat-label { font-size:12px; font-weight:700; color:var(--ink-soft); margin-top:6px; }
 .stat-cell.pending.active .stat-num { color:#3B82F6; }
 .stat-cell.running.active .stat-num { color:var(--warn); }
+.stat-cell.answer.active .stat-num { color:#B91C1C; }
 .stat-cell.review.active .stat-num { color:#7C3AED; }
 .stat-cell.done.active .stat-num { color:var(--ok); }
 
@@ -242,6 +249,7 @@ onMounted(async () => {
 .status-tag { display:inline-block; padding:3px 9px; border-radius:12px; font-size:11px; font-weight:700; }
 .s-pending { background:#DBEAFE; color:#1D4ED8; }
 .s-in_progress { background:#FEF3C7; color:#92400E; }
+.s-awaiting_answer { background:#FEE2E2; color:#B91C1C; }
 .s-under_review { background:#EDE9FE; color:#6D28D9; }
 .s-done { background:var(--ok-bg); color:var(--ok); }
 

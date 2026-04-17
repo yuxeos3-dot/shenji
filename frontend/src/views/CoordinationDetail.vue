@@ -75,16 +75,28 @@
               {{ task.status === 'pending' ? '🛠 分配给开发（开始）' : '🔁 重新分配' }}
             </button>
           </template>
+          <!-- Developer: ask a question. Only shown while actively developing;
+               pauses the task until the creator answers. -->
           <button
             v-if="task.status === 'in_progress'"
+            class="btn btn-ask"
+            @click="doAsk"
+          >❓ 提问（转给发起人）</button>
+          <button
+            v-if="task.status === 'in_progress' || task.status === 'awaiting_answer'"
             class="btn btn-submit"
             @click="doSubmit"
-          >✅ 标记修改完毕</button>
+          >✅ 开发完毕</button>
           <button
             v-if="task.status === 'under_review'"
             class="btn btn-verify"
             @click="doVerify"
           >🎯 验收通过 · 关闭任务</button>
+          <button
+            v-if="task.status === 'pending'"
+            class="btn btn-edit"
+            @click="startEditNote"
+          >✏ 编辑问题描述</button>
           <button
             v-if="task.status === 'pending'"
             class="btn btn-danger-soft"
@@ -93,6 +105,23 @@
         </div>
         <div v-else class="locked-banner">
           🔒 任务已完成并关闭，所有操作已锁定（留痕）
+        </div>
+
+        <!-- When waiting for the creator to answer, surface the question
+             and a prominent reply input. This is the single most
+             important action for the creator, so it goes in the header. -->
+        <div v-if="task.status === 'awaiting_answer' && latestAsk" class="pending-answer-box">
+          <div class="pa-title">💬 开发 {{ latestAsk.actor_name }} 提了一个问题，需要你的回复：</div>
+          <div class="pa-question">{{ latestAsk.note }}</div>
+          <textarea
+            v-model="answerDraft"
+            class="pa-input"
+            rows="3"
+            placeholder="回复开发的问题..."
+          ></textarea>
+          <button class="btn btn-primary" @click="doAnswer" :disabled="!answerDraft.trim() || sending">
+            {{ sending ? '发送中...' : '✉ 回复并继续开发' }}
+          </button>
         </div>
       </div>
 
@@ -115,8 +144,15 @@
       <div class="panel note-panel" v-if="!isLocked">
         <div class="section-title">
           任务备注
-          <button class="btn-xs" v-if="!editingNote" @click="startEditNote">✏ 编辑</button>
-          <template v-else>
+          <button
+            class="btn-xs"
+            v-if="!editingNote && task.status === 'pending'"
+            @click="startEditNote"
+          >✏ 编辑</button>
+          <span v-else-if="!editingNote && task.status !== 'pending'" class="lock-hint">
+            🔒 任务已推给开发，问题描述不可再改（可在下方添加备注）
+          </span>
+          <template v-else-if="editingNote">
             <button class="btn-xs" @click="saveNote">保存</button>
             <button class="btn-xs btn-xs-ghost" @click="editingNote = false; noteDraft = task.note">取消</button>
           </template>
@@ -129,6 +165,73 @@
           placeholder="描述需求、附加上下文、验收标准等"
         ></textarea>
         <div v-else class="note-display">{{ task.note || '（暂无备注）' }}</div>
+      </div>
+
+      <!-- Attachment panel: image grid + file list + upload button.
+           Visible even when the task is done (we show attachments for
+           archival purposes) but the action buttons are hidden. -->
+      <div class="panel attach-panel">
+        <div class="section-title">
+          📎 附件（截图/文档 {{ attachments.length }} 个）
+          <button
+            v-if="!isLocked"
+            class="btn-xs btn-xs-primary"
+            :disabled="uploading"
+            @click="pickFile"
+          >
+            {{ uploading ? '上传中...' : '+ 上传截图/文件' }}
+          </button>
+          <input
+            ref="fileInputRef"
+            type="file"
+            multiple
+            accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.md"
+            style="display:none"
+            @change="onFilePicked"
+          />
+        </div>
+
+        <div v-if="!attachments.length" class="empty-hint">
+          暂无附件。点击「上传截图/文件」附加证据或补充材料。
+          <div class="hint-sub">支持图片 / PDF / Office 文档，单个 10 MB 内。</div>
+        </div>
+
+        <!-- Image grid -->
+        <div v-if="imageAttachments.length" class="img-grid">
+          <div
+            v-for="a in imageAttachments"
+            :key="a.id"
+            class="img-cell"
+          >
+            <a :href="attachmentUrl(a.id)" target="_blank" rel="noopener">
+              <img :src="attachmentUrl(a.id)" :alt="a.filename" loading="lazy" />
+            </a>
+            <div class="img-meta">
+              <span class="img-name" :title="a.filename">{{ a.filename }}</span>
+              <button
+                v-if="!isLocked"
+                class="img-del"
+                @click="deleteAttachment(a)"
+                title="删除附件"
+              >✕</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Non-image file list -->
+        <div v-if="fileAttachments.length" class="file-list">
+          <div v-for="a in fileAttachments" :key="a.id" class="file-row">
+            <span class="file-icon">{{ fileIcon(a.mime) }}</span>
+            <a :href="attachmentUrl(a.id)" target="_blank" rel="noopener" class="file-name">{{ a.filename }}</a>
+            <span class="file-size">{{ fmtSize(a.size) }}</span>
+            <span class="file-time">{{ fmtTime(a.uploaded_at) }}</span>
+            <button
+              v-if="!isLocked"
+              class="btn-xs btn-xs-ghost"
+              @click="deleteAttachment(a)"
+            >删除</button>
+          </div>
+        </div>
       </div>
 
       <!-- Timeline -->
@@ -207,6 +310,7 @@ const router = useRouter()
 
 const task = ref(null)
 const events = ref([])
+const attachments = ref([])
 const developers = ref([])
 const loading = ref(false)
 const sending = ref(false)
@@ -214,6 +318,9 @@ const sending = ref(false)
 const editingNote = ref(false)
 const noteDraft = ref('')
 const commentDraft = ref('')
+const answerDraft = ref('')
+const uploading = ref(false)
+const fileInputRef = ref(null)
 
 const showAssignDialog = ref(false)
 const assignForm = ref({ assignee_id: null, note: '' })
@@ -229,11 +336,31 @@ const issueSnapshotParsed = computed(() => {
 // Conflict on any write; the frontend just hides the buttons.
 const isLocked = computed(() => task.value?.status === 'done')
 
+// Find the most recent ask event so the creator can see what the dev
+// asked without scrolling the whole timeline. Paired with the answer
+// input box in the header when status === awaiting_answer.
+const latestAsk = computed(() => {
+  for (let i = events.value.length - 1; i >= 0; i--) {
+    if (events.value[i].event_type === 'ask') return events.value[i]
+  }
+  return null
+})
+
+// Split attachments by kind so we can render images as thumbnails
+// and non-images as a classic file list with icon + filename.
+const imageAttachments = computed(() =>
+  attachments.value.filter(a => (a.mime || '').startsWith('image/'))
+)
+const fileAttachments = computed(() =>
+  attachments.value.filter(a => !(a.mime || '').startsWith('image/'))
+)
+
 function statusLabel(s) {
   return {
     '': '—',
     pending: '待分配',
     in_progress: '开发中',
+    awaiting_answer: '待发起人回复',
     under_review: '待验收',
     done: '已完成',
   }[s] || s
@@ -248,11 +375,16 @@ function sevClass(sev) {
 function eventLabel(t) {
   return {
     create: '🆕 创建任务',
+    edit: '✏ 编辑问题',
     assign: '👤 分配开发',
     start: '▶ 开始处理',
-    submit: '✅ 修改完毕',
+    ask: '❓ 开发提问',
+    answer: '✉ 发起人回复',
+    submit: '✅ 开发完毕',
     verify: '🎯 审计通过',
     comment: '💬 备注',
+    upload: '📎 上传附件',
+    attach_delete: '🗑 删除附件',
   }[t] || t
 }
 function fmtTime(s) {
@@ -271,6 +403,7 @@ async function load() {
     const res = await api.coordGetTask(route.params.id)
     task.value = res.data?.task || null
     events.value = res.data?.events || []
+    attachments.value = res.data?.attachments || []
     noteDraft.value = task.value?.note || ''
   } catch (e) {
     console.error(e)
@@ -381,6 +514,115 @@ async function doAddComment() {
   finally { sending.value = false }
 }
 
+// Developer raises a question. Required input; empty prompt cancels.
+async function doAsk() {
+  try {
+    const { value } = await ElMessageBox.prompt('描述你的问题（将推送给任务发起人）', '提问', {
+      confirmButtonText: '转给发起人',
+      cancelButtonText: '取消',
+      inputType: 'textarea',
+      inputPlaceholder: '例如：首页 hero 区的文案字数要求是 200 字正文还是含标题？',
+      inputValidator: v => !!(v && v.trim()) || '请填写你的问题',
+    })
+    sending.value = true
+    await api.coordAskTask(task.value.id, { note: value })
+    ElMessage.success('已转给发起人')
+    await load()
+  } catch (e) {
+    if (e === 'cancel' || e === 'close') return
+  } finally { sending.value = false }
+}
+
+// Creator answers a developer's question. Uses the always-visible
+// `answerDraft` in the header (not a prompt box, since the answer is
+// often long and the user wants to reference the question above it).
+async function doAnswer() {
+  const text = answerDraft.value.trim()
+  if (!text) {
+    ElMessage.warning('请填写回复内容')
+    return
+  }
+  sending.value = true
+  try {
+    await api.coordAnswerTask(task.value.id, { note: text })
+    answerDraft.value = ''
+    await load()
+    ElMessage.success('已回复，任务重新回到开发中')
+  } catch { /* interceptor showed */ }
+  finally { sending.value = false }
+}
+
+// Open the hidden file picker. We use a plain <input type="file"> so the
+// user sees the native OS picker (which supports drag, preview, multi-
+// select filtering, etc. depending on the browser).
+function pickFile() {
+  if (fileInputRef.value) fileInputRef.value.click()
+}
+
+async function onFilePicked(ev) {
+  const files = Array.from(ev.target?.files || [])
+  ev.target.value = '' // reset so picking the same file twice still triggers
+  if (!files.length) return
+
+  uploading.value = true
+  try {
+    // Upload one at a time so we can show per-file errors. Could be
+    // parallelised, but sequential keeps the UI obvious.
+    for (const f of files) {
+      const fd = new FormData()
+      fd.append('file', f)
+      try {
+        await api.coordUploadAttachment(task.value.id, fd)
+      } catch (e) {
+        // Single-file failure shouldn't abort the batch; surface a
+        // message pointing at which file failed.
+        ElMessage.error(`${f.name} 上传失败：${e?.response?.data?.error || '未知错误'}`)
+      }
+    }
+    await load()
+    ElMessage.success('上传完成')
+  } finally {
+    uploading.value = false
+  }
+}
+
+async function deleteAttachment(att) {
+  try {
+    await ElMessageBox.confirm(`确认删除附件「${att.filename}」？`, '删除附件', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  try {
+    await api.coordDeleteAttachment(att.id)
+    await load()
+    ElMessage.success('已删除')
+  } catch { /* interceptor */ }
+}
+
+function attachmentUrl(id) {
+  return api.coordAttachmentUrl(id)
+}
+
+function fmtSize(bytes) {
+  if (!bytes) return ''
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB'
+}
+
+function fileIcon(mime) {
+  if (!mime) return '📄'
+  if (mime === 'application/pdf') return '📕'
+  if (mime.includes('word')) return '📘'
+  if (mime.includes('sheet') || mime.includes('excel')) return '📗'
+  if (mime.startsWith('text/')) return '📝'
+  return '📎'
+}
+
 async function doDelete() {
   try {
     await ElMessageBox.confirm('确认删除此任务？只有待分配状态可删除，删除后不可恢复。', '删除任务', {
@@ -422,8 +664,10 @@ onMounted(async () => {
 .status-tag { display:inline-block; padding:5px 14px; border-radius:20px; font-size:12.5px; font-weight:800; }
 .st-pending { background:#DBEAFE; color:#1D4ED8; }
 .st-in_progress { background:#FEF3C7; color:#92400E; }
+.st-awaiting_answer { background:#FEE2E2; color:#B91C1C; animation: blink 2s ease-in-out infinite; }
 .st-under_review { background:#EDE9FE; color:#6D28D9; }
 .st-done { background:var(--ok-bg); color:var(--ok); }
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
 
 .meta-row { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; padding:16px 0; border-top:1.5px solid var(--border-light); border-bottom:1.5px solid var(--border-light); margin-bottom:20px; }
 .meta-item .meta-label { font-size:11px; font-weight:700; color:var(--ink-hint); text-transform:uppercase; letter-spacing:.07em; margin-bottom:4px; }
@@ -500,4 +744,50 @@ onMounted(async () => {
 .btn-xs { padding:3px 10px; font-size:11.5px; border-radius:5px; border:1px solid var(--border); background:var(--surface); cursor:pointer; font-family:inherit; font-weight:700; color:var(--ink-mid); margin-left:8px; }
 .btn-xs:hover { background:var(--sun-light); color:var(--sun-deep); }
 .btn-xs-ghost { color:var(--ink-soft); background:transparent; }
+.btn-xs-primary { background:var(--sun); color:#fff; border-color:var(--sun); }
+.btn-xs-primary:hover:not(:disabled) { background:var(--sun-deep); border-color:var(--sun-deep); color:#fff; }
+.btn-xs:disabled { opacity:.55; cursor:not-allowed; }
+
+.btn-ask { background:linear-gradient(135deg,#F59E0B,#EA580C); color:#fff; border-color:transparent; }
+.btn-ask:hover:not(:disabled) { filter:brightness(1.08); color:#fff; }
+.btn-edit { background:#FFFDF8; color:var(--sun-deep); border-color:var(--peach); }
+.btn-edit:hover:not(:disabled) { background:var(--sun-light); }
+
+.lock-hint { font-size:11.5px; font-weight:600; color:var(--ink-hint); margin-left:10px; }
+
+/* Q&A pending-answer prominent box in the header */
+.pending-answer-box { margin-top:18px; padding:16px 18px; background:linear-gradient(135deg,#FFF1F2,#FFF); border:2px solid #FCA5A5; border-radius:var(--r-sm); }
+.pending-answer-box .pa-title { font-size:13px; font-weight:800; color:#B91C1C; margin-bottom:10px; }
+.pending-answer-box .pa-question { font-size:14px; color:var(--ink); line-height:1.65; margin-bottom:14px; padding:12px 14px; background:#FFF; border-left:3px solid #DC2626; border-radius:6px; white-space:pre-wrap; }
+.pending-answer-box .pa-input { width:100%; box-sizing:border-box; padding:10px 12px; border:1.5px solid var(--border); border-radius:var(--r-sm); font-size:13.5px; font-family:inherit; resize:vertical; outline:none; margin-bottom:10px; }
+.pending-answer-box .pa-input:focus { border-color:#DC2626; box-shadow:0 0 0 3px rgba(220,38,38,.12); }
+
+/* Attachment panel */
+.attach-panel { padding:20px 26px; }
+.hint-sub { font-size:11.5px; color:var(--ink-hint); margin-top:4px; font-weight:500; }
+
+.img-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:12px; margin-top:8px; }
+.img-cell { border:1.5px solid var(--border-light); border-radius:var(--r-sm); overflow:hidden; background:var(--surface-2); }
+.img-cell a { display:block; width:100%; aspect-ratio:4/3; overflow:hidden; background:#F3F4F6; }
+.img-cell img { width:100%; height:100%; object-fit:cover; display:block; transition:transform .2s; }
+.img-cell a:hover img { transform:scale(1.04); }
+.img-meta { display:flex; align-items:center; justify-content:space-between; padding:6px 10px; gap:6px; border-top:1px solid var(--border-light); background:var(--surface); }
+.img-name { font-size:11.5px; color:var(--ink-mid); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.img-del { background:none; border:none; color:var(--ink-hint); cursor:pointer; font-size:13px; font-weight:700; padding:2px 6px; border-radius:4px; }
+.img-del:hover { background:var(--err); color:#fff; }
+
+.file-list { display:flex; flex-direction:column; gap:6px; margin-top:12px; }
+.file-row { display:flex; align-items:center; gap:10px; padding:8px 12px; background:var(--surface-2); border:1px solid var(--border-light); border-radius:var(--r-sm); font-size:13px; }
+.file-icon { font-size:18px; }
+.file-name { flex:1; color:var(--info); font-weight:600; text-decoration:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.file-name:hover { text-decoration:underline; }
+.file-size { font-size:11.5px; color:var(--ink-hint); font-family:'JetBrains Mono',monospace; min-width:60px; text-align:right; }
+.file-time { font-size:11.5px; color:var(--ink-hint); font-family:'JetBrains Mono',monospace; }
+
+/* Additional timeline dot colors for new event types */
+.tl-item.tl-ask .tl-dot { background:#F59E0B; border-color:#F59E0B; }
+.tl-item.tl-answer .tl-dot { background:#3B82F6; border-color:#3B82F6; }
+.tl-item.tl-upload .tl-dot { background:#10B981; border-color:#10B981; }
+.tl-item.tl-edit .tl-dot { background:var(--info); border-color:var(--info); }
+.tl-item.tl-attach_delete .tl-dot { background:var(--err); border-color:var(--err); }
 </style>
