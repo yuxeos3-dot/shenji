@@ -48,8 +48,15 @@ instance.interceptors.response.use(
     }
     const data = response.data as ApiResponse
     if (data.code !== 0) {
-      ElMessage.error(data.error || '请求失败')
-      return Promise.reject(new Error(data.error))
+      // Opt-out: a caller that wants to render field-level errors itself
+      // can pass `{ _silent: true }` (see AxiosRequestConfig extension).
+      // The global toast would otherwise double-announce the failure,
+      // which is the "3 red banners stack on top" problem users saw
+      // when email + password both failed validation.
+      if (!(response.config as any)._silent) {
+        ElMessage.error(data.error || '请求失败')
+      }
+      return Promise.reject(Object.assign(new Error(data.error), { response }))
     }
     return data as any
   },
@@ -59,7 +66,9 @@ instance.interceptors.response.use(
       localStorage.removeItem('token')
       router.push('/login')
     }
-    ElMessage.error(error.response?.data?.error || '网络错误')
+    if (!(error.config as any)?._silent) {
+      ElMessage.error(error.response?.data?.error || '网络错误')
+    }
     return Promise.reject(error)
   }
 )
@@ -76,8 +85,8 @@ const api = {
 
   // Users
   listUsers: () => instance.get('/v1/users'),
-  createUser: (data: Record<string, any>) => instance.post('/v1/users', data),
-  updateUser: (id: Id, data: Record<string, any>) => instance.put(`/v1/users/${id}`, data),
+  createUser: (data: Record<string, any>, config?: Record<string, any>) => instance.post('/v1/users', data, config),
+  updateUser: (id: Id, data: Record<string, any>, config?: Record<string, any>) => instance.put(`/v1/users/${id}`, data, config),
   deleteUser: (id: Id) => instance.delete(`/v1/users/${id}`),
 
   // Organization (departments + groups). Admin-only on the backend;

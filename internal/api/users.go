@@ -81,12 +81,29 @@ func ListUsers(c *gin.Context) {
 
 func CreateUser(c *gin.Context) {
 	var req CreateUserRequest
+	// Use manual binding so we can emit per-field errors. Default Gin
+	// bindJSON returns a validator.ValidationErrors whose .Error() is
+	// the raw jargon you saw in the screenshot ("Field validation for
+	// 'Email' failed on the 'email' tag") — unacceptable as user copy.
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "参数错误: " + err.Error()})
+		fields := translateBindErrors(err, map[string]fieldRule{
+			"Name":     {label: "姓名", required: "请填写姓名"},
+			"Email":    {label: "邮箱", required: "请填写邮箱", email: "邮箱格式不正确"},
+			"Password": {label: "密码", required: "请填写密码", min: "密码至少 12 位"},
+		})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":   -1,
+			"error":  firstFieldError(fields, "参数错误"),
+			"fields": fields,
+		})
 		return
 	}
 	if err := ValidatePassword(req.Password); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":   -1,
+			"error":  err.Error(),
+			"fields": gin.H{"password": err.Error()},
+		})
 		return
 	}
 

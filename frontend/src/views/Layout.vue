@@ -156,14 +156,29 @@ const flatTop = computed(() => topItems)
 const visibleGroups = computed(() =>
   groups.filter(g => !g.adminOnly || userStore.isAdmin()))
 
-// Collapse state: keyed by group key. Default = expanded. Persisted
-// in localStorage under 'nav-collapsed'.
+// Collapse state: keyed by group key. Default = ALL COLLAPSED (per
+// product decision — menu is dense, user prefers to expand on demand).
+// Persisted in localStorage under 'nav-collapsed' so a user's explicit
+// expand/collapse choices stick across reloads.
+//
+// On first-ever load (no localStorage entry) we seed with every group
+// collapsed; ensureCurrentGroupOpen() will then pop open whichever
+// group contains the current route so the user always sees their
+// current location.
 const COLLAPSE_KEY = 'nav-collapsed'
 const collapsed = ref(new Set())
-try {
-  const saved = JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '[]')
-  if (Array.isArray(saved)) collapsed.value = new Set(saved)
-} catch { /* corrupt entry, ignore */ }
+const hasSaved = (() => {
+  try { return localStorage.getItem(COLLAPSE_KEY) != null } catch { return false }
+})()
+if (hasSaved) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '[]')
+    if (Array.isArray(saved)) collapsed.value = new Set(saved)
+  } catch { /* corrupt entry, ignore */ }
+} else {
+  // First-time visitor — seed all group keys as collapsed.
+  collapsed.value = new Set(groups.map(g => g.key))
+}
 
 function isCollapsed(key) { return collapsed.value.has(key) }
 function toggleGroup(key) {
@@ -349,13 +364,12 @@ async function changePassword() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 11px 12px 6px;
-  margin-top: 8px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-  color: var(--ink-hint);
+  padding: 13px 12px 8px;
+  margin-top: 10px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  color: var(--ink);
   cursor: pointer;
   user-select: none;
   border-radius: 6px;
@@ -366,14 +380,14 @@ async function changePassword() {
   background: var(--sun-light);
 }
 .sidebar .nav-group-header .grp-title {
-  display: flex; align-items: center; gap: 7px;
+  display: flex; align-items: center; gap: 8px;
 }
 .sidebar .nav-group-header .grp-icon {
-  font-size: 13px; opacity: .8;
+  font-size: 16px; opacity: .95;
 }
 .sidebar .nav-group-header .grp-chev {
-  font-size: 10px;
-  color: var(--ink-hint);
+  font-size: 12px;
+  color: var(--ink-soft);
   transition: transform .18s;
   display: inline-block;
 }

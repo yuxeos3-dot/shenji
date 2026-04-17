@@ -75,10 +75,22 @@
       </table>
     </div>
 
-    <el-dialog v-model="showDialog" :title="editId ? '✏️ 编辑用户' : '👤 添加用户'" width="480px">
-      <div class="form-group"><label>姓名</label><input v-model="form.name" @keyup.enter="saveUser" /></div>
-      <div class="form-group"><label>邮箱</label><input v-model="form.email" type="email" @keyup.enter="saveUser" /></div>
-      <div v-if="!editId" class="form-group"><label>密码 <span style="font-weight:400;color:var(--ink-hint);font-size:12px">（至少 12 位，含大小写字母和数字）</span></label><input v-model="form.password" type="password" @keyup.enter="saveUser" /></div>
+    <el-dialog v-model="showDialog" :title="editId ? '✏️ 编辑用户' : '👤 添加用户'" width="480px" @close="clearFieldErrors">
+      <div class="form-group">
+        <label>姓名</label>
+        <input v-model="form.name" @keyup.enter="saveUser" :class="{'has-err': fieldErrs.name}" />
+        <div v-if="fieldErrs.name" class="field-err">{{ fieldErrs.name }}</div>
+      </div>
+      <div class="form-group">
+        <label>邮箱</label>
+        <input v-model="form.email" type="email" @keyup.enter="saveUser" :class="{'has-err': fieldErrs.email}" />
+        <div v-if="fieldErrs.email" class="field-err">{{ fieldErrs.email }}</div>
+      </div>
+      <div v-if="!editId" class="form-group">
+        <label>密码 <span style="font-weight:400;color:var(--ink-hint);font-size:12px">（至少 12 位，含大小写字母和数字）</span></label>
+        <input v-model="form.password" type="password" @keyup.enter="saveUser" :class="{'has-err': fieldErrs.password}" />
+        <div v-if="fieldErrs.password" class="field-err">{{ fieldErrs.password }}</div>
+      </div>
       <div class="form-group">
         <label>角色</label>
         <el-select v-model="form.role" style="width:100%">
@@ -187,6 +199,11 @@ const loading = ref(false)
 const showDialog = ref(false)
 const editId = ref(null)
 const form = ref({ name:'', email:'', password:'', role:'member', telegram_id:'', department_id:null, group_id:null })
+// Field-level validation errors, keyed by json field name (email/password/name/...).
+// Populated from the backend's `fields` key when a POST returns 400. We show each
+// message right under its input instead of stacking global toasts.
+const fieldErrs = ref({})
+function clearFieldErrors() { fieldErrs.value = {} }
 
 // Group-by-department map so the form's cascading dropdown and the
 // dept panel below can both render groups under the right parent.
@@ -222,6 +239,7 @@ async function loadAll() {
 function openAdd() {
   editId.value = null
   form.value = { name:'', email:'', password:'', role:'member', telegram_id:'', department_id:null, group_id:null }
+  clearFieldErrors()
   showDialog.value = true
 }
 function openEdit(u) {
@@ -234,6 +252,7 @@ function openEdit(u) {
     department_id: u.department_id || null,
     group_id: u.group_id || null,
   }
+  clearFieldErrors()
   showDialog.value = true
 }
 
@@ -244,6 +263,7 @@ function onDeptChange() {
 }
 
 async function saveUser() {
+  clearFieldErrors()
   // Send explicit 0 for unassigned so the backend sees "user wants to
   // clear it" rather than "not sent" (pointer-based).
   const payload = {
@@ -251,11 +271,27 @@ async function saveUser() {
     department_id: form.value.department_id || 0,
     group_id: form.value.group_id || 0,
   }
+  // _silent tells the axios interceptor to skip the global toast so we
+  // can render field-level errors inline. On unexpected errors (no
+  // fields map from the server) we fall back to a single toast.
+  const opts = { _silent: true }
   try {
-    if (editId.value) await api.updateUser(editId.value, payload)
-    else await api.createUser(payload)
+    if (editId.value) await api.updateUser(editId.value, payload, opts)
+    else await api.createUser(payload, opts)
     ElMessage.success('保存成功'); showDialog.value = false; loadAll()
-  } catch (e) { console.error('保存用户失败', e) }
+  } catch (e) {
+    const body = e?.response?.data || {}
+    if (body.fields && typeof body.fields === 'object') {
+      fieldErrs.value = body.fields
+      // If the backend only emitted "_" (non-validation bind error),
+      // fall back to a toast so the user sees something.
+      if (body.fields._ && Object.keys(body.fields).length === 1) {
+        ElMessage.error(body.fields._)
+      }
+    } else {
+      ElMessage.error(body.error || '保存失败')
+    }
+  }
 }
 
 async function deleteUser(u) {
@@ -457,6 +493,9 @@ onMounted(loadAll)
   transition:border-color .18s, box-shadow .18s; outline:none;
 }
 .form-group input:focus, .form-group select:focus { border-color:var(--sun); box-shadow:0 0 0 3px rgba(249,115,22,.14); }
+.form-group input.has-err { border-color:#DC2626; background:#FEF2F2; }
+.form-group input.has-err:focus { box-shadow:0 0 0 3px rgba(220,38,38,.14); }
+.field-err { margin-top:6px; font-size:12px; color:#DC2626; font-weight:600; }
 .btn-perm { background:#EEF2FF; border-color:#C7D2FE; color:#4338CA; }
 .btn-perm:hover { background:#E0E7FF; border-color:#A5B4FC; }
 .perm-hint { font-size:13px; color:var(--ink-hint); margin-bottom:16px; padding:8px 12px; background:#FFFBEB; border:1px solid #FDE68A; border-radius:8px; }
