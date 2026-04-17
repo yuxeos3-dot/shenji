@@ -108,6 +108,11 @@
               @click="doVerify"
             >🎯 验收通过 · 关闭任务</button>
             <button
+              v-if="task.status === 'under_review'"
+              class="btn btn-danger-soft"
+              @click="doReject"
+            >🔁 打回修改</button>
+            <button
               v-if="task.status === 'pending'"
               class="btn btn-edit"
               @click="startEditNote"
@@ -140,6 +145,117 @@
           </button>
         </div>
       </div>
+
+      <!-- Pre-audit panel: shown while task is under_review (待验收).
+           Admin attaches test-server URLs that were modified by dev,
+           fetches their HTML, asks AI for a verdict (fixed/not_fixed/
+           unclear), then decides 验收通过 or 打回. -->
+      <div v-if="task.status === 'under_review'" class="panel preaudit-panel">
+        <div class="section-title">
+          🧪 测试服验收
+          <span class="pa-subtitle">开发已提交修复，请添加测试服页面、抓取源码、运行 AI 预审核后决定是否通过</span>
+        </div>
+
+        <!-- Existing AI verdict (if any) -->
+        <div v-if="task.pre_audit_verdict" :class="['verdict-box', 'vb-' + task.pre_audit_verdict]">
+          <div class="vb-head">
+            <span class="vb-badge">
+              {{ task.pre_audit_verdict === 'fixed' ? '✅ AI 判断：已修复'
+                : task.pre_audit_verdict === 'not_fixed' ? '❌ AI 判断：未修复'
+                : '⚠️ AI 判断：无法确定' }}
+            </span>
+            <span v-if="task.pre_audit_at" class="vb-time">{{ task.pre_audit_at }}</span>
+          </div>
+          <div class="vb-reasoning">{{ task.pre_audit_result }}</div>
+          <div class="vb-hint">⚠️ AI 判断仅供参考，最终由人工审核决定</div>
+        </div>
+
+        <!-- Test pages list -->
+        <div class="test-pages-head">
+          <div class="tp-title">测试服页面（{{ testPages.length }}）</div>
+          <div class="tp-actions">
+            <button class="btn btn-xs btn-primary-soft" @click="openAddTestPage">+ 添加测试页</button>
+            <button
+              class="btn btn-xs btn-polish"
+              :disabled="!hasFetchedPage || preAuditing"
+              @click="doPreAudit"
+              :title="hasFetchedPage ? '运行 AI 预审核' : '请先添加并抓取至少一个页面'"
+            >{{ preAuditing ? '🤖 AI 审核中...' : '🤖 AI 预审核' }}</button>
+          </div>
+        </div>
+
+        <table v-if="testPages.length" class="tp-table">
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>URL</th>
+              <th>状态</th>
+              <th>抓取时间</th>
+              <th style="width:220px">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in testPages" :key="p.id">
+              <td><span class="tp-name">{{ p.name }}</span></td>
+              <td class="tp-url"><a :href="p.url" target="_blank" rel="noopener">{{ p.url }}</a></td>
+              <td>
+                <span v-if="!p.last_fetched_at" class="tp-status tp-none">未抓取</span>
+                <span v-else-if="p.status_code >= 200 && p.status_code < 400" class="tp-status tp-ok">HTTP {{ p.status_code }}</span>
+                <span v-else class="tp-status tp-err">HTTP {{ p.status_code || '-' }}</span>
+              </td>
+              <td class="tp-time">{{ p.last_fetched_at || '—' }}</td>
+              <td>
+                <button class="btn btn-xs" @click="doFetchPage(p)" :disabled="fetchingPageIds.includes(p.id)">
+                  {{ fetchingPageIds.includes(p.id) ? '抓取中...' : '🔄 抓取' }}
+                </button>
+                <button class="btn btn-xs" v-if="p.last_fetched_at" @click="openViewSource(p)">👁 源码</button>
+                <button class="btn btn-xs btn-danger-soft-xs" @click="doDeletePage(p)">删</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="tp-empty">还没有测试页。点击「+ 添加测试页」开始。</div>
+      </div>
+
+      <!-- Add test page dialog -->
+      <el-dialog v-model="showAddTestPage" title="添加测试服页面" width="520px">
+        <div class="form-group">
+          <label>名称</label>
+          <input v-model="testPageForm.name" placeholder="例如：文章详情页 测试服" @keyup.enter="saveTestPage" />
+        </div>
+        <div class="form-group">
+          <label>URL</label>
+          <input v-model="testPageForm.url" placeholder="https://test.example.com/..." @keyup.enter="saveTestPage" />
+        </div>
+        <template #footer>
+          <el-button @click="showAddTestPage = false">取消</el-button>
+          <el-button type="primary" @click="saveTestPage">保存</el-button>
+        </template>
+      </el-dialog>
+
+      <!-- View source dialog -->
+      <el-dialog v-model="showSource" :title="'页面源码：' + (viewingPage?.name || '')" width="860px" top="5vh">
+        <div v-if="viewingPage" class="src-meta">
+          <span>URL: <a :href="viewingPage.url" target="_blank" rel="noopener">{{ viewingPage.url }}</a></span>
+          <span>抓取时间: {{ viewingPage.last_fetched_at || '—' }}</span>
+        </div>
+        <pre class="src-html">{{ viewingHtml }}</pre>
+      </el-dialog>
+
+      <!-- Reject dialog -->
+      <el-dialog v-model="showReject" title="打回修改" width="540px">
+        <p class="reject-hint">打回后任务会回到「开发中」状态，以下备注会推送给开发者：</p>
+        <textarea
+          v-model="rejectNote"
+          rows="5"
+          placeholder="请说明哪里还没修好、希望开发做什么修改（必填）"
+          class="reject-textarea"
+        ></textarea>
+        <template #footer>
+          <el-button @click="showReject = false">取消</el-button>
+          <el-button type="danger" @click="confirmReject" :disabled="!rejectNote.trim()">确认打回</el-button>
+        </template>
+      </el-dialog>
 
       <!-- Issue snapshot. Read-only in every status except pending when
            the user is in edit mode — then all 4 fields become editable
@@ -391,6 +507,28 @@ const fileInputRef = ref(null)
 const showAssignDialog = ref(false)
 const assignForm = ref({ assignee_id: null, note: '' })
 
+// ── Pre-audit (待验收) state ─────────────────────────────────────────────
+// All pre-audit refs are only meaningful when task.status === 'under_review'.
+// They're declared at module scope so the template can bind them without
+// v-if guards, and we guard data loading via the status check in load().
+const testPages = ref([])
+const preAuditing = ref(false)
+const fetchingPageIds = ref([])     // page ids currently being crawled
+const showAddTestPage = ref(false)
+const testPageForm = ref({ name: '', url: '' })
+const showSource = ref(false)
+const viewingPage = ref(null)
+const viewingHtml = ref('')
+const showReject = ref(false)
+const rejectNote = ref('')
+
+// True when at least one test page has been successfully fetched. The
+// AI pre-audit button stays disabled until this is true — asking AI to
+// inspect empty HTML would be wasted tokens.
+const hasFetchedPage = computed(() =>
+  testPages.value.some(p => p.last_fetched_at)
+)
+
 // Parse the snapshot once so template access is cheap.
 const issueSnapshotParsed = computed(() => {
   if (!task.value?.issue_snapshot) return null
@@ -451,6 +589,8 @@ function eventLabel(t) {
     comment: '💬 备注',
     upload: '📎 上传附件',
     attach_delete: '🗑 删除附件',
+    pre_audit: '🧪 AI 预审核',
+    reject: '🔁 打回修改',
   }[t] || t
 }
 function fmtTime(s) {
@@ -471,11 +611,136 @@ async function load() {
     events.value = res.data?.events || []
     attachments.value = res.data?.attachments || []
     noteDraft.value = task.value?.note || ''
+    // Load test pages only while under_review; other states don't need
+    // them and one extra request is enough noise to skip.
+    if (task.value?.status === 'under_review') {
+      await loadTestPages()
+    } else {
+      testPages.value = []
+    }
   } catch (e) {
     console.error(e)
   } finally {
     loading.value = false
   }
+}
+
+// ── Pre-audit handlers ─────────────────────────────────────────────────
+
+async function loadTestPages() {
+  try {
+    const res = await api.coordListTestPages(task.value.id)
+    testPages.value = res.data || []
+  } catch {
+    testPages.value = []
+  }
+}
+
+function openAddTestPage() {
+  testPageForm.value = { name: '', url: '' }
+  showAddTestPage.value = true
+}
+
+async function saveTestPage() {
+  const name = testPageForm.value.name.trim()
+  const url = testPageForm.value.url.trim()
+  if (!name) { ElMessage.warning('请填写页面名称'); return }
+  if (!url) { ElMessage.warning('请填写页面 URL'); return }
+  if (!/^https?:\/\//i.test(url)) {
+    ElMessage.warning('URL 必须以 http:// 或 https:// 开头')
+    return
+  }
+  try {
+    await api.coordAddTestPage(task.value.id, { name, url })
+    ElMessage.success('已添加')
+    showAddTestPage.value = false
+    await loadTestPages()
+  } catch { /* interceptor */ }
+}
+
+// Crawl a test page. We track fetching ids in a list rather than a
+// boolean so multiple pages can be fetched concurrently (though in
+// practice users tend to click them one by one).
+async function doFetchPage(page) {
+  fetchingPageIds.value = [...fetchingPageIds.value, page.id]
+  try {
+    const res = await api.coordFetchTestPage(task.value.id, page.id)
+    const err = res.data?.error
+    if (err) {
+      ElMessage.warning('抓取完成但有错误：' + err)
+    } else {
+      ElMessage.success('抓取成功（HTTP ' + (res.data?.status_code || '-') + '）')
+    }
+    await loadTestPages()
+  } catch { /* interceptor */ }
+  finally {
+    fetchingPageIds.value = fetchingPageIds.value.filter(id => id !== page.id)
+  }
+}
+
+async function openViewSource(page) {
+  viewingPage.value = page
+  viewingHtml.value = '加载中...'
+  showSource.value = true
+  try {
+    const res = await api.coordGetTestPageSource(task.value.id, page.id)
+    viewingHtml.value = res.data?.html || '(源码为空)'
+  } catch {
+    viewingHtml.value = '(加载失败)'
+  }
+}
+
+async function doDeletePage(page) {
+  try {
+    await ElMessageBox.confirm(`确认删除测试页「${page.name}」？`, '删除', { type: 'warning' })
+  } catch { return }
+  try {
+    await api.coordDeleteTestPage(task.value.id, page.id)
+    ElMessage.success('已删除')
+    await loadTestPages()
+  } catch { /* interceptor */ }
+}
+
+async function doPreAudit() {
+  if (!hasFetchedPage.value) {
+    ElMessage.warning('请先添加并抓取至少一个测试页')
+    return
+  }
+  preAuditing.value = true
+  try {
+    const res = await api.coordPreAudit(task.value.id)
+    const verdict = res.data?.verdict
+    const label = verdict === 'fixed' ? '✅ 已修复'
+      : verdict === 'not_fixed' ? '❌ 未修复'
+      : '⚠️ 无法确定'
+    ElMessage.info('AI 审核完成：' + label)
+    await load() // reload so the verdict_box on the page shows the fresh result
+  } catch { /* interceptor */ }
+  finally { preAuditing.value = false }
+}
+
+function doReject() {
+  rejectNote.value = ''
+  // If AI gave a "not_fixed" reasoning, pre-fill the reject note with
+  // it — saves the admin retyping the reason.
+  if (task.value?.pre_audit_verdict === 'not_fixed' && task.value?.pre_audit_result) {
+    rejectNote.value = task.value.pre_audit_result
+  }
+  showReject.value = true
+}
+
+async function confirmReject() {
+  const note = rejectNote.value.trim()
+  if (!note) {
+    ElMessage.warning('请填写打回原因')
+    return
+  }
+  try {
+    await api.coordRejectTask(task.value.id, { note })
+    ElMessage.success('已打回，任务回到「开发中」')
+    showReject.value = false
+    await load()
+  } catch { /* interceptor */ }
 }
 
 async function loadDevelopers() {
@@ -932,4 +1197,61 @@ onMounted(async () => {
 .tl-item.tl-upload .tl-dot { background:#10B981; border-color:#10B981; }
 .tl-item.tl-edit .tl-dot { background:var(--info); border-color:var(--info); }
 .tl-item.tl-attach_delete .tl-dot { background:var(--err); border-color:var(--err); }
+.tl-item.tl-pre_audit .tl-dot { background:#8B5CF6; border-color:#8B5CF6; }
+.tl-item.tl-reject .tl-dot { background:var(--err); border-color:var(--err); }
+
+/* ── Pre-audit (待验收) panel ─────────────────────────────────────────── */
+.preaudit-panel { padding:20px 26px; margin-bottom:16px; border:1.5px solid #C7D2FE; background:linear-gradient(180deg, #F5F3FF 0%, var(--surface) 55%); }
+.pa-subtitle { font-size:12px; font-weight:500; color:var(--ink-hint); margin-left:10px; }
+
+/* AI verdict box — color-coded by verdict value */
+.verdict-box { margin:14px 0 18px; padding:14px 18px; border-radius:var(--r-sm); border:1.5px solid; }
+.verdict-box.vb-fixed { background:#ECFDF5; border-color:#A7F3D0; }
+.verdict-box.vb-not_fixed { background:#FEF2F2; border-color:#FECACA; }
+.verdict-box.vb-unclear { background:#FFFBEB; border-color:#FCD34D; }
+.vb-head { display:flex; align-items:center; gap:14px; margin-bottom:8px; }
+.vb-badge { font-size:14px; font-weight:800; }
+.vb-fixed .vb-badge { color:#047857; }
+.vb-not_fixed .vb-badge { color:#B91C1C; }
+.vb-unclear .vb-badge { color:#92400E; }
+.vb-time { font-size:11.5px; color:var(--ink-hint); font-family:'JetBrains Mono', monospace; margin-left:auto; }
+.vb-reasoning { font-size:13.5px; line-height:1.7; color:var(--ink); white-space:pre-wrap; word-break:break-word; }
+.vb-hint { margin-top:8px; font-size:11.5px; color:var(--ink-hint); font-style:italic; }
+
+/* Test pages header bar */
+.test-pages-head { display:flex; align-items:center; justify-content:space-between; margin:14px 0 10px; }
+.tp-title { font-size:13.5px; font-weight:800; color:var(--ink-mid); }
+.tp-actions { display:flex; gap:8px; }
+.btn-primary-soft { background:#EEF2FF; color:#4338CA; border-color:#C7D2FE; }
+.btn-primary-soft:hover:not(:disabled) { background:#C7D2FE; color:#3730A3; }
+.btn-polish { background:linear-gradient(135deg, #8B5CF6, #6366F1); color:#fff; border-color:transparent; }
+.btn-polish:hover:not(:disabled) { filter:brightness(1.08); color:#fff; }
+.btn-danger-soft-xs { color:var(--err); border-color:#FFCDD2; background:#FFF5F5; padding:4px 10px; font-size:11.5px; }
+.btn-danger-soft-xs:hover:not(:disabled) { background:var(--err); color:#fff; }
+
+/* Test pages table */
+.tp-table { width:100%; border-collapse:collapse; background:var(--surface); border-radius:var(--r-sm); overflow:hidden; border:1px solid var(--border-light); }
+.tp-table th { padding:8px 12px; text-align:left; font-size:11px; font-weight:800; color:var(--ink-mid); text-transform:uppercase; letter-spacing:.06em; background:var(--surface-3); border-bottom:1.5px solid var(--border); }
+.tp-table td { padding:8px 12px; border-bottom:1px solid var(--border-light); font-size:13px; vertical-align:middle; }
+.tp-table tr:last-child td { border-bottom:none; }
+.tp-name { font-weight:700; color:var(--ink); }
+.tp-url { font-family:'JetBrains Mono', monospace; font-size:11.5px; max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tp-url a { color:var(--sun-deep); text-decoration:none; }
+.tp-url a:hover { text-decoration:underline; }
+.tp-status { font-size:11px; font-weight:700; padding:2px 9px; border-radius:10px; font-family:'JetBrains Mono', monospace; }
+.tp-status.tp-ok { background:var(--ok-bg); color:var(--ok); border:1px solid var(--ok-border); }
+.tp-status.tp-err { background:#FEE2E2; color:#B91C1C; border:1px solid #FECACA; }
+.tp-status.tp-none { background:var(--surface-3); color:var(--ink-hint); border:1px solid var(--border); }
+.tp-time { font-size:11.5px; color:var(--ink-hint); font-family:'JetBrains Mono', monospace; }
+.tp-empty { padding:24px; text-align:center; color:var(--ink-hint); font-size:13px; font-style:italic; background:var(--surface-2); border:1.5px dashed var(--border); border-radius:var(--r-sm); }
+
+/* Source view dialog */
+.src-meta { display:flex; gap:18px; font-size:12px; color:var(--ink-mid); padding:8px 12px; background:var(--surface-3); border-radius:var(--r-sm); margin-bottom:10px; }
+.src-meta a { color:var(--sun-deep); font-family:'JetBrains Mono', monospace; }
+.src-html { white-space:pre-wrap; word-break:break-all; padding:12px 14px; background:#1E293B; color:#E2E8F0; font-family:'JetBrains Mono', monospace; font-size:11.5px; line-height:1.6; max-height:60vh; overflow:auto; border-radius:var(--r-sm); margin:0; }
+
+/* Reject dialog */
+.reject-hint { font-size:13px; color:var(--ink-mid); margin-bottom:10px; padding:8px 12px; background:#FEF2F2; border-left:3px solid var(--err); border-radius:6px; line-height:1.6; }
+.reject-textarea { width:100%; box-sizing:border-box; padding:10px 12px; border:1.5px solid var(--border); border-radius:var(--r-sm); font-size:13.5px; font-family:inherit; line-height:1.7; resize:vertical; outline:none; background:var(--surface); min-height:110px; }
+.reject-textarea:focus { border-color:var(--err); box-shadow:0 0 0 3px rgba(239,68,68,.12); }
 </style>

@@ -297,6 +297,19 @@ func main() {
 			coord.POST("/tasks/:id/attachments", api.RequirePermission("coord.comment"), api.UploadCoordAttachment)
 			coord.GET("/attachments/:id/file", api.RequirePermission("coord.view"), api.ServeCoordAttachment)
 			coord.DELETE("/attachments/:id", api.RequirePermission("coord.comment"), api.DeleteCoordAttachment)
+
+			// Pre-audit (待验收) — reviewer attaches test-server URLs,
+			// fetches their HTML, runs AI verdict, then manually accepts
+			// (VerifyCoordTask above) or rejects (RejectCoordTask below).
+			// Test-page CRUD uses coord.verify perm since these only make
+			// sense during the verify phase.
+			coord.GET("/tasks/:id/test-pages", api.RequirePermission("coord.view"), api.ListCoordTestPages)
+			coord.POST("/tasks/:id/test-pages", api.RequirePermission("coord.verify"), api.CreateCoordTestPage)
+			coord.DELETE("/tasks/:id/test-pages/:page_id", api.RequirePermission("coord.verify"), api.DeleteCoordTestPage)
+			coord.POST("/tasks/:id/test-pages/:page_id/fetch", api.RequirePermission("coord.verify"), api.FetchCoordTestPage)
+			coord.GET("/tasks/:id/test-pages/:page_id/source", api.RequirePermission("coord.view"), api.GetCoordTestPageSource)
+			coord.POST("/tasks/:id/pre-audit", api.RequirePermission("coord.verify"), api.PreAuditCoordTask)
+			coord.POST("/tasks/:id/reject", api.RequirePermission("coord.verify"), api.RejectCoordTask)
 		}
 
 		// Cache management (admin only)

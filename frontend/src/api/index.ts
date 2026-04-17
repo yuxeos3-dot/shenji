@@ -290,6 +290,15 @@ const api = {
   // Absolute URL for <img src=...> / <a href=...>. The Content-Disposition
   // from the server decides inline vs download.
   coordAttachmentUrl: (id: Id) => `/api/v1/coord/attachments/${id}/file`,
+
+  // Pre-audit (待验收): test-server pages + AI verdict + reject flow
+  coordListTestPages: (id: Id) => instance.get(`/v1/coord/tasks/${id}/test-pages`),
+  coordAddTestPage: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/test-pages`, data),
+  coordDeleteTestPage: (id: Id, pageId: Id) => instance.delete(`/v1/coord/tasks/${id}/test-pages/${pageId}`),
+  coordFetchTestPage: (id: Id, pageId: Id) => instance.post(`/v1/coord/tasks/${id}/test-pages/${pageId}/fetch`),
+  coordGetTestPageSource: (id: Id, pageId: Id) => instance.get(`/v1/coord/tasks/${id}/test-pages/${pageId}/source`),
+  coordPreAudit: (id: Id) => instance.post(`/v1/coord/tasks/${id}/pre-audit`, {}),
+  coordRejectTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/reject`, data),
 }
 
 export default api

@@ -642,6 +642,35 @@ func Init() {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_geo_jobs_user ON geo_workflow_jobs(user_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_geo_jobs_site ON geo_workflow_jobs(site_id, status)`,
+
+		// ─── Coord test-server pages + pre-audit ───────────────────────────
+		// When a coordination task hits under_review (待验收), the reviewer
+		// attaches one or more test-server URLs that were modified to fix
+		// the issue. We crawl those pages, store their HTML, then ask AI
+		// to compare the captured HTML against the original issue snapshot
+		// and produce a verdict: fixed / not_fixed / unclear.
+		// Reviewer then manually accepts (→ done) or rejects (→ in_progress
+		// with required note that goes back to the developer).
+		`CREATE TABLE IF NOT EXISTS coord_test_pages (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			task_id         INTEGER NOT NULL,
+			name            TEXT NOT NULL,
+			url             TEXT NOT NULL,
+			last_html       TEXT DEFAULT '',
+			last_fetched_at DATETIME,
+			status_code     INTEGER DEFAULT 0,
+			ttfb_ms         INTEGER DEFAULT 0,
+			created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+			created_by      INTEGER DEFAULT 0
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_coord_test_pages_task ON coord_test_pages(task_id)`,
+
+		// Pre-audit output sticks to the task row so the review panel
+		// shows the last verdict even after refreshing. verdict:
+		// '' | 'fixed' | 'not_fixed' | 'unclear'. reasoning is free text.
+		`ALTER TABLE coordination_tasks ADD COLUMN pre_audit_verdict TEXT DEFAULT ''`,
+		`ALTER TABLE coordination_tasks ADD COLUMN pre_audit_result TEXT DEFAULT ''`,
+		`ALTER TABLE coordination_tasks ADD COLUMN pre_audit_at DATETIME`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {

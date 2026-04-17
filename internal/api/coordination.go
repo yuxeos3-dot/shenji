@@ -52,27 +52,30 @@ func validCoordStatus(s string) bool {
 }
 
 type coordTask struct {
-	ID            int64   `json:"id"`
-	SiteID        int64   `json:"site_id"`
-	SiteName      string  `json:"site_name,omitempty"`
-	SiteDomain    string  `json:"site_domain,omitempty"`
-	AuditTaskID   int64   `json:"audit_task_id"`
-	IssueID       string  `json:"issue_id"`
-	IssueTitle    string  `json:"issue_title"`
-	IssueSeverity string  `json:"issue_severity"`
-	IssueModule   string  `json:"issue_module"`
-	IssueChapter  string  `json:"issue_chapter"`
-	IssueSnapshot string  `json:"issue_snapshot"`
-	Note          string  `json:"note"`
-	Status        string  `json:"status"`
-	CreatedBy     int64   `json:"created_by"`
-	CreatorName   string  `json:"creator_name,omitempty"`
-	AssigneeID    int64   `json:"assignee_id"`
-	AssigneeName  string  `json:"assignee_name,omitempty"`
-	CreatedAt     string  `json:"created_at"`
-	StartedAt     *string `json:"started_at"`
-	SubmittedAt   *string `json:"submitted_at"`
-	VerifiedAt    *string `json:"verified_at"`
+	ID              int64   `json:"id"`
+	SiteID          int64   `json:"site_id"`
+	SiteName        string  `json:"site_name,omitempty"`
+	SiteDomain      string  `json:"site_domain,omitempty"`
+	AuditTaskID     int64   `json:"audit_task_id"`
+	IssueID         string  `json:"issue_id"`
+	IssueTitle      string  `json:"issue_title"`
+	IssueSeverity   string  `json:"issue_severity"`
+	IssueModule     string  `json:"issue_module"`
+	IssueChapter    string  `json:"issue_chapter"`
+	IssueSnapshot   string  `json:"issue_snapshot"`
+	Note            string  `json:"note"`
+	Status          string  `json:"status"`
+	CreatedBy       int64   `json:"created_by"`
+	CreatorName     string  `json:"creator_name,omitempty"`
+	AssigneeID      int64   `json:"assignee_id"`
+	AssigneeName    string  `json:"assignee_name,omitempty"`
+	CreatedAt       string  `json:"created_at"`
+	StartedAt       *string `json:"started_at"`
+	SubmittedAt     *string `json:"submitted_at"`
+	VerifiedAt      *string `json:"verified_at"`
+	PreAuditVerdict string  `json:"pre_audit_verdict,omitempty"`
+	PreAuditResult  string  `json:"pre_audit_result,omitempty"`
+	PreAuditAt      *string `json:"pre_audit_at,omitempty"`
 }
 
 type coordEvent struct {
@@ -120,14 +123,16 @@ func loadCoordTask(id int64) (*coordTask, error) {
 		       t.issue_module, t.issue_chapter, t.issue_snapshot, t.note,
 		       t.status, t.created_by, COALESCE(u1.name,''),
 		       t.assignee_id, COALESCE(u2.name,''),
-		       t.created_at, t.started_at, t.submitted_at, t.verified_at
+		       t.created_at, t.started_at, t.submitted_at, t.verified_at,
+		       COALESCE(t.pre_audit_verdict,''), COALESCE(t.pre_audit_result,''),
+		       t.pre_audit_at
 		FROM coordination_tasks t
 		LEFT JOIN sites s ON s.id = t.site_id
 		LEFT JOIN users u1 ON u1.id = t.created_by
 		LEFT JOIN users u2 ON u2.id = t.assignee_id
 		WHERE t.id = ?`
 	var t coordTask
-	var started, submitted, verified sql.NullString
+	var started, submitted, verified, preAuditAt sql.NullString
 	err := db.DB.QueryRow(q, id).Scan(
 		&t.ID, &t.SiteID, &t.SiteName, &t.SiteDomain,
 		&t.AuditTaskID, &t.IssueID, &t.IssueTitle, &t.IssueSeverity,
@@ -135,6 +140,7 @@ func loadCoordTask(id int64) (*coordTask, error) {
 		&t.Status, &t.CreatedBy, &t.CreatorName,
 		&t.AssigneeID, &t.AssigneeName,
 		&t.CreatedAt, &started, &submitted, &verified,
+		&t.PreAuditVerdict, &t.PreAuditResult, &preAuditAt,
 	)
 	if err != nil {
 		return nil, err
@@ -147,6 +153,9 @@ func loadCoordTask(id int64) (*coordTask, error) {
 	}
 	if verified.Valid {
 		t.VerifiedAt = &verified.String
+	}
+	if preAuditAt.Valid {
+		t.PreAuditAt = &preAuditAt.String
 	}
 	return &t, nil
 }
@@ -297,7 +306,8 @@ func ListCoordTasks(c *gin.Context) {
 		       t.issue_module, t.issue_chapter, t.issue_snapshot, t.note,
 		       t.status, t.created_by, COALESCE(u1.name,''),
 		       t.assignee_id, COALESCE(u2.name,''),
-		       t.created_at, t.started_at, t.submitted_at, t.verified_at
+		       t.created_at, t.started_at, t.submitted_at, t.verified_at,
+		       COALESCE(t.pre_audit_verdict,'')
 		FROM coordination_tasks t
 		LEFT JOIN sites s ON s.id = t.site_id
 		LEFT JOIN users u1 ON u1.id = t.created_by
@@ -334,6 +344,7 @@ func ListCoordTasks(c *gin.Context) {
 			&t.Status, &t.CreatedBy, &t.CreatorName,
 			&t.AssigneeID, &t.AssigneeName,
 			&t.CreatedAt, &started, &submitted, &verified,
+			&t.PreAuditVerdict,
 		); err != nil {
 			continue
 		}
