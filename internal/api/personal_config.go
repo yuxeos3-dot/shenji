@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"seo-system/internal/db"
@@ -664,21 +665,5 @@ func fmtSscanInt64(s string, out *int64) (int, error) {
 }
 
 func parseInt64(s string) (int64, error) {
-	var v int64
-	var sign int64 = 1
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, fmt.Errorf("empty")
-	}
-	if s[0] == '-' {
-		sign = -1
-		s = s[1:]
-	}
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return 0, fmt.Errorf("bad digit %q", r)
-		}
-		v = v*10 + int64(r-'0')
-	}
-	return v * sign, nil
+	return strconv.ParseInt(strings.TrimSpace(s), 10, 64)
 }
