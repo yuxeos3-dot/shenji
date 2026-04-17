@@ -456,6 +456,68 @@ func Init() {
 		`CREATE INDEX IF NOT EXISTS idx_spider_site_time ON spider_logs(site_id, visited_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_spider_site_name_time ON spider_logs(site_id, spider, visited_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_spider_visited_at ON spider_logs(visited_at)`,
+
+		// ─── Coordination workflow ──────────────────────────────────────────
+		// Audit reports surface a lot of issues; not all of them are acted
+		// on. The coordination feature lets an admin pick the ones that
+		// need to be sent to a developer and track the fix through to
+		// re-audit. Timeline events live in a sibling table so history is
+		// append-only and every state transition is auditable.
+		`CREATE TABLE IF NOT EXISTS coordination_tasks (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			site_id         INTEGER NOT NULL REFERENCES sites(id),
+			audit_task_id   INTEGER NOT NULL,
+			issue_id        TEXT DEFAULT '',           -- id from the v6 report (may repeat across audits)
+			issue_title     TEXT NOT NULL,
+			issue_severity  TEXT DEFAULT '',
+			issue_module    TEXT DEFAULT '',
+			issue_chapter   TEXT DEFAULT '',
+			issue_snapshot  TEXT DEFAULT '',           -- full JSON of the issue at the moment it was added
+			note            TEXT DEFAULT '',           -- free-form description
+			status          TEXT NOT NULL DEFAULT 'pending',  -- pending / in_progress / under_review / done
+			created_by      INTEGER NOT NULL,
+			assignee_id     INTEGER DEFAULT 0,         -- the developer handling it
+			created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+			started_at      DATETIME,                  -- set when status moves to in_progress
+			submitted_at    DATETIME,                  -- set when developer marks fix done
+			verified_at     DATETIME                   -- set when admin closes the task
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_coord_site ON coordination_tasks(site_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_coord_assignee ON coordination_tasks(assignee_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_coord_created_by ON coordination_tasks(created_by)`,
+
+		// Append-only timeline. Every meaningful action (create/assign/
+		// start/comment/submit/verify) gets a row so the detail page can
+		// render a full history with actor, time, and optional note.
+		`CREATE TABLE IF NOT EXISTS coordination_events (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			task_id     INTEGER NOT NULL REFERENCES coordination_tasks(id),
+			event_type  TEXT NOT NULL,                 -- create/assign/start/comment/submit/verify
+			from_status TEXT DEFAULT '',
+			to_status   TEXT DEFAULT '',
+			actor_id    INTEGER NOT NULL,
+			actor_name  TEXT DEFAULT '',
+			note        TEXT DEFAULT '',
+			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_coord_events_task ON coordination_events(task_id, created_at)`,
+
+		// Screenshot attachments. Bound to a task; optionally also to an
+		// event (so we can render "2 screenshots uploaded with this
+		// comment" style entries on the timeline).
+		`CREATE TABLE IF NOT EXISTS coordination_attachments (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			task_id     INTEGER NOT NULL REFERENCES coordination_tasks(id),
+			event_id    INTEGER DEFAULT 0,
+			filename    TEXT NOT NULL,                 -- display name
+			filepath    TEXT NOT NULL,                 -- relative path under the uploads root
+			size        INTEGER DEFAULT 0,
+			mime        TEXT DEFAULT '',
+			uploaded_by INTEGER NOT NULL,
+			uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_coord_attach_task ON coordination_attachments(task_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_coord_attach_event ON coordination_attachments(event_id)`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {

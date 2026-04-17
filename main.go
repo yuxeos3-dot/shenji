@@ -213,6 +213,24 @@ func main() {
 		v1.GET("/spider/trend", api.RequirePermission("spider.view"), api.SpiderDailyTrend)
 		v1.GET("/spider/logs", api.RequirePermission("spider.view"), api.SpiderLogs)
 
+		// Coordination workflow (协同管理): turn audit findings into tracked
+		// fix tickets that flow through pending → in_progress → under_review
+		// → done. Per-permission gating so devs can only move items they're
+		// assigned, while admins can do everything.
+		coord := v1.Group("/coord")
+		{
+			coord.GET("/stats", api.RequirePermission("coord.view"), api.CoordStats)
+			coord.GET("/tasks", api.RequirePermission("coord.view"), api.ListCoordTasks)
+			coord.POST("/tasks", api.RequirePermission("coord.create"), api.CreateCoordTask)
+			coord.GET("/tasks/:id", api.RequirePermission("coord.view"), api.GetCoordTask)
+			coord.PUT("/tasks/:id", api.RequirePermission("coord.edit"), api.UpdateCoordTask)
+			coord.DELETE("/tasks/:id", api.RequirePermission("coord.edit"), api.DeleteCoordTask)
+			coord.POST("/tasks/:id/assign", api.RequirePermission("coord.assign"), api.AssignCoordTask)
+			coord.POST("/tasks/:id/submit", api.RequirePermission("coord.submit"), api.SubmitCoordTask)
+			coord.POST("/tasks/:id/verify", api.RequirePermission("coord.verify"), api.VerifyCoordTask)
+			coord.POST("/tasks/:id/comments", api.RequirePermission("coord.comment"), api.AddCoordComment)
+		}
+
 		// Cache management (admin only)
 		cache := v1.Group("/cache")
 		cache.Use(middleware.AdminRequired())

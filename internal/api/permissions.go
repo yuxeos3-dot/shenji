@@ -72,6 +72,15 @@ var PermissionTree = []PermNode{
 	{Code: "spider", Label: "蜘蛛管理", Children: []PermNode{
 		{Code: "spider.view", Label: "查看蜘蛛统计 / 日志"},
 	}},
+	{Code: "coord", Label: "协同管理", Children: []PermNode{
+		{Code: "coord.view", Label: "查看协同任务"},
+		{Code: "coord.create", Label: "从审计报告创建任务"},
+		{Code: "coord.edit", Label: "编辑 / 删除任务"},
+		{Code: "coord.assign", Label: "分配给开发（启动）"},
+		{Code: "coord.comment", Label: "添加备注"},
+		{Code: "coord.submit", Label: "标记修改完毕（开发）"},
+		{Code: "coord.verify", Label: "验收审计完成（关闭）"},
+	}},
 	{Code: "reports", Label: "每日汇报", Children: []PermNode{
 		{Code: "reports.view", Label: "查看汇报列表"},
 		{Code: "reports.write", Label: "写汇报"},
