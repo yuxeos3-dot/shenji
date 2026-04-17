@@ -487,9 +487,9 @@ func main() {
 		Addr:              ":" + port,
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
-		// No WriteTimeout: audit/report downloads can be slow; Gin and the
-		// reverse proxy already cap per-request.
-		IdleTimeout: 120 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      300 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// Graceful shutdown: on SIGINT/SIGTERM, stop accepting new requests and
