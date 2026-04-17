@@ -41,11 +41,37 @@
         class="eval-textarea"
       ></textarea>
       <div class="editor-actions">
+        <button
+          class="btn btn-polish"
+          :disabled="!canSave || polishing"
+          @click="polish"
+          title="用 AI 帮你润色草稿"
+        >
+          {{ polishing ? '🤖 润色中...' : '🤖 AI 润色' }}
+        </button>
         <button class="btn btn-primary" :disabled="!canSave || saving" @click="save">
           {{ saving ? '保存中...' : (myEvalId ? '💾 更新评价' : '💾 发表评价') }}
         </button>
       </div>
     </div>
+
+    <!-- Compare dialog: user decides whether to apply AI rewrite. -->
+    <el-dialog v-model="showCompare" title="🤖 AI 润色结果" width="760px" top="5vh">
+      <div class="compare-wrap">
+        <div class="compare-col">
+          <div class="compare-head">当前内容</div>
+          <pre class="compare-box">{{ draft }}</pre>
+        </div>
+        <div class="compare-col">
+          <div class="compare-head polished">AI 润色后</div>
+          <pre class="compare-box polished-box">{{ polishedDraft }}</pre>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showCompare = false">取消（保留当前）</el-button>
+        <el-button type="primary" @click="applyPolish">应用 AI 版本</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -65,6 +91,9 @@ const evals = ref([])
 const loading = ref(false)
 const draft = ref('')
 const saving = ref(false)
+const polishing = ref(false)
+const polishedDraft = ref('')
+const showCompare = ref(false)
 
 const isAdmin = computed(() => userStore.isAdmin())
 
@@ -115,6 +144,34 @@ async function save() {
     await load()
   } catch { /* interceptor */ }
   finally { saving.value = false }
+}
+
+// AI polish the current draft. Doesn't touch the DB — shows a compare
+// dialog so the admin can accept or reject the AI rewrite. The admin
+// is still the accountable author of whatever gets saved.
+async function polish() {
+  if (!canSave.value) return
+  polishing.value = true
+  try {
+    const res = await api.polishEvaluation({
+      report_type: props.reportType,
+      report_id: Number(props.reportId),
+      content: draft.value.trim(),
+    })
+    polishedDraft.value = res.data?.content || ''
+    if (!polishedDraft.value) {
+      ElMessage.warning('AI 未返回内容')
+      return
+    }
+    showCompare.value = true
+  } catch { /* interceptor */ }
+  finally { polishing.value = false }
+}
+
+function applyPolish() {
+  draft.value = polishedDraft.value
+  showCompare.value = false
+  ElMessage.info('已应用 AI 版本，记得点「发表评价」或「更新评价」保存')
 }
 
 async function retract(id) {
@@ -230,6 +287,7 @@ onMounted(load)
 
 .editor-actions {
   display:flex; justify-content:flex-end; margin-top:10px;
+  gap:8px;
 }
 .btn {
   display:inline-flex; align-items:center; gap:6px;
@@ -239,6 +297,8 @@ onMounted(load)
   transition:all .18s; color:var(--ink-mid);
 }
 .btn:disabled { opacity:.55; cursor:not-allowed; }
+.btn-polish { background:#EEF2FF; color:#4338CA; border-color:#C7D2FE; }
+.btn-polish:hover:not(:disabled) { background:#C7D2FE; color:#3730A3; }
 .btn-primary {
   background:linear-gradient(135deg,var(--sun),var(--coral));
   color:#fff; border-color:transparent; box-shadow:var(--s-amber);
@@ -246,4 +306,12 @@ onMounted(load)
 .btn-primary:hover:not(:disabled) {
   background:linear-gradient(135deg,var(--sun-deep),var(--sun));
 }
+
+/* Compare dialog: side-by-side draft vs AI candidate */
+.compare-wrap { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.compare-col { display:flex; flex-direction:column; }
+.compare-head { font-size:12px; font-weight:800; color:var(--ink-mid); margin-bottom:6px; padding:4px 8px; background:var(--surface-3); border-radius:6px; }
+.compare-head.polished { color:#4338CA; background:#EEF2FF; }
+.compare-box { white-space:pre-wrap; word-break:break-word; padding:12px 14px; background:var(--surface-2); border:1px solid var(--border-light); border-radius:var(--r-sm); font-size:13px; line-height:1.75; max-height:55vh; overflow:auto; margin:0; font-family:inherit; }
+.polished-box { background:#F5F3FF; border-color:#DDD6FE; }
 </style>

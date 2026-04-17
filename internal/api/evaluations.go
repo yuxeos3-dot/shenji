@@ -11,11 +11,15 @@ package api
 // tables would triple the code without adding clarity.
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"seo-system/internal/db"
 
@@ -240,4 +244,142 @@ func DeleteEvaluation(c *gin.Context) {
 	}
 	WriteAuditLog(c, "eval_delete", "report_evaluation", fmt.Sprintf("%d", id), "")
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "已删除"})
+}
+
+// PolishEvaluationRequest: the current draft + its target so we can
+// optionally pass context ("this is a weekly report evaluation...")
+// to the AI. Target is optional — if not set, we still polish but
+// without report-type context.
+type PolishEvaluationRequest struct {
+	Content    string `json:"content" binding:"required"`
+	ReportType string `json:"report_type"`
+	ReportID   int64  `json:"report_id"`
+}
+
+// PolishEvaluation runs the draft through AI and returns a candidate
+// rewrite. Doesn't touch the DB — the client decides whether to keep
+// the AI version via the compare dialog, then saves via the existing
+// CreateEvaluation upsert.
+//
+// Admin only (only admins write evaluations).
+func PolishEvaluation(c *gin.Context) {
+	role, _ := c.Get("role")
+	if role != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "仅管理员"})
+		return
+	}
+	var req PolishEvaluationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "参数错误"})
+		return
+	}
+	if strings.TrimSpace(req.Content) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "内容为空，无需润色"})
+		return
+	}
+
+	polished, err := polishEvaluationWithAI(req.ReportType, req.Content)
+	if err != nil || strings.TrimSpace(polished) == "" {
+		log.Printf("[eval] polish failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":  -1,
+			"error": "AI 润色失败：" + fmt.Sprint(err),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"content": polished}})
+}
+
+// polishEvaluationWithAI mirrors the weekly/monthly summarizer plumbing
+// but uses an evaluation-specific prompt: short, professional, objective.
+// We specifically tell the model NOT to change the evaluator's stance
+// or inject new opinions — that would undermine the admin's accountability
+// for their own feedback.
+func polishEvaluationWithAI(reportType, draft string) (string, error) {
+	apiURL := db.GetSetting("ai_api_url")
+	apiKey := db.GetSetting("ai_api_key")
+	model := db.GetSetting("ai_model")
+	if apiURL == "" {
+		apiURL = "https://ai.router.team/v1"
+	}
+	if model == "" {
+		model = "claude-sonnet-4-6"
+	}
+	if apiKey == "" {
+		return "", fmt.Errorf("AI API key 未配置")
+	}
+
+	typeLabel := "汇报"
+	switch reportType {
+	case "daily":
+		typeLabel = "日汇报"
+	case "weekly":
+		typeLabel = "周汇报"
+	case "monthly":
+		typeLabel = "月汇报"
+	}
+
+	prompt := fmt.Sprintf(`你是一名职场评语润色助手。下面是一名管理者对员工 %s 写的评价草稿，请帮 ta 润色成更简洁专业的表达。
+
+## 原始草稿
+%s
+
+## 润色规则（严格遵守）
+1. 保持原意、立场、语气倾向 100%% 不变 —— 不得强化、弱化、反转评价倾向
+2. 不得新增原文没有的事实、数据、建议
+3. 不得删除原文提到的具体事项（除非是纯口语化的填充词）
+4. 不得把原文的批评软化成表扬，也不得反过来
+5. 允许改善的范围: 
+   - 去除口语/重复/冗余
+   - 改善措辞的专业度
+   - 修正错别字、标点、语法
+   - 合并相邻的相似观点
+6. 不要使用感叹号
+7. 不要加"本人""我觉得""个人认为"等第一人称口水词
+8. 不要加签名、抬头、结束语
+9. 直接输出润色后的评价文本，不要包裹在 markdown 代码块里，不要加任何解释`,
+		typeLabel, draft)
+
+	body := map[string]interface{}{
+		"model":       model,
+		"messages":    []map[string]string{{"role": "user", "content": prompt}},
+		"max_tokens":  1200,
+		"temperature": 0.25,
+	}
+	bj, _ := json.Marshal(body)
+	httpReq, _ := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(bj))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("AI HTTP %d", resp.StatusCode)
+	}
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return "", err
+	}
+	if len(parsed.Choices) == 0 {
+		return "", fmt.Errorf("AI 无返回")
+	}
+	out := strings.TrimSpace(parsed.Choices[0].Message.Content)
+	if strings.HasPrefix(out, "```") {
+		out = strings.TrimPrefix(out, "```markdown")
+		out = strings.TrimPrefix(out, "```")
+		out = strings.TrimSuffix(out, "```")
+		out = strings.TrimSpace(out)
+	}
+	return out, nil
 }

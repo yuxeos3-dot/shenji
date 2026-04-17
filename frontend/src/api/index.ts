@@ -185,6 +185,7 @@ const api = {
   // Report evaluations (admin 写评价 / 作者查看)
   listEvaluations: (params: Record<string, any>) => instance.get('/v1/evaluations', { params }),
   createEvaluation: (data: Record<string, any>) => instance.post('/v1/evaluations', data),
+  polishEvaluation: (data: Record<string, any>) => instance.post('/v1/evaluations/polish', data),
   deleteEvaluation: (id: Id) => instance.delete(`/v1/evaluations/${id}`),
 
   // Bing Webmaster

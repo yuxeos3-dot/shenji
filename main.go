@@ -240,6 +240,7 @@ func main() {
 		// via middleware so the handler can assume the role already.
 		v1.GET("/evaluations", api.RequirePermission("reports.view"), api.ListEvaluations)
 		v1.POST("/evaluations", middleware.AdminRequired(), api.CreateEvaluation)
+		v1.POST("/evaluations/polish", middleware.AdminRequired(), api.PolishEvaluation)
 		v1.DELETE("/evaluations/:id", middleware.AdminRequired(), api.DeleteEvaluation)
 
 		// Bing Webmaster
