@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strings"
 
 	"seo-system/internal/db"
 
@@ -165,7 +164,10 @@ func SaveUserPermissions(c *gin.Context) {
 }
 
 // HasPermission checks if the current user has a specific permission.
-// Admin users always have all permissions.
+// Admin users always have all permissions. Non-admins need an EXACT match —
+// granting a parent node no longer auto-grants children, since the UI renders
+// each child as its own checkbox and implicit wildcards led to surprise
+// privilege escalation.
 func HasPermission(c *gin.Context, perm string) bool {
 	role, _ := c.Get("role")
 	if role == "admin" {
@@ -182,9 +184,8 @@ func HasPermission(c *gin.Context, perm string) bool {
 		log.Printf("[permissions] unmarshal permissions failed for user %d: %v", userID, err)
 		return false
 	}
-	// Check exact match or parent wildcard
 	for _, p := range perms {
-		if p == perm || strings.HasPrefix(perm, p+".") {
+		if p == perm {
 			return true
 		}
 	}

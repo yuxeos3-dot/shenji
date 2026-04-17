@@ -5,16 +5,52 @@ After=network.target
 [Service]
 Type=simple
 User=www-data
+Group=www-data
 WorkingDirectory=/opt/seo-system
 EnvironmentFile=/opt/seo-system/.env
+# Production defaults — override in .env if needed.
+Environment=GIN_MODE=release
+# Set ALLOWED_ORIGINS and TRUSTED_PROXIES in /opt/seo-system/.env for same-
+# or multi-domain deployments, e.g.:
+#   ALLOWED_ORIGINS=https://keifukudo.com
+#   TRUSTED_PROXIES=127.0.0.1,::1
+
 ExecStart=/opt/seo-system/seo-system
 Restart=always
 RestartSec=10
+# Give in-flight audits/deadlink checks a chance to finish on shutdown.
+TimeoutStopSec=35
+KillSignal=SIGTERM
+
+# ─── Hardening (see systemd.exec(5)) ────────────────────────────────────────
 NoNewPrivileges=yes
 PrivateTmp=yes
+PrivateDevices=yes
 ProtectSystem=strict
 ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectKernelLogs=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+# Only these directories are writable; everything else on disk is read-only.
 ReadWritePaths=/opt/seo-system/data
+
+# Resource limits — cap worst-case blast radius.
+LimitNOFILE=65535
+TasksMax=4096
 
 [Install]
 WantedBy=multi-user.target

@@ -366,10 +366,12 @@ func runDeadLinkCheck(siteID, domain string, job *DeadLinkJob) {
 	job.Phase = "正在检测链接..."
 	job.mu.Unlock()
 
-	// Concurrent check — results collected in channel, batch-written to DB.
-	resultCh := make(chan checkResult, 100)
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 20)
+	// Worker-pool pattern: cap live goroutines to `workers`. Previously each
+	// URL spawned its own goroutine which piled up on the semaphore (8KB
+	// stack × N), so a 100k-URL sitemap ate ~800MB before a single HEAD ran.
+	const workers = 20
+	urlCh := make(chan string, workers*2)
+	resultCh := make(chan checkResult, workers*4)
 
 	client := &http.Client{
 		Timeout: 15 * time.Second,
@@ -381,44 +383,53 @@ func runDeadLinkCheck(siteID, domain string, job *DeadLinkJob) {
 		},
 	}
 
-	for _, u := range uniqueURLs {
-		wg.Add(1)
-		go func(url string) {
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			start := time.Now()
-			sc := 0
-			req, err := http.NewRequest("HEAD", url, nil)
-			if err != nil {
-				sc = -1
-			} else {
-				req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SEO-DeadLinkChecker/1.0)")
-				resp, err := client.Do(req)
+			for url := range urlCh {
+				start := time.Now()
+				sc := 0
+				req, err := http.NewRequest("HEAD", url, nil)
 				if err != nil {
 					sc = -1
 				} else {
-					sc = resp.StatusCode
-					resp.Body.Close()
+					req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SEO-DeadLinkChecker/1.0)")
+					resp, err := client.Do(req)
+					if err != nil {
+						sc = -1
+					} else {
+						sc = resp.StatusCode
+						resp.Body.Close()
+					}
 				}
+				ttfb := time.Since(start).Milliseconds()
+
+				resultCh <- checkResult{url: url, statusCode: sc, ttfb: ttfb}
+
+				job.mu.Lock()
+				job.Checked++
+				job.mu.Unlock()
 			}
-			ttfb := time.Since(start).Milliseconds()
-
-			resultCh <- checkResult{url: url, statusCode: sc, ttfb: ttfb}
-
-			job.mu.Lock()
-			job.Checked++
-			job.mu.Unlock()
-		}(u)
+		}()
 	}
 
-	// Close channel when all goroutines finish.
+	// Feed URLs without blocking the batch writer.
+	go func() {
+		for _, u := range uniqueURLs {
+			urlCh <- u
+		}
+		close(urlCh)
+	}()
+
+	// Close results when every worker has drained urlCh.
 	go func() { wg.Wait(); close(resultCh) }()
 
 	// Batch writer — collects results and writes to DB in batches of 50.
 	// This avoids 20 concurrent goroutines all fighting for the SQLite write
 	// lock, which was causing the "卡死" issue.
+	IncDeadlinkRun()
 	db.DB.Exec("DELETE FROM dead_link_results WHERE site_id = ?", siteID)
 
 	batch := make([]checkResult, 0, 50)

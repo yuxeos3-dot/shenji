@@ -43,6 +43,10 @@ func GetMyAIConfig(c *gin.Context) {
 }
 
 // SaveMyAIConfig saves the current user's AI configuration.
+// Masked key handling is explicit: any key that matches the display mask
+// (first4 + "****" + last4, or the literal "****") is treated as "keep old".
+// Any other value (including empty string) overwrites — an empty string from
+// the UI means "clear this slot" rather than "preserve silently".
 func SaveMyAIConfig(c *gin.Context) {
 	userID := c.GetInt64("user_id")
 	var cfg UserAIConfig
@@ -54,22 +58,34 @@ func SaveMyAIConfig(c *gin.Context) {
 	if len(cfg.Slots) > 3 {
 		cfg.Slots = cfg.Slots[:3]
 	}
-	// If user sends masked key (****), keep the old value
 	old := loadUserAIConfig(userID)
 	for i := range cfg.Slots {
-		if i < len(old.Slots) {
-			oldKey := old.Slots[i].APIKey
-			newKey := cfg.Slots[i].APIKey
-			if newKey == "" || newKey == "****" {
-				cfg.Slots[i].APIKey = oldKey
-			} else if len(oldKey) > 8 && newKey == oldKey[:4]+"****"+oldKey[len(oldKey)-4:] {
-				cfg.Slots[i].APIKey = oldKey
-			}
+		if i >= len(old.Slots) {
+			continue
+		}
+		oldKey := old.Slots[i].APIKey
+		newKey := cfg.Slots[i].APIKey
+		if isMaskedKey(newKey, oldKey) {
+			cfg.Slots[i].APIKey = oldKey
 		}
 	}
 	js, _ := json.Marshal(cfg)
-	db.DB.Exec("UPDATE users SET ai_configs=? WHERE id=?", string(js), userID)
+	if _, err := db.DB.Exec("UPDATE users SET ai_configs=? WHERE id=?", string(js), userID); err != nil {
+		c.JSON(500, gin.H{"code": -1, "error": "保存失败"})
+		return
+	}
 	c.JSON(200, gin.H{"code": 0, "data": "AI 配置已保存"})
+}
+
+// isMaskedKey detects whether newKey is the UI's masked rendering of oldKey.
+func isMaskedKey(newKey, oldKey string) bool {
+	if newKey == "****" {
+		return true
+	}
+	if len(oldKey) > 8 && newKey == oldKey[:4]+"****"+oldKey[len(oldKey)-4:] {
+		return true
+	}
+	return false
 }
 
 // TestMyAI tests the user's AI configuration (tries each slot in order).

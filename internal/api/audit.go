@@ -63,11 +63,14 @@ func TriggerAudit(c *gin.Context) {
 }
 
 func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName string) {
+	IncAuditRun()
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Audit task %d panicked: %v", taskID, r)
-			db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
-				"internal panic", time.Now(), taskID)
+			if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
+				"internal panic", time.Now(), taskID); err != nil {
+				log.Printf("[audit %d] mark-failed exec 失败: %v", taskID, err)
+			}
 		}
 	}()
 
@@ -346,9 +349,15 @@ func DeleteAudit(c *gin.Context) {
 
 func ListAudits(c *gin.Context) {
 	siteID := c.Param("id")
+	page, perPage := parsePageQuery(c, 50, 500)
+	offset := (page - 1) * perPage
+
+	var total int
+	db.DB.QueryRow("SELECT COUNT(*) FROM audit_tasks WHERE site_id = ?", siteID).Scan(&total)
+
 	rows, err := db.DB.Query(
-		"SELECT id, site_id, triggered_by, status, progress, error_msg, created_at, finished_at FROM audit_tasks WHERE site_id = ? ORDER BY id DESC LIMIT 200",
-		siteID,
+		"SELECT id, site_id, triggered_by, status, progress, error_msg, created_at, finished_at FROM audit_tasks WHERE site_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+		siteID, perPage, offset,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
@@ -380,6 +389,11 @@ func ListAudits(c *gin.Context) {
 	if audits == nil {
 		audits = []gin.H{}
 	}
+	// Backward-compatible shape: data stays an array, pagination metadata
+	// lives in response headers so existing callers keep working.
+	c.Header("X-Total-Count", fmt.Sprintf("%d", total))
+	c.Header("X-Page", fmt.Sprintf("%d", page))
+	c.Header("X-Per-Page", fmt.Sprintf("%d", perPage))
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": audits})
 }
 

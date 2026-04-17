@@ -45,8 +45,13 @@ func ListReports(c *gin.Context) {
 	}
 
 	if date != "" {
+		normalized, err := parseISODate(date)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "日期格式需为 YYYY-MM-DD"})
+			return
+		}
 		query += " AND r.report_date = ?"
-		args = append(args, date)
+		args = append(args, normalized)
 	}
 	query += " ORDER BY r.report_date DESC, r.user_id LIMIT 200"
 
@@ -112,12 +117,17 @@ func SubmitReport(c *gin.Context) {
 }
 
 func GetReportByDate(c *gin.Context) {
-	date := c.Param("date")
+	rawDate := c.Param("date")
+	date, err := parseISODate(rawDate)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "日期格式需为 YYYY-MM-DD"})
+		return
+	}
 	userID := c.GetInt64("user_id")
 
 	var id int64
 	var content, tasksDone, tasksTodo, issues, createdAt string
-	err := db.DB.QueryRow(
+	err = db.DB.QueryRow(
 		"SELECT id, content, tasks_done, tasks_todo, issues, created_at FROM daily_reports WHERE user_id = ? AND report_date = ?",
 		userID, date,
 	).Scan(&id, &content, &tasksDone, &tasksTodo, &issues, &createdAt)

@@ -1,8 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
 
 	"seo-system/internal/api"
 	"seo-system/internal/db"
@@ -27,21 +34,50 @@ func main() {
 	// Setup Gin
 	r := gin.Default()
 
-	// Middleware
+	// Tell gin which proxy addresses can set X-Forwarded-For / X-Real-IP,
+	// otherwise c.ClientIP() is spoofable and IP whitelist + login rate limit
+	// can be bypassed. Defaults to loopback only; override with TRUSTED_PROXIES.
+	trusted := []string{"127.0.0.1", "::1"}
+	if raw := os.Getenv("TRUSTED_PROXIES"); raw != "" {
+		trusted = trusted[:0]
+		for _, p := range strings.Split(raw, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				trusted = append(trusted, p)
+			}
+		}
+	}
+	if err := r.SetTrustedProxies(trusted); err != nil {
+		log.Fatalf("SetTrustedProxies 失败: %v", err)
+	}
+
+	// Global middleware
 	r.Use(middleware.CORS())
 	r.Use(middleware.IPWhitelist())
+	r.Use(middleware.RecoverLogger())
+	r.Use(api.MetricsCounter())
+
+	// Public health endpoint — used by load balancers / monitoring. Reports
+	// DB reachability. Deliberately outside the auth group.
+	r.GET("/healthz", api.Healthz)
+
+	// Prometheus-style metrics endpoint (no-auth by default; wrap with reverse
+	// proxy ACL if the host is public).
+	r.GET("/metrics", api.Metrics)
 
 	// Auth routes (no auth required)
 	r.POST("/api/auth/login", middleware.LoginRateLimit(), api.Login)
 
 	// Authenticated routes
+	// CSRF runs AFTER auth: it's cheap to skip for non-cookie clients, and
+	// needs to know whether the request is cookie-based.
 	v1 := r.Group("/api/v1")
-	v1.Use(middleware.AuthRequired())
+	v1.Use(middleware.AuthRequired(), middleware.CSRFProtect())
 	{
 		// Auth
 		v1.POST("/auth/logout", api.Logout)
 		v1.POST("/auth/change-password", api.ChangePassword)
 		v1.GET("/auth/me", api.GetMe)
+		v1.GET("/auth/csrf", api.GetCSRFToken)
 		v1.GET("/auth/online", api.GetOnlineUsersAPI)
 		v1.GET("/auth/my-permissions", api.GetMyPermissions)
 		v1.GET("/auth/my-ai-config", api.GetMyAIConfig)
@@ -129,7 +165,7 @@ func main() {
 		v1.GET("/reports", api.RequirePermission("reports.view"), api.ListReports)
 		v1.POST("/reports", api.RequirePermission("reports.write"), api.SubmitReport)
 		v1.POST("/reports/polish", api.RequirePermission("reports.polish"), api.PolishReport)
-		v1.GET("/reports/export", api.RequirePermission("reports.export"), api.ExportReports)  // must be before /:date
+		v1.GET("/reports/export", api.RequirePermission("reports.export"), api.ExportReports) // must be before /:date
 		v1.GET("/reports/:date", api.RequirePermission("reports.view"), api.GetReportByDate)
 
 		// Bing Webmaster
@@ -196,8 +232,42 @@ func main() {
 		port = "8088"
 	}
 
-	log.Printf("SEO巡站系统启动，端口: %s", port)
-	if err := r.Run(":" + port); err != nil {
-		log.Fatalf("启动失败: %v", err)
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		// No WriteTimeout: audit/report downloads can be slow; Gin and the
+		// reverse proxy already cap per-request.
+		IdleTimeout: 120 * time.Second,
+	}
+
+	// Graceful shutdown: on SIGINT/SIGTERM, stop accepting new requests and
+	// let in-flight ones finish. Running audits/deadlink checks detach into
+	// their own goroutines and may outlive the HTTP server.
+	shutdownCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
+	serveErr := make(chan error, 1)
+	go func() {
+		log.Printf("SEO巡站系统启动，端口: %s (trusted_proxies=%v)", port, trusted)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
+		}
+		close(serveErr)
+	}()
+
+	select {
+	case err := <-serveErr:
+		if err != nil {
+			log.Fatalf("启动失败: %v", err)
+		}
+	case <-shutdownCtx.Done():
+		log.Println("收到关停信号，等待在途请求完成 (最多 30s)...")
+		shutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutCtx); err != nil {
+			log.Printf("HTTP shutdown 失败: %v", err)
+		}
+		log.Println("已优雅关停")
 	}
 }
