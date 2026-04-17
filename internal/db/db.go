@@ -609,6 +609,39 @@ func Init() {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_eval_target ON report_evaluations(report_type, report_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_eval_by ON report_evaluations(evaluator_id)`,
+
+		// ─── GEO / ExtLink async workflow jobs ──────────────────────────────
+		// Tracks 2-step AI pipeline state for per-keyword article writing:
+		//   Step 1: long-form draft with anti-AI-detection humanization
+		//   Step 2: TDK (meta_title, meta_desc) + FAQ as JSON
+		// Frontend polls this table via GET /geo/jobs/:id every ~2s.
+		`CREATE TABLE IF NOT EXISTS geo_workflow_jobs (
+			id                INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id           INTEGER NOT NULL,
+			site_id           INTEGER NOT NULL,
+			content_type      TEXT DEFAULT 'geo',   -- 'geo' | 'extlink'
+			title_id          INTEGER DEFAULT 0,    -- source geo_titles.id (0 = ad-hoc)
+			keyword           TEXT NOT NULL,
+			title_text        TEXT DEFAULT '',
+			word_count        INTEGER DEFAULT 1500,
+			writing_angle     TEXT DEFAULT '',      -- optional persona hint
+			knowledge_id      INTEGER DEFAULT 0,
+			status            TEXT DEFAULT 'pending',   -- pending | running | done | failed
+			current_step      INTEGER DEFAULT 0,
+			step_label        TEXT DEFAULT '',
+			draft             TEXT DEFAULT '',          -- step-1 output
+			final_content     TEXT DEFAULT '',
+			final_meta_title  TEXT DEFAULT '',
+			final_meta_desc   TEXT DEFAULT '',
+			final_faq         TEXT DEFAULT '[]',
+			ai_model          TEXT DEFAULT '',
+			error_msg         TEXT DEFAULT '',
+			article_id        INTEGER DEFAULT 0,        -- filled on apply
+			created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_geo_jobs_user ON geo_workflow_jobs(user_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_geo_jobs_site ON geo_workflow_jobs(site_id, status)`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {

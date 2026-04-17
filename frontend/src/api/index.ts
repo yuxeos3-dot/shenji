@@ -260,6 +260,12 @@ const api = {
   geoReviewArticle: (id: Id, data: Record<string, any>) => instance.post(`/v1/geo/articles/${id}/review`, data),
   geoPublishArticle: (id: Id) => instance.post(`/v1/geo/articles/${id}/publish`),
 
+  // Per-keyword AI writing workflow (GEO + 外链 共用)
+  geoStartKeywordWorkflow: (data: Record<string, any>) => instance.post('/v1/geo/keyword/workflow/start', data),
+  geoListWorkflowJobs: (params?: Record<string, any>) => instance.get('/v1/geo/keyword/workflow/jobs', { params }),
+  geoGetWorkflowJob: (id: Id) => instance.get(`/v1/geo/keyword/workflow/${id}`),
+  geoApplyWorkflowJob: (id: Id, data?: Record<string, any>) => instance.post(`/v1/geo/keyword/workflow/${id}/apply`, data || {}),
+
   // Coordination (协同管理)
   coordStats: (params?: Record<string, any>) => instance.get('/v1/coord/stats', { params }),
   coordListTasks: (params?: Record<string, any>) => instance.get('/v1/coord/tasks', { params }),

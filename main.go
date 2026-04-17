@@ -345,6 +345,14 @@ func main() {
 			geo.DELETE("/articles/:id", api.RequirePermission("geo.articles_delete"), api.GeoDeleteArticle)
 			geo.POST("/articles/:id/review", api.RequirePermission("geo.articles_review"), api.GeoReviewArticle)
 			geo.POST("/articles/:id/publish", api.RequirePermission("geo.articles_publish"), api.GeoPublishArticle)
+
+			// Per-keyword async AI writing workflow (both GEO + ExtLink
+			// share this backend; differentiate via content_type in the
+			// request body). Returns job id immediately, frontend polls.
+			geo.POST("/keyword/workflow/start", api.RequirePermission("geo.tasks_run"), api.GeoStartKeywordWorkflow)
+			geo.GET("/keyword/workflow/jobs", api.RequirePermission("geo.view"), api.GeoListWorkflowJobs)
+			geo.GET("/keyword/workflow/:id", api.RequirePermission("geo.view"), api.GeoGetWorkflowJob)
+			geo.POST("/keyword/workflow/:id/apply", api.RequirePermission("geo.tasks_run"), api.GeoApplyWorkflowJob)
 		}
 	}
 

@@ -54,10 +54,17 @@
               <template #footer><el-button @click="showLibForm=false">取消</el-button><el-button type="primary" @click="createLib">创建</el-button></template>
             </el-dialog>
             <!-- 查看关键词 -->
-            <el-dialog v-model="showTitles" :title="'关键词库：'+(curLib?.name||'')" width="700px" top="5vh">
+            <el-dialog v-model="showTitles" :title="'关键词库：'+(curLib?.name||'')" width="860px" top="5vh">
               <el-table :data="curTitles" stripe size="small" max-height="400">
-                <el-table-column prop="title" label="关键词" /><el-table-column prop="keyword" label="附加词" width="140" />
-                <el-table-column label="操作" width="70"><template #default="{row}"><el-button size="small" type="danger" text @click="delTitle(row)">删除</el-button></template></el-table-column>
+                <el-table-column prop="title" label="关键词" />
+                <el-table-column prop="keyword" label="附加词" width="140" />
+                <el-table-column label="已用" width="60"><template #default="{row}">{{ row.is_used?'✅':'—' }}</template></el-table-column>
+                <el-table-column label="操作" width="220">
+                  <template #default="{row}">
+                    <el-button size="small" type="primary" @click="openAIGen(row)">🤖 AI 生成</el-button>
+                    <el-button size="small" type="danger" text @click="delTitle(row)">删除</el-button>
+                  </template>
+                </el-table-column>
               </el-table>
               <div style="margin-top:10px;text-align:center" v-if="titlesTotal>100"><el-pagination v-model:current-page="titlesPage" :page-size="100" :total="titlesTotal" layout="prev,pager,next,total" background @current-change="loadTitlesPage" /></div>
             </el-dialog>
@@ -239,6 +246,19 @@
       </template>
     </el-dialog>
 
+    <!-- Shared workflow dialog (AI per-keyword generate, content_type=extlink) -->
+    <KeywordAIWorkflow
+      v-model="showAIGen"
+      :site-id="siteId"
+      content-type="extlink"
+      :title-id="aiGenRow?.id || 0"
+      :keyword="aiGenRow?.keyword || aiGenRow?.title || ''"
+      :title-text="aiGenRow?.title || ''"
+      :knowledge-options="knowledgeList"
+      :site-page-count="sitePageCount"
+      @applied="onAIGenApplied"
+    />
+
   </div>
 </template>
 
@@ -246,14 +266,38 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import KeywordAIWorkflow from '../components/KeywordAIWorkflow.vue'
 
 const activeTab = ref('libs')
 const stats = ref({})
 const sites = ref([])
 const siteId = ref(null)
 
+// Per-keyword AI generate workflow state
+const showAIGen = ref(false)
+const aiGenRow = ref(null)
+const sitePageCount = ref(0)
+
 function onSiteChange() { loadAll() }
-function loadAll() { if(!siteId.value)return; loadStats(); loadLibs(); loadPrompts(); loadKnowledge(); loadTasks(); loadArticles() }
+function loadAll() { if(!siteId.value)return; loadStats(); loadLibs(); loadPrompts(); loadKnowledge(); loadTasks(); loadArticles(); loadSitePageCount() }
+
+async function loadSitePageCount() {
+  try {
+    const res = await api.listSitePages(siteId.value)
+    sitePageCount.value = (res.data || []).length
+  } catch { sitePageCount.value = 0 }
+}
+
+function openAIGen(row) {
+  aiGenRow.value = row
+  showAIGen.value = true
+}
+function onAIGenApplied({ article_id }) {
+  ElMessage.success('✅ 已保存为外链文章 #' + article_id)
+  loadArticles()
+  loadStats()
+  if (curLib.value) loadTitlesPage()
+}
 
 // ── 关键词库 ──
 const titleLibs = ref([])
