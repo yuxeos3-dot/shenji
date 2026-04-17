@@ -1,7 +1,10 @@
 <template>
   <div class="app-layout">
     <nav class="sidebar">
-      <div class="logo">☀ {{ siteConfig.title }}<span>管理后台</span></div>
+      <div class="logo">
+        <div class="logo-main">☀ {{ siteConfig.title }}</div>
+        <div class="logo-sub">管理后台 · <span class="logo-ver">{{ appVersion }}</span></div>
+      </div>
       <ul>
         <li><router-link to="/dashboard" :class="{active: $route.path==='/dashboard'}"><span class="nav-icon">📊</span>仪表盘</router-link></li>
         <li><router-link to="/sites" :class="{active: $route.path.startsWith('/sites')}"><span class="nav-icon">🌐</span>站点管理</router-link></li>
@@ -19,7 +22,6 @@
       <div class="sidebar-footer">
         <a href="#" @click.prevent="showPasswordDialog=true">🔑 修改密码</a>
         <a href="#" @click.prevent="handleLogout">🚪 退出登录</a>
-        <div class="version-tag">{{ appVersion }}</div>
       </div>
     </nav>
     <div class="content">
@@ -144,22 +146,31 @@ async function changePassword() {
   box-shadow: 2px 0 20px rgba(200,100,10,.06);
 }
 .sidebar .logo {
-  padding: 24px 20px 22px;
+  padding: 22px 14px 20px;
+  border-bottom: 1.5px solid var(--border-light);
+  background: linear-gradient(135deg, var(--sun-light) 0%, #FFF 100%);
+  text-align: center;
+}
+.sidebar .logo .logo-main {
   font-size: 17px;
   font-weight: 800;
   letter-spacing: -.4px;
-  border-bottom: 1.5px solid var(--border-light);
-  background: linear-gradient(135deg, var(--sun-light) 0%, #FFF 100%);
   color: var(--sun-deep);
+  line-height: 1.25;
+  word-break: break-word;
 }
-.sidebar .logo span {
-  display: block;
+.sidebar .logo .logo-sub {
+  margin-top: 4px;
   font-size: 10.5px;
   font-weight: 600;
   color: var(--ink-hint);
   letter-spacing: .06em;
   text-transform: uppercase;
-  margin-top: 2px;
+}
+.sidebar .logo .logo-ver {
+  color: var(--sun);
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
 }
 .sidebar ul { list-style: none; padding: 10px; flex: 1; }
 .sidebar ul li a {
@@ -214,18 +225,6 @@ async function changePassword() {
   text-decoration: none;
 }
 .sidebar-footer a:hover { background: var(--sun-light); color: var(--sun-deep); }
-.sidebar-footer .version-tag {
-  margin-top: 8px;
-  padding: 4px 10px;
-  font-size: 10.5px;
-  font-weight: 700;
-  color: var(--ink-hint);
-  font-family: 'JetBrains Mono', monospace;
-  text-align: center;
-  letter-spacing: .05em;
-  border-top: 1px dashed var(--border-light);
-  padding-top: 10px;
-}
 
 /* ── Content ── */
 .content {
