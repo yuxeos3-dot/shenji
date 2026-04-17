@@ -424,6 +424,24 @@ func Init() {
 		`CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)`,
+
+		// ─── Spider (search engine crawler) hit logs ────────────────────────
+		`CREATE TABLE IF NOT EXISTS spider_logs (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			site_id      INTEGER NOT NULL,
+			spider       TEXT NOT NULL,
+			ip           TEXT DEFAULT '',
+			user_agent   TEXT DEFAULT '',
+			url          TEXT DEFAULT '',
+			status_code  INTEGER DEFAULT 0,
+			ttfb_ms      INTEGER DEFAULT 0,
+			referrer     TEXT DEFAULT '',
+			visited_at   DATETIME NOT NULL,
+			created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_spider_site_time ON spider_logs(site_id, visited_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_spider_site_name_time ON spider_logs(site_id, spider, visited_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_spider_visited_at ON spider_logs(visited_at)`,
 	}
 	for _, m := range migrations {
 		DB.Exec(m) // ignore errors (column/table already exists)
@@ -494,6 +512,7 @@ func seedDefaultSettings() {
 		"ai_api_url":                   "https://ai.router.team/v1",
 		"ai_model":                     "claude-sonnet-4-6",
 		"ip_whitelist":                 "",
+		"spider_ingest_api_key":        "", // Set via admin UI; empty disables /api/spider/ingest
 	}
 
 	for k, v := range defaults {

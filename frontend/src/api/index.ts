@@ -177,6 +177,15 @@ const api = {
   // Audit Logs
   listAuditLogs: () => instance.get('/v1/audit-logs'),
 
+  // Cache management
+  listCaches: () => instance.get('/v1/cache'),
+  clearCache: (key: string) => instance.delete(`/v1/cache/${key}`),
+
+  // Spider analytics
+  spiderOverview: () => instance.get('/v1/spider/overview'),
+  spiderTrend: (params?: Record<string, any>) => instance.get('/v1/spider/trend', { params }),
+  spiderLogs: (params?: Record<string, any>) => instance.get('/v1/spider/logs', { params }),
+
   // GEO Content Production
   geoStats: (params?: Record<string, any>) => instance.get('/v1/geo/stats', { params }),
   geoListTitleLibs: (params?: Record<string, any>) => instance.get('/v1/geo/title-libs', { params }),

@@ -68,6 +68,11 @@ func main() {
 	// Auth routes (no auth required)
 	r.POST("/api/auth/login", middleware.LoginRateLimit(), api.Login)
 
+	// Spider hit ingest — authenticated by X-API-Key (set in system settings).
+	// Public so external log shippers (nginx parser, CF worker) can POST to it
+	// without holding a JWT cookie.
+	r.POST("/api/spider/ingest", api.IngestSpiderLog)
+
 	// Authenticated routes
 	// CSRF runs AFTER auth: it's cheap to skip for non-cookie clients, and
 	// needs to know whether the request is cookie-based.
@@ -186,6 +191,19 @@ func main() {
 
 		// Audit Logs (admin only)
 		v1.GET("/audit-logs", middleware.AdminRequired(), api.ListAuditLogs)
+
+		// Spider analytics (read-only for now; ingest is a public route above)
+		v1.GET("/spider/overview", api.RequirePermission("spider.view"), api.SpiderOverview)
+		v1.GET("/spider/trend", api.RequirePermission("spider.view"), api.SpiderDailyTrend)
+		v1.GET("/spider/logs", api.RequirePermission("spider.view"), api.SpiderLogs)
+
+		// Cache management (admin only)
+		cache := v1.Group("/cache")
+		cache.Use(middleware.AdminRequired())
+		{
+			cache.GET("", api.ListCaches)
+			cache.DELETE("/:key", api.ClearCache)
+		}
 
 		// GEO Content Production
 		geo := v1.Group("/geo")

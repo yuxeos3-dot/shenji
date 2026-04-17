@@ -4,16 +4,17 @@
       <div class="logo">☀ SEO巡站<span>管理后台</span></div>
       <ul>
         <li><router-link to="/dashboard" :class="{active: $route.path==='/dashboard'}"><span class="nav-icon">📊</span>仪表盘</router-link></li>
-        <li><router-link to="/data-management" :class="{active: $route.path==='/data-management'}"><span class="nav-icon">📡</span>数据管理</router-link></li>
-
         <li><router-link to="/sites" :class="{active: $route.path.startsWith('/sites')}"><span class="nav-icon">🌐</span>站点管理</router-link></li>
+        <li><router-link to="/data-management" :class="{active: $route.path==='/data-management'}"><span class="nav-icon">📡</span>数据管理</router-link></li>
+        <li><router-link to="/spider-management" :class="{active: $route.path==='/spider-management'}"><span class="nav-icon">🕷️</span>蜘蛛管理</router-link></li>
         <li><router-link to="/geo-management" :class="{active: $route.path==='/geo-management'}"><span class="nav-icon">🤖</span>GEO管理</router-link></li>
-        <li><router-link to="/dead-links" :class="{active: $route.path==='/dead-links'}"><span class="nav-icon">💀</span>死链检查</router-link></li>
-        <li><router-link to="/content-rewrite" :class="{active: $route.path==='/content-rewrite'}"><span class="nav-icon">✍️</span>内容二创</router-link></li>
+        <li><router-link to="/dead-links" :class="{active: $route.path==='/dead-links'}"><span class="nav-icon">💀</span>死链管理</router-link></li>
+        <li><router-link to="/content-rewrite" :class="{active: $route.path==='/content-rewrite'}"><span class="nav-icon">✍️</span>二创管理</router-link></li>
         <li><router-link to="/external-links" :class="{active: $route.path==='/external-links'}"><span class="nav-icon">🔗</span>外链管理</router-link></li>
-        <li><router-link to="/reports" :class="{active: $route.path.startsWith('/reports')}"><span class="nav-icon">📋</span>每日汇报</router-link></li>
+        <li><router-link to="/reports" :class="{active: $route.path.startsWith('/reports')}"><span class="nav-icon">📋</span>汇报管理</router-link></li>
         <li v-if="userStore.isAdmin()"><router-link to="/users" :class="{active: $route.path==='/users'}"><span class="nav-icon">👥</span>用户管理</router-link></li>
-        <li v-if="userStore.isAdmin()"><router-link to="/settings" :class="{active: $route.path==='/settings'}"><span class="nav-icon">⚙️</span>系统设置</router-link></li>
+        <li v-if="userStore.isAdmin()"><router-link to="/cache-management" :class="{active: $route.path==='/cache-management'}"><span class="nav-icon">💾</span>缓存管理</router-link></li>
+        <li v-if="userStore.isAdmin()"><router-link to="/settings" :class="{active: $route.path==='/settings'}"><span class="nav-icon">⚙️</span>系统管理</router-link></li>
       </ul>
       <div class="sidebar-footer">
         <a href="#" @click.prevent="showPasswordDialog=true">🔑 修改密码</a>
@@ -70,16 +71,18 @@ const pwdForm = ref({ old_password: '', new_password: '' })
 
 const pageTitles = {
   '/dashboard': '仪表盘',
-  '/data-management': '数据管理',
   '/sites': '站点管理',
-  '/geo-management': 'Geo管理',
-  '/dead-links': '死链检查',
-  '/content-rewrite': '内容二创',
+  '/data-management': '数据管理',
+  '/spider-management': '蜘蛛管理',
+  '/geo-management': 'GEO管理',
+  '/dead-links': '死链管理',
+  '/content-rewrite': '二创管理',
   '/external-links': '外链管理',
-  '/reports': '每日汇报',
+  '/reports': '汇报管理',
   '/reports/write': '写汇报',
   '/users': '用户管理',
-  '/settings': '系统设置',
+  '/cache-management': '缓存管理',
+  '/settings': '系统管理',
 }
 const pageTitle = computed(() => {
   for (const [path, title] of Object.entries(pageTitles)) {

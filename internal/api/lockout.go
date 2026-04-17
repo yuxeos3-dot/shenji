@@ -94,3 +94,24 @@ func RecordLoginSuccess(email string) {
 	defer lockoutMu.Unlock()
 	delete(lockouts, key)
 }
+
+// LockoutStats returns (tracked_accounts, currently_locked) for the cache UI.
+func LockoutStats() (tracked, locked int) {
+	now := time.Now()
+	lockoutMu.Lock()
+	defer lockoutMu.Unlock()
+	tracked = len(lockouts)
+	for _, e := range lockouts {
+		if now.Before(e.lockedUntil) {
+			locked++
+		}
+	}
+	return
+}
+
+// ClearLockouts wipes all failure counters and unlocks every account.
+func ClearLockouts() {
+	lockoutMu.Lock()
+	defer lockoutMu.Unlock()
+	lockouts = map[string]*lockoutEntry{}
+}

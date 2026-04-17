@@ -26,6 +26,37 @@ type DeadLinkJob struct {
 	mu      sync.Mutex
 }
 
+// DeadlinkProgressStats returns (tracked_sites, running_count) for UI display.
+func DeadlinkProgressStats() (tracked, running int) {
+	deadlinkProgress.Range(func(_, v interface{}) bool {
+		tracked++
+		j := v.(*DeadLinkJob)
+		j.mu.Lock()
+		if j.Status == "running" {
+			running++
+		}
+		j.mu.Unlock()
+		return true
+	})
+	return
+}
+
+// ClearDeadlinkProgress drops every per-site job record. Running checks keep
+// executing but progress becomes untracked — the endpoint just stops showing
+// their status. Useful when the UI thinks a stale job is still running.
+func ClearDeadlinkProgress() {
+	deadlinkProgress.Range(func(k, v interface{}) bool {
+		j := v.(*DeadLinkJob)
+		j.mu.Lock()
+		notRunning := j.Status != "running"
+		j.mu.Unlock()
+		if notRunning {
+			deadlinkProgress.Delete(k)
+		}
+		return true
+	})
+}
+
 func GetDeadLinks(c *gin.Context) {
 	siteID := c.Param("id")
 	if !canAccessSite(c, siteID) {

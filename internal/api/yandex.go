@@ -192,6 +192,21 @@ func getYandexAccessToken() (string, error) {
 // Without a TTL, swapping the Yandex account leaves sync permanently broken.
 const yandexUserIDCacheTTL = 6 * time.Hour
 
+// ClearYandexUserIDCache forces the next Yandex sync to re-fetch the user id.
+func ClearYandexUserIDCache() {
+	db.DB.Exec("DELETE FROM settings WHERE key = 'yandex_user_id'")
+}
+
+// YandexUserIDCacheStats returns 1 if a cached user id row exists.
+func YandexUserIDCacheStats() int {
+	var v string
+	db.DB.QueryRow("SELECT value FROM settings WHERE key = 'yandex_user_id'").Scan(&v)
+	if v != "" {
+		return 1
+	}
+	return 0
+}
+
 // getYandexUserIDCached gets userID from DB cache first, fetches and saves if missing.
 // The cache is keyed to the current access token so rotating accounts invalidates it,
 // and expires after yandexUserIDCacheTTL regardless.

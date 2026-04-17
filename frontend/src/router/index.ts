@@ -22,6 +22,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'reports/write', name: 'WriteReport', component: () => import('../views/WriteReport.vue') },
       { path: 'settings', name: 'Settings', component: () => import('../views/Settings.vue') },
       { path: 'users', name: 'Users', component: () => import('../views/Users.vue') },
+      { path: 'cache-management', name: 'CacheManagement', component: () => import('../views/CacheManagement.vue') },
+      { path: 'spider-management', name: 'SpiderManagement', component: () => import('../views/SpiderManagement.vue') },
     ]
   },
 ]

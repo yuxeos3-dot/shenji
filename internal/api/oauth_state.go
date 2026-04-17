@@ -74,3 +74,18 @@ func requireValidState(c *gin.Context) bool {
 	}
 	return true
 }
+
+// OAuthStateStats returns the number of pending OAuth states.
+func OAuthStateStats() int {
+	oauthStatesMu.Lock()
+	defer oauthStatesMu.Unlock()
+	return len(oauthStates)
+}
+
+// ClearOAuthStates drops every in-flight state, effectively canceling any
+// OAuth authorize redirects currently waiting on a callback.
+func ClearOAuthStates() {
+	oauthStatesMu.Lock()
+	defer oauthStatesMu.Unlock()
+	oauthStates = map[string]oauthStateEntry{}
+}

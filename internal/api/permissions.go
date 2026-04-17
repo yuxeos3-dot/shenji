@@ -69,6 +69,9 @@ var PermissionTree = []PermNode{
 		{Code: "extlinks.delete", Label: "删除外链"},
 		{Code: "extlinks.check", Label: "检测外链可用性"},
 	}},
+	{Code: "spider", Label: "蜘蛛管理", Children: []PermNode{
+		{Code: "spider.view", Label: "查看蜘蛛统计 / 日志"},
+	}},
 	{Code: "reports", Label: "每日汇报", Children: []PermNode{
 		{Code: "reports.view", Label: "查看汇报列表"},
 		{Code: "reports.write", Label: "写汇报"},

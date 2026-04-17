@@ -218,6 +218,21 @@ func getIPWhitelist() []ipWhitelistEntry {
 	return refreshIPCache()
 }
 
+// IPWhitelistCacheStats returns (entries, next_refresh_at) for /cache UI.
+func IPWhitelistCacheStats() (int, time.Time) {
+	ipCacheMu.RLock()
+	defer ipCacheMu.RUnlock()
+	return len(cachedEntries), ipCacheExpiry
+}
+
+// InvalidateIPWhitelistCache forces a reload on next request.
+func InvalidateIPWhitelistCache() {
+	ipCacheMu.Lock()
+	cachedEntries = nil
+	ipCacheExpiry = time.Time{}
+	ipCacheMu.Unlock()
+}
+
 // Online user tracking — records each authenticated request's user + IP.
 type OnlineEntry struct {
 	UserID   int64
@@ -250,6 +265,44 @@ func GetOnlineUsers() []OnlineEntry {
 		return true
 	})
 	return result
+}
+
+// OnlineUsersSize returns the total number of (user, ip) session entries.
+func OnlineUsersSize() int {
+	n := 0
+	onlineUsers.Range(func(_, _ interface{}) bool { n++; return true })
+	return n
+}
+
+// ClearOnlineUsers drops every cached presence entry.
+func ClearOnlineUsers() {
+	onlineUsers.Range(func(k, _ interface{}) bool { onlineUsers.Delete(k); return true })
+}
+
+// HeavyLimiterStats / ClearHeavyLimiter expose the per-user rate limiter state.
+func HeavyLimiterStats() int {
+	heavyLimiter.mu.Lock()
+	defer heavyLimiter.mu.Unlock()
+	return len(heavyLimiter.requests)
+}
+
+func ClearHeavyLimiter() {
+	heavyLimiter.mu.Lock()
+	defer heavyLimiter.mu.Unlock()
+	heavyLimiter.requests = make(map[int64][]time.Time)
+}
+
+// LoginLimiterStats / ClearLoginLimiter expose the per-IP login-attempt limiter.
+func LoginLimiterStats() int {
+	loginLimiter.mu.Lock()
+	defer loginLimiter.mu.Unlock()
+	return len(loginLimiter.attempts)
+}
+
+func ClearLoginLimiter() {
+	loginLimiter.mu.Lock()
+	defer loginLimiter.mu.Unlock()
+	loginLimiter.attempts = make(map[string][]time.Time)
 }
 
 // ─── Per-user rate limiter for heavy endpoints ───────────────────────────────
