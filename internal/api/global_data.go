@@ -1,50 +1,43 @@
 package api
 
-// Admin global-data endpoint: one platform + one date range → a flat
-// list of per-site cards aggregated from the locally synced tables
-// (gsc_data / ga_data / yandex_data / bing_data). Powers the 全局数据
-// page, which is the admin's cross-user version of the personal 数据
-//管理 view — identical card UI, just every user's sites in one grid.
+// Admin global-data endpoint: for each user who has bound the requested
+// platform, call the provider API (GSC / GA / Bing / Yandex) with that
+// user's own credentials and return every property / site that account
+// has access to — tagged with the owner's name. This is the cross-user
+// superset of the per-user 数据管理 page.
 //
-// Why local DB instead of calling each provider's API per user:
-//   - The per-user dashboards (DataManagement.vue) go through each
-//     user's own OAuth token, which the admin does not (and should not)
-//     have access to.
-//   - Sync jobs already write a daily row per (site, platform) into the
-//     local tables, so we have everything we need to aggregate.
-//
-// Data freshness is therefore whatever the last sync produced. If
-// sites show zeros, the owner hasn't synced yet — not an admin issue.
+// Important: cards returned are the PROVIDER's sites, not rows from our
+// local `sites` table. A user might have registered 1 site with us but
+// have 50 properties in their GSC account — all 50 show up here.
 
 import (
-	"fmt"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
 
 	"seo-system/internal/db"
 
 	"github.com/gin-gonic/gin"
 )
 
-type globalSiteInfo struct {
-	id        int64
-	name      string
-	domain    string
-	ownerID   int64
-	ownerName string
-}
-
-// GetGlobalDataOverview GET /api/v1/admin/global-data?platform=gsc&start_date=X&end_date=Y
+// GetGlobalDataOverview GET /api/v1/admin/global-data
 //
-// platform: gsc | ga4 | bing | yandex
-// start_date / end_date: YYYY-MM-DD inclusive
+// Query params:
+//
+//	platform=gsc|ga4|bing|yandex   (required)
+//	start_date=YYYY-MM-DD           (required)
+//	end_date=YYYY-MM-DD             (required)
+//	user_id=N                       (optional; narrows to one owner)
 //
 // Response:
 //
-//	{ cards: [{site_id, name, domain, owner_name, clicks, impressions, ctr, position, has_data}] }
+//	{ cards: [...], platform, range, summary }
 //
-// Shape kept close to DataManagement's overview so the frontend can
-// reuse its existing card component.
+// `cards[]` is the concatenation of every user's provider cards with
+// owner_id + owner_name added. Per-user fetches run concurrently (one
+// goroutine per user, each internally fans out to up to 8 parallel
+// provider calls).
 func GetGlobalDataOverview(c *gin.Context) {
 	platform := strings.ToLower(c.DefaultQuery("platform", "gsc"))
 	switch platform {
@@ -53,167 +46,196 @@ func GetGlobalDataOverview(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "platform 必须是 gsc / ga4 / bing / yandex"})
 		return
 	}
-	startDate := c.Query("start_date")
-	endDate := c.Query("end_date")
-	if !isYMD(startDate) || !isYMD(endDate) {
+	sd := c.Query("start_date")
+	ed := c.Query("end_date")
+	if !isYMD(sd) || !isYMD(ed) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "start_date / end_date 必须是 YYYY-MM-DD"})
 		return
 	}
-	filterUser := c.Query("user_id") // optional
+	filterUser := c.Query("user_id")
 
-	// Base: every site + owner name. We ALWAYS list every site, even
-	// ones that have no data in the requested window — the card just
-	// shows "无数据" in that case, which matches the per-user page.
-	siteQ := `SELECT s.id, s.name, s.domain, COALESCE(s.created_by,0), COALESCE(u.name,'')
-	          FROM sites s LEFT JOIN users u ON u.id = s.created_by`
-	args := []interface{}{}
-	if filterUser != "" {
-		siteQ += " WHERE s.created_by = ?"
-		args = append(args, filterUser)
-	}
-	siteQ += " ORDER BY u.name, s.id DESC"
-
-	rows, err := db.DB.Query(siteQ, args...)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询站点失败"})
+	// Figure out which users have the platform bound. For OAuth platforms
+	// we read user_oauth_tokens; for Bing we read user_bing.
+	users := listUsersWithPlatformBinding(platform, filterUser)
+	if len(users) == 0 {
+		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
+			"platform": platform,
+			"range":    gin.H{"start": sd, "end": ed},
+			"cards":    []gin.H{},
+			"summary":  gin.H{"total_sites": 0, "total_owners": 0},
+		}})
 		return
 	}
-	var sites []globalSiteInfo
-	for rows.Next() {
-		var s globalSiteInfo
-		if err := rows.Scan(&s.id, &s.name, &s.domain, &s.ownerID, &s.ownerName); err != nil {
+
+	// Fan out: one goroutine per user, cap total concurrency so 20 users
+	// × 8 provider calls don't drown the upstream. 4 users in flight is a
+	// reasonable ceiling — admin calls this rarely.
+	type userResult struct {
+		userID    int64
+		ownerName string
+		cards     []map[string]interface{}
+		errMsg    string
+	}
+	results := make([]userResult, len(users))
+	userSem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	for i, u := range users {
+		wg.Add(1)
+		userSem <- struct{}{}
+		go func(idx int, uid int64, uname string) {
+			defer wg.Done()
+			defer func() { <-userSem }()
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[global-data] user %d (%s) panic: %v", uid, uname, r)
+					results[idx] = userResult{userID: uid, ownerName: uname, errMsg: "panic"}
+				}
+			}()
+
+			var cards []map[string]interface{}
+			var err error
+			switch platform {
+			case "gsc":
+				cards, err = gscCardsForUser(uid, sd, ed)
+			case "ga4":
+				cards, err = gaCardsForUser(uid, sd, ed)
+			case "bing":
+				cards, err = bingCardsForUser(uid, sd, ed)
+			case "yandex":
+				cards, err = yandexCardsForUser(uid, sd, ed)
+			}
+			r := userResult{userID: uid, ownerName: uname, cards: cards}
+			if err != nil {
+				r.errMsg = err.Error()
+				log.Printf("[global-data] user %d (%s) %s failed: %v", uid, uname, platform, err)
+			}
+			results[idx] = r
+		}(i, u.id, u.name)
+	}
+	wg.Wait()
+
+	// Flatten into final payload. Each card gets owner info so the
+	// frontend can render an owner chip on the card.
+	out := make([]gin.H, 0, 64)
+	var totalClicks, totalImpr, totalSessions, totalUsers float64
+	ownerSet := map[int64]bool{}
+	for _, r := range results {
+		if len(r.cards) == 0 {
 			continue
 		}
-		sites = append(sites, s)
-	}
-	rows.Close()
-
-	// Aggregate the platform data in a single grouped query.
-	type agg struct {
-		clicks, impressions, indexCount int64
-		ctr, position                   float64
-		hasData                         bool
-	}
-	byID := map[int64]*agg{}
-	var aggQ string
-	switch platform {
-	case "gsc":
-		aggQ = `SELECT site_id,
-		               COALESCE(SUM(clicks),0), COALESCE(SUM(impressions),0),
-		               COALESCE(AVG(ctr),0), COALESCE(AVG(position),0),
-		               COUNT(*)
-		        FROM gsc_data WHERE date >= ? AND date <= ? GROUP BY site_id`
-	case "ga4":
-		// GA4: clicks → sessions, impressions → users (re-purposed so
-		// the shared card UI doesn't need a platform switch). position
-		// / ctr stay zero.
-		aggQ = `SELECT site_id,
-		               COALESCE(SUM(sessions),0), COALESCE(SUM(users),0),
-		               0, 0,
-		               COUNT(*)
-		        FROM ga_data WHERE date >= ? AND date <= ? GROUP BY site_id`
-	case "bing":
-		aggQ = `SELECT site_id,
-		               COALESCE(SUM(clicks),0), COALESCE(SUM(impressions),0),
-		               COALESCE(AVG(ctr),0), COALESCE(AVG(avg_position),0),
-		               COUNT(*)
-		        FROM bing_data WHERE date >= ? AND date <= ? GROUP BY site_id`
-	case "yandex":
-		// Yandex has no position/CTR in our schema — surface index_count
-		// via position slot so the card still has a 4th number.
-		aggQ = `SELECT site_id,
-		               COALESCE(SUM(clicks),0), COALESCE(SUM(impressions),0),
-		               0, COALESCE(MAX(index_count),0),
-		               COUNT(*)
-		        FROM yandex_data WHERE date >= ? AND date <= ? GROUP BY site_id`
-	}
-
-	if r2, err := db.DB.Query(aggQ, startDate, endDate); err == nil {
-		for r2.Next() {
-			var sid int64
-			var clicks, impressions int64
-			var ctr, pos float64
-			var rowCount int
-			if err := r2.Scan(&sid, &clicks, &impressions, &ctr, &pos, &rowCount); err != nil {
-				continue
+		ownerSet[r.userID] = true
+		for _, card := range r.cards {
+			card["owner_id"] = r.userID
+			card["owner_name"] = r.ownerName
+			// Gather totals for the summary strip.
+			if v, ok := card["clicks"].(float64); ok {
+				totalClicks += v
 			}
-			byID[sid] = &agg{
-				clicks:      clicks,
-				impressions: impressions,
-				ctr:         ctr,
-				position:    pos,
-				hasData:     rowCount > 0,
+			if v, ok := card["impressions"].(float64); ok {
+				totalImpr += v
 			}
+			if v, ok := card["sessions"].(float64); ok {
+				totalSessions += v
+			}
+			if v, ok := card["total_users"].(float64); ok {
+				totalUsers += v
+			}
+			out = append(out, gin.H(card))
 		}
-		r2.Close()
 	}
 
-	cards := make([]gin.H, 0, len(sites))
-	var totalClicks, totalImpr int64
-	for _, s := range sites {
-		a := byID[s.id]
-		if a == nil {
-			a = &agg{}
+	// Per-user error summary so the admin can tell "nobody has synced" vs
+	// "one user's token expired".
+	userErrors := []gin.H{}
+	for _, r := range results {
+		if r.errMsg != "" {
+			userErrors = append(userErrors, gin.H{
+				"user_id":    r.userID,
+				"owner_name": r.ownerName,
+				"error":      r.errMsg,
+			})
 		}
-		totalClicks += a.clicks
-		totalImpr += a.impressions
-		card := gin.H{
-			"site_id":      s.id,
-			"display_name": displayNameForSite(s.name, s.domain),
-			"site_url":     s.domain,
-			"name":         s.name,
-			"domain":       s.domain,
-			"owner_id":     s.ownerID,
-			"owner_name":   s.ownerName,
-			"has_data":     a.hasData,
-		}
-		switch platform {
-		case "ga4":
-			card["sessions"] = a.clicks
-			card["total_users"] = a.impressions
-		default:
-			card["clicks"] = a.clicks
-			card["impressions"] = a.impressions
-			card["ctr"] = a.ctr
-			card["position"] = a.position
-		}
-		if platform == "yandex" {
-			// position slot was repurposed for index_count
-			card["index_count"] = int64(a.position)
-			delete(card, "position")
-			delete(card, "ctr")
-		}
-		cards = append(cards, card)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
-		"cards":    cards,
-		"platform": platform,
-		"range":    gin.H{"start": startDate, "end": endDate},
+		"platform":    platform,
+		"range":       gin.H{"start": sd, "end": ed},
+		"cards":       out,
+		"user_errors": userErrors,
 		"summary": gin.H{
-			"total_sites":  len(cards),
-			"total_owners": countDistinctOwners(sites),
-			"total_clicks": totalClicks,
-			"total_impr":   totalImpr,
+			"total_sites":    len(out),
+			"total_owners":   len(ownerSet),
+			"total_clicks":   totalClicks,
+			"total_impr":     totalImpr,
+			"total_sessions": totalSessions,
+			"total_users":    totalUsers,
 		},
 	}})
 }
 
-func displayNameForSite(name, domain string) string {
-	if strings.TrimSpace(name) != "" {
-		return name
+// listUsersWithPlatformBinding returns {id, name} for every user whose
+// credential row for the platform exists. Optional filterUserID narrows
+// to a single user (admin UI dropdown). Order: name ASC for stable
+// rendering.
+func listUsersWithPlatformBinding(platform, filterUserID string) []struct {
+	id   int64
+	name string
+} {
+	var q string
+	switch platform {
+	case "gsc":
+		q = `SELECT DISTINCT u.id, u.name
+		     FROM user_oauth_tokens t
+		     JOIN users u ON u.id = t.user_id
+		     WHERE t.service = 'gsc' AND t.access_token != ''`
+	case "ga4":
+		q = `SELECT DISTINCT u.id, u.name
+		     FROM user_oauth_tokens t
+		     JOIN users u ON u.id = t.user_id
+		     WHERE t.service = 'ga' AND t.access_token != ''`
+	case "yandex":
+		q = `SELECT DISTINCT u.id, u.name
+		     FROM user_oauth_tokens t
+		     JOIN users u ON u.id = t.user_id
+		     WHERE t.service = 'yandex' AND t.access_token != ''`
+	case "bing":
+		q = `SELECT u.id, u.name
+		     FROM user_bing b
+		     JOIN users u ON u.id = b.user_id
+		     WHERE b.api_key != ''`
+	default:
+		return nil
 	}
-	return domain
-}
+	args := []interface{}{}
+	if filterUserID != "" {
+		q += " AND u.id = ?"
+		args = append(args, filterUserID)
+	}
+	q += " ORDER BY u.name ASC"
 
-func countDistinctOwners(sites []globalSiteInfo) int {
-	seen := map[int64]bool{}
-	for _, s := range sites {
-		if s.ownerID > 0 {
-			seen[s.ownerID] = true
-		}
+	rows, err := db.DB.Query(q, args...)
+	if err != nil {
+		log.Printf("[global-data] list bound users (%s): %v", platform, err)
+		return nil
 	}
-	return len(seen)
+	defer rows.Close()
+
+	out := []struct {
+		id   int64
+		name string
+	}{}
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			continue
+		}
+		out = append(out, struct {
+			id   int64
+			name string
+		}{id, name})
+	}
+	return out
 }
 
 // isYMD validates YYYY-MM-DD strictly — no timezones, no times.
@@ -231,8 +253,3 @@ func isYMD(s string) bool {
 	}
 	return true
 }
-
-// _unused keeps fmt imported without forcing an import line on every
-// future tweak; the aggregation queries above use it via printf-style
-// helpers added later.
-var _ = fmt.Sprintf

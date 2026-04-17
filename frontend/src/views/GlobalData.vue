@@ -69,65 +69,72 @@
       <div
         v-for="(c, idx) in cards"
         :key="idx"
-        :class="['site-card', !c.has_data && 'site-card-empty']"
-        @click="openSite(c)"
+        :class="['site-card', !c.has_data && 'site-card-empty', c.error && 'site-card-err']"
+        @click="openCard(c)"
       >
         <div class="card-head">
-          <div class="card-title">{{ c.display_name || c.name || c.domain }}</div>
-          <span v-if="!c.has_data" class="card-tag tag-muted">无数据</span>
+          <div class="card-title">{{ c.display_name || c.site_url || c.host_id || c.property_id }}</div>
+          <span v-if="c.error" class="card-tag tag-err">错误</span>
+          <span v-else-if="!c.has_data" class="card-tag tag-muted">无数据</span>
         </div>
-        <div class="card-sub">{{ c.domain }}</div>
+        <div class="card-sub">{{ cardSubtitle(c) }}</div>
         <div class="card-owner" v-if="c.owner_name">
           <span class="owner-icon">👤</span>{{ c.owner_name }}
         </div>
+        <div v-if="c.error" class="card-err-msg">{{ c.error }}</div>
 
-        <!-- GSC / Bing: clicks / impressions / ctr / position -->
-        <div v-if="platform === 'gsc' || platform === 'bing'" class="card-kpis">
-          <div class="kpi">
-            <div class="kpi-label">点击</div>
-            <div class="kpi-value sv-blue">{{ fmt(c.clicks) }}</div>
+        <!-- GSC / Bing / Yandex: clicks / impressions / ctr / position -->
+        <template v-else-if="platform !== 'ga4'">
+          <div class="card-kpis">
+            <div class="kpi">
+              <div class="kpi-label">点击</div>
+              <div class="kpi-value sv-blue">{{ fmt(c.clicks) }}</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">展示</div>
+              <div class="kpi-value sv-green">{{ fmt(c.impressions) }}</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">CTR</div>
+              <div class="kpi-value sv-orange">{{ ((c.ctr || 0) * 100).toFixed(2) }}%</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">{{ platform === 'yandex' ? '平均位置' : '平均排名' }}</div>
+              <div class="kpi-value sv-purple">{{ (c.position || 0).toFixed(1) }}</div>
+            </div>
           </div>
-          <div class="kpi">
-            <div class="kpi-label">展示</div>
-            <div class="kpi-value sv-green">{{ fmt(c.impressions) }}</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-label">CTR</div>
-            <div class="kpi-value sv-orange">{{ ((c.ctr || 0) * 100).toFixed(2) }}%</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-label">平均排名</div>
-            <div class="kpi-value sv-purple">{{ (c.position || 0).toFixed(1) }}</div>
-          </div>
-        </div>
+        </template>
 
-        <!-- GA4: sessions / users -->
-        <div v-else-if="platform === 'ga4'" class="card-kpis">
-          <div class="kpi">
-            <div class="kpi-label">会话</div>
-            <div class="kpi-value sv-blue">{{ fmt(c.sessions) }}</div>
+        <!-- GA4: sessions / users / newUsers / pageViews -->
+        <template v-else>
+          <div class="card-kpis">
+            <div class="kpi">
+              <div class="kpi-label">会话</div>
+              <div class="kpi-value sv-blue">{{ fmt(c.sessions) }}</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">用户</div>
+              <div class="kpi-value sv-green">{{ fmt(c.total_users) }}</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">新用户</div>
+              <div class="kpi-value sv-orange">{{ fmt(c.new_users) }}</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">浏览量</div>
+              <div class="kpi-value sv-purple">{{ fmt(c.screen_page_views) }}</div>
+            </div>
           </div>
-          <div class="kpi">
-            <div class="kpi-label">用户</div>
-            <div class="kpi-value sv-green">{{ fmt(c.total_users) }}</div>
-          </div>
-        </div>
+        </template>
+      </div>
+    </div>
 
-        <!-- Yandex: clicks / impressions / index_count -->
-        <div v-else class="card-kpis">
-          <div class="kpi">
-            <div class="kpi-label">点击</div>
-            <div class="kpi-value sv-blue">{{ fmt(c.clicks) }}</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-label">展示</div>
-            <div class="kpi-value sv-green">{{ fmt(c.impressions) }}</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-label">收录数</div>
-            <div class="kpi-value sv-purple">{{ fmt(c.index_count) }}</div>
-          </div>
-        </div>
+    <!-- Per-user error toast list so admin knows who needs to re-auth -->
+    <div v-if="userErrors.length" class="user-errors panel">
+      <div class="err-head">⚠ 部分用户数据获取失败</div>
+      <div v-for="e in userErrors" :key="e.user_id" class="err-row">
+        <span class="err-user">👤 {{ e.owner_name }}</span>
+        <span class="err-msg">{{ e.error }}</span>
       </div>
     </div>
   </div>
@@ -135,11 +142,8 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
-
-const router = useRouter()
 
 // ── Platforms ────────────────────────────────────────────────────────────
 const platforms = [
@@ -200,6 +204,7 @@ const loading = ref(false)
 const error = ref('')
 const cards = ref([])
 const summary = ref(null)
+const userErrors = ref([])
 const users = ref([])
 const filterUser = ref(null)
 
@@ -220,6 +225,7 @@ async function load(bypassCache) {
     if (hit && Date.now() - hit.at < 5 * 60 * 1000) {
       cards.value = hit.data.cards || []
       summary.value = hit.data.summary || null
+      userErrors.value = hit.data.user_errors || []
       return
     }
   }
@@ -234,6 +240,7 @@ async function load(bypassCache) {
     })
     cards.value = res.data?.cards || []
     summary.value = res.data?.summary || null
+    userErrors.value = res.data?.user_errors || []
     cache.set(k, { at: Date.now(), data: res.data })
   } catch (e) {
     error.value = e?.response?.data?.error || '加载失败'
@@ -243,13 +250,24 @@ async function load(bypassCache) {
   }
 }
 
-function openSite(c) {
-  if (!c.site_id) {
-    ElMessage.warning('无法打开站点详情')
-    return
+// Provider-side sites aren't rows in our `sites` table so they don't have
+// a route to drill into. For now clicking a card just shows a toast with
+// the provider's identifier — the admin uses this page for at-a-glance
+// health check, not deep per-site analysis. Deep drilldown stays in the
+// owner's own 数据管理 page where they can click from.
+function openCard(c) {
+  const ident = c.site_url || c.property_id || c.host_id || c.display_name
+  ElMessage.info(`${c.owner_name || '(未知)'} · ${ident}`)
+}
+
+function cardSubtitle(c) {
+  switch (platform.value) {
+    case 'gsc':    return c.is_domain ? 'Domain Property' : (c.site_url || '')
+    case 'ga4':    return c.account_name ? '账户：' + c.account_name : ''
+    case 'bing':   return c.site_url || ''
+    case 'yandex': return c.host_id || ''
   }
-  // Go to the site's per-platform data page (the user-scoped DataCenter).
-  router.push(`/sites/${c.site_id}/data`)
+  return ''
 }
 
 function fmt(n) {
@@ -353,4 +371,17 @@ onMounted(async () => {
 .state-placeholder, .state-empty, .state-error { padding: 60px 20px; text-align: center; color: var(--ink-hint); font-size: 14px; }
 .state-error { color: #B91C1C; }
 .err-title { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+
+.site-card-err { border-color: #FECACA; background: #FEF2F2; }
+.tag-err { background: #FEE2E2; color: #B91C1C; }
+.card-err-msg { font-size: 12px; color: #B91C1C; background: #FEF2F2; padding: 8px 10px; border-radius: 6px; margin-top: 6px; }
+
+.user-errors {
+  margin-top: 18px; padding: 14px 18px;
+  background: #FEF3C7; border: 1.5px solid #FCD34D;
+}
+.err-head { font-size: 13px; font-weight: 800; color: #92400E; margin-bottom: 8px; }
+.err-row { display: flex; gap: 14px; font-size: 12px; padding: 4px 0; }
+.err-user { font-weight: 700; color: #92400E; min-width: 120px; }
+.err-msg { color: #78350F; font-family: 'JetBrains Mono', monospace; }
 </style>
