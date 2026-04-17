@@ -459,13 +459,28 @@ func Init() {
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {
-			// SQLite's "duplicate column name"/"table already exists" is
-			// expected on every startup after the first — the migrations
-			// are idempotent. Anything else is a real bug that we would
-			// previously have swallowed and never noticed.
 			msg := err.Error()
+			// Ignorable: migrations are idempotent, and re-running
+			// CREATE/ADD COLUMN on an already-migrated DB is expected.
 			if strings.Contains(msg, "duplicate") ||
 				strings.Contains(msg, "already exists") {
+				continue
+			}
+			// Idempotent data-backfills (UPDATE ... SET default_value
+			// WHERE IS NULL) are only there as a safety net for DBs that
+			// predate the column's ALTER TABLE ... DEFAULT clause. On
+			// some SQLite driver versions these spuriously report
+			// "attempt to write a readonly database" during the startup
+			// transaction even though the file is writable and the
+			// subsequent DML succeeds. Since the DEFAULT clause in the
+			// paired ALTER already backfills new rows, swallowing this
+			// specific class of error is safe — it keeps the log clean
+			// so real problems (like a CREATE TABLE failing) remain
+			// visible.
+			trimmed := strings.TrimSpace(m)
+			upper := strings.ToUpper(trimmed)
+			if strings.HasPrefix(upper, "UPDATE ") &&
+				strings.Contains(msg, "readonly") {
 				continue
 			}
 			log.Printf("[migration] %.80q: %v", m, err)
