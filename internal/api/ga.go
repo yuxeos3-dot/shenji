@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -294,6 +295,9 @@ func SyncGAData(c *gin.Context) {
 	})
 	db.DB.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
 		fmt.Sprintf("ga_extra_%s", siteID), string(extraJSON))
+	if sid, err := strconv.ParseInt(siteID, 10, 64); err == nil {
+		InvalidateGA(sid)
+	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
 		"message": "GA4 数据同步成功",
@@ -303,42 +307,10 @@ func SyncGAData(c *gin.Context) {
 }
 
 func GetGAData(c *gin.Context) {
-	siteID := c.Param("id")
-	rows, err := db.DB.Query(
-		"SELECT date, sessions, users, pageviews, bounce_rate, avg_duration, channels_json, pages_json FROM ga_data WHERE site_id = ? ORDER BY date DESC LIMIT 30",
-		siteID,
-	)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
-		return
+	siteID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	rows, extra := CachedGA(siteID)
+	if extra == nil {
+		extra = json.RawMessage("null")
 	}
-	defer rows.Close()
-	var data []gin.H
-	for rows.Next() {
-		var date, channelsJSON, pagesJSON string
-		var sessions, users, pageviews int
-		var bounceRate, avgDuration float64
-		if err := rows.Scan(&date, &sessions, &users, &pageviews, &bounceRate, &avgDuration, &channelsJSON, &pagesJSON); err != nil {
-			continue
-		}
-		data = append(data, gin.H{
-			"date": date, "sessions": sessions, "users": users, "pageviews": pageviews,
-			"bounce_rate": bounceRate, "avg_duration": avgDuration,
-			"channels_json": json.RawMessage(channelsJSON),
-			"pages_json":    json.RawMessage(pagesJSON),
-		})
-	}
-
-	// Fetch extra data
-	var extraStr string
-	db.DB.QueryRow("SELECT value FROM settings WHERE key = ?",
-		fmt.Sprintf("ga_extra_%s", siteID)).Scan(&extraStr)
-
-	if data == nil {
-		data = []gin.H{}
-	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": data, "extra": json.RawMessage(func() string {
-		if extraStr == "" { return "null" }
-		return extraStr
-	}())})
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": rows, "extra": extra})
 }

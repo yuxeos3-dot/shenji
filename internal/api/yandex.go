@@ -386,6 +386,9 @@ func SyncYandexData(c *gin.Context) {
 		"INSERT OR REPLACE INTO yandex_data (site_id, date, clicks, impressions, index_count, keywords_json, errors_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		siteID, date, totalClicks, totalImpressions, indexCount, keywordsJSON, errorsJSON,
 	)
+	if sid, err := strconv.ParseInt(siteID, 10, 64); err == nil {
+		InvalidateYandex(sid)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
@@ -420,34 +423,6 @@ func matchYandexToGSC(yandexHost, gscURL string) bool {
 }
 
 func GetYandexData(c *gin.Context) {
-	siteID := c.Param("id")
-
-	rows, err := db.DB.Query(
-		"SELECT date, clicks, impressions, index_count, keywords_json, errors_json FROM yandex_data WHERE site_id = ? ORDER BY date DESC LIMIT 30",
-		siteID,
-	)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
-		return
-	}
-	defer rows.Close()
-
-	var data []gin.H
-	for rows.Next() {
-		var date, keywordsJSON, errorsJSON string
-		var clicks, impressions, indexCount int
-		if err := rows.Scan(&date, &clicks, &impressions, &indexCount, &keywordsJSON, &errorsJSON); err != nil {
-			continue
-		}
-		data = append(data, gin.H{
-			"date": date, "clicks": clicks, "impressions": impressions,
-			"index_count":   indexCount,
-			"keywords_json": json.RawMessage(keywordsJSON),
-			"errors_json":   json.RawMessage(errorsJSON),
-		})
-	}
-	if data == nil {
-		data = []gin.H{}
-	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": data})
+	siteID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": CachedYandex(siteID)})
 }

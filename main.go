@@ -27,6 +27,12 @@ func main() {
 	// Initialize database
 	db.Init()
 
+	// Warm the 4-platform data cache right after the DB is ready so first
+	// request hits a primed cache. Done in a goroutine — the HTTP server
+	// comes up immediately; if an early read loses the race it'll lazy-load
+	// the single site on demand.
+	go api.WarmDataCache()
+
 	// Start scheduler
 	scheduler.Start()
 	defer scheduler.Stop()

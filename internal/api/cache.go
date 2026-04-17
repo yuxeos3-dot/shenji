@@ -24,8 +24,28 @@ func ListCaches(c *gin.Context) {
 	ipCount, _ := middleware.IPWhitelistCacheStats()
 	lockTracked, lockActive := LockoutStats()
 	dlTracked, dlRunning := DeadlinkProgressStats()
+	platformStats := DataCacheStats()
+	platformEntry := func(key, label, desc string) CacheEntry {
+		s := platformStats[key]
+		return CacheEntry{
+			Key:         "data_" + key,
+			Label:       label,
+			Description: desc,
+			Size:        s.Rows,
+			Extra:       intToStr(s.Sites, "个站点"),
+			CanClear:    true,
+		}
+	}
 
 	entries := []CacheEntry{
+		platformEntry("gsc", "GSC 数据缓存",
+			"数据管理页读取的 GSC 行（每站点最多 30 行）。登录后 warm 一次，同步后自动刷新。清空后下次读接口会按站点按需从 DB 补回。"),
+		platformEntry("ga", "GA4 数据缓存",
+			"数据管理页读取的 GA4 行（每站点最多 30 行）+ 扩展 blob（devices/countries/trend）。登录后 warm 一次，同步后自动刷新。"),
+		platformEntry("bing", "Bing 数据缓存",
+			"数据管理页读取的 Bing 行（每站点最多 30 行）。登录后 warm 一次，同步后自动刷新。"),
+		platformEntry("yandex", "Yandex 数据缓存",
+			"数据管理页读取的 Yandex 行（每站点最多 30 行）。登录后 warm 一次，同步后自动刷新。"),
 		{
 			Key: "ip_whitelist", Label: "IP 白名单缓存",
 			Description: "从 settings 表读出的 IP/CIDR 列表，30 秒过期。清空后下一次请求会重读 DB。",
@@ -84,6 +104,14 @@ func ListCaches(c *gin.Context) {
 func ClearCache(c *gin.Context) {
 	key := c.Param("key")
 	switch key {
+	case "data_gsc":
+		ClearDataCachePlatform("gsc")
+	case "data_ga":
+		ClearDataCachePlatform("ga")
+	case "data_bing":
+		ClearDataCachePlatform("bing")
+	case "data_yandex":
+		ClearDataCachePlatform("yandex")
 	case "ip_whitelist":
 		middleware.InvalidateIPWhitelistCache()
 	case "online_users":

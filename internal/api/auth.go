@@ -83,6 +83,11 @@ func Login(c *gin.Context) {
 	// double-submit header).
 	csrf := middleware.IssueCSRFToken(c, secure)
 
+	// Warm the platform data cache asynchronously so the user lands on the
+	// data management page with everything already in memory. Uses TryLock
+	// internally, so simultaneous logins collapse into a single reload.
+	go WarmDataCache()
+
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"data": gin.H{

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -188,6 +189,9 @@ func SyncBingData(c *gin.Context) {
 		toStr(results["queries"]), toStr(results["pages"]),
 		toStr(results["crawl"]), toStr(results["errors"]),
 	)
+	if sid, err := strconv.ParseInt(siteID, 10, 64); err == nil {
+		InvalidateBing(sid)
+	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
 		"message":     "Bing 数据同步成功",
@@ -200,39 +204,6 @@ func SyncBingData(c *gin.Context) {
 }
 
 func GetBingData(c *gin.Context) {
-	siteID := c.Param("id")
-	rows, err := db.DB.Query(
-		`SELECT date, clicks, impressions, ctr, avg_position, index_count,
-		 queries_json, pages_json, crawl_json, errors_json
-		 FROM bing_data WHERE site_id = ? ORDER BY date DESC LIMIT 30`,
-		siteID,
-	)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
-		return
-	}
-	defer rows.Close()
-
-	var data []gin.H
-	for rows.Next() {
-		var date, queriesJSON, pagesJSON, crawlJSON, errorsJSON string
-		var clicks, impressions, indexCount int
-		var ctr, avgPosition float64
-		if err := rows.Scan(&date, &clicks, &impressions, &ctr, &avgPosition, &indexCount,
-			&queriesJSON, &pagesJSON, &crawlJSON, &errorsJSON); err != nil {
-			continue
-		}
-		data = append(data, gin.H{
-			"date": date, "clicks": clicks, "impressions": impressions,
-			"ctr": ctr, "avg_position": avgPosition, "index_count": indexCount,
-			"queries_json": json.RawMessage(queriesJSON),
-			"pages_json":   json.RawMessage(pagesJSON),
-			"crawl_json":   json.RawMessage(crawlJSON),
-			"errors_json":  json.RawMessage(errorsJSON),
-		})
-	}
-	if data == nil {
-		data = []gin.H{}
-	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": data})
+	siteID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": CachedBing(siteID)})
 }

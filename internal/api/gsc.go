@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -333,6 +334,9 @@ func SyncGSCData(c *gin.Context) {
 		siteID, ed, totalClicks, totalImpressions, avgCTR, avgPosition,
 		keywordsJSON, pagesJSON, devicesJSON, countriesJSON,
 	)
+	if sid, err := strconv.ParseInt(siteID, 10, 64); err == nil {
+		InvalidateGSC(sid)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
@@ -361,38 +365,14 @@ func extractRows(raw json.RawMessage) string {
 }
 
 func GetGSCData(c *gin.Context) {
-	siteID := c.Param("id")
-	days := c.DefaultQuery("days", "30")
-
-	rows, err := db.DB.Query(
-		"SELECT date, clicks, impressions, ctr, position, keywords_json, pages_json, devices_json, countries_json FROM gsc_data WHERE site_id = ? ORDER BY date DESC LIMIT ?",
-		siteID, days,
-	)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
-		return
+	siteID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	days, _ := strconv.Atoi(c.DefaultQuery("days", "30"))
+	if days < 1 {
+		days = 30
 	}
-	defer rows.Close()
-
-	var data []gin.H
-	for rows.Next() {
-		var date, keywords, pages, devices, countries string
-		var clicks, impressions int
-		var ctr, position float64
-		if err := rows.Scan(&date, &clicks, &impressions, &ctr, &position, &keywords, &pages, &devices, &countries); err != nil {
-			continue
-		}
-		data = append(data, gin.H{
-			"date": date, "clicks": clicks, "impressions": impressions,
-			"ctr": ctr, "position": position,
-			"keywords_json": json.RawMessage(keywords), "pages_json": json.RawMessage(pages),
-			"devices_json": json.RawMessage(devices), "countries_json": json.RawMessage(countries),
-		})
-	}
-	if data == nil {
-		data = []gin.H{}
-	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": data})
+	// Cache-first: CachedGSC lazily loads from DB on miss so the first ever
+	// read for a site still works without waiting for a login warm-up.
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": CachedGSC(siteID, days)})
 }
 
 // StoreSiteKeywords receives keyword data pushed from browser (gsc-dashboard.html)
@@ -459,6 +439,7 @@ func StoreSiteKeywords(c *gin.Context) {
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		siteID, date, req.Clicks, req.Impressions, req.CTR, req.Position, kw, pg, dv, ct,
 	)
+	InvalidateGSC(siteID)
 
 	// keyword_count = number of elements in the keywords JSON array, not comma-split.
 	kwCount := 0
