@@ -34,6 +34,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'settings', name: 'Settings', component: () => import('../views/Settings.vue') },
       { path: 'personal-center', name: 'PersonalCenter', component: () => import('../views/PersonalCenter.vue') },
       { path: 'users', name: 'Users', component: () => import('../views/Users.vue') },
+      { path: 'users-monitor', name: 'UserMonitor', component: () => import('../views/UserMonitor.vue') },
       { path: 'cache-management', name: 'CacheManagement', component: () => import('../views/CacheManagement.vue') },
       { path: 'spider-management', name: 'SpiderManagement', component: () => import('../views/SpiderManagement.vue') },
       { path: 'coordination', name: 'Coordination', component: () => import('../views/Coordination.vue') },

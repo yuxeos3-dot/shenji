@@ -110,7 +110,6 @@ const pwdForm = ref({ old_password: '', new_password: '' })
 
 const topItems = [
   { path: '/dashboard', icon: '📊', label: '仪表盘' },
-  { path: '/personal-center', icon: '🧑', label: '个人中心' },
 ]
 
 const groups = [
@@ -141,21 +140,37 @@ const groups = [
     ],
   },
   {
-    key: 'system', icon: '⚙️', label: '系统', adminOnly: true,
+    // 系统管理 group. Non-admin members only see 个人中心 here; admins see
+    // the full management toolbox. We don't gate the whole group by role
+    // anymore because every user needs access to their own API keys.
+    key: 'system', icon: '⚙️', label: '系统管理',
     items: [
-      { path: '/users',            icon: '👥', label: '用户管理' },
-      { path: '/cache-management', icon: '💾', label: '缓存管理' },
-      { path: '/settings',         icon: '⚙️', label: '系统管理' },
+      { path: '/personal-center',  icon: '🧑', label: '个人中心' },
+      { path: '/users',            icon: '👥', label: '用户管理',   adminOnly: true },
+      { path: '/users-monitor',    icon: '📡', label: '用户监控',   adminOnly: true },
+      { path: '/cache-management', icon: '💾', label: '缓存管理',   adminOnly: true },
+      { path: '/settings',         icon: '⚙️', label: '系统设置',   adminOnly: true },
     ],
   },
 ]
 
 const flatTop = computed(() => topItems)
 
-// Filter out admin-only groups for non-admins. Still a group (for
-// structural consistency) — admins see all groups.
-const visibleGroups = computed(() =>
-  groups.filter(g => !g.adminOnly || userStore.isAdmin()))
+// Per-role filtering. A group is visible when:
+//   - the group isn't admin-only, OR the user is admin, AND
+//   - at least one of its items is visible under the user's role.
+// Items can also be marked adminOnly individually. Non-admins see only
+// their own-scoped items (e.g. 个人中心) inside a mostly-admin group.
+const visibleGroups = computed(() => {
+  const isAdmin = userStore.isAdmin()
+  return groups
+    .filter(g => !g.adminOnly || isAdmin)
+    .map(g => ({
+      ...g,
+      items: g.items.filter(it => !it.adminOnly || isAdmin),
+    }))
+    .filter(g => g.items.length > 0)
+})
 
 // Collapse state: keyed by group key. Default = ALL COLLAPSED (per
 // product decision — menu is dense, user prefers to expand on demand).
@@ -166,7 +181,10 @@ const visibleGroups = computed(() =>
 // collapsed; ensureCurrentGroupOpen() will then pop open whichever
 // group contains the current route so the user always sees their
 // current location.
-const COLLAPSE_KEY = 'nav-collapsed'
+// Bumped to v2 alongside the "no auto-expand + collapsed-by-default"
+// decision; existing users (who had every group expanded by habit)
+// reset to the clean collapsed state on next load.
+const COLLAPSE_KEY = 'nav-collapsed-v2'
 const collapsed = ref(new Set())
 const hasSaved = (() => {
   try { return localStorage.getItem(COLLAPSE_KEY) != null } catch { return false }
@@ -192,26 +210,12 @@ function toggleGroup(key) {
   } catch { /* quota / privacy mode, lose state silently */ }
 }
 
-// Auto-expand the group containing the current route. Runs on mount and
-// whenever the route changes. If the user had explicitly collapsed that
-// group we don't override them (collapsed set is sticky); but on first
-// load, if they land directly on a route inside a collapsed group, we
-// pop it open so they can see where they are.
-function ensureCurrentGroupOpen() {
-  const cur = route.path
-  for (const g of groups) {
-    const match = g.items.some(it =>
-      cur === it.path || (it.activePrefix && cur.startsWith(it.activePrefix)))
-    if (match && collapsed.value.has(g.key)) {
-      const next = new Set(collapsed.value)
-      next.delete(g.key)
-      collapsed.value = next
-      try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...next])) } catch {}
-      return
-    }
-  }
-}
-watch(() => route.path, ensureCurrentGroupOpen, { immediate: true })
+// Per product decision: NO auto-expand on navigation. The sidebar stays
+// fully collapsed until the user manually clicks a group header. This is
+// a deliberate minimalism choice — the menu is dense and most sessions
+// only touch 1-2 groups, so popping open three or four on every route
+// change was noisy. Users who want a group to stay open can click it
+// once and the state sticks via localStorage.
 
 function isActive(item) {
   if (item.activePrefix) return route.path.startsWith(item.activePrefix)
@@ -236,8 +240,9 @@ const pageTitles = {
   '/reports/monthly': '月汇报',
   '/reports/monthly/new': '生成月汇报',
   '/users': '用户管理',
+  '/users-monitor': '用户监控',
   '/cache-management': '缓存管理',
-  '/settings': '系统管理',
+  '/settings': '系统设置',
   '/personal-center': '个人中心',
 }
 const pageTitle = computed(() => {

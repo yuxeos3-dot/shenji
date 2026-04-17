@@ -174,8 +174,11 @@ func main() {
 			users.PUT("/:id/permissions", api.SaveUserPermissions)
 			users.GET("/permission-tree", api.GetPermissionTree)
 			// Admin monitoring: see which platforms a user has configured
-			// without exposing the plaintext secrets themselves.
+			// without exposing the plaintext secrets themselves. Overview
+			// aggregates site / coord / platform counts for the 用户监控
+			// page header.
 			users.GET("/:id/platform-status", api.GetUserPlatformStatus)
+			users.GET("/:id/overview", api.GetUserOverview)
 		}
 
 		// Organization structure — admin only. Matches the /users pattern

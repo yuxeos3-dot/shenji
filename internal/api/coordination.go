@@ -303,6 +303,16 @@ func ListCoordTasks(c *gin.Context) {
 		where = append(where, "t.assignee_id = ?")
 		args = append(args, a)
 	}
+	// Admin 用户监控 page passes ?involved_user_id=N to list every task
+	// the given user is involved in — either as creator OR assignee.
+	// Only honored for admins; non-admins can't filter across other
+	// users anyway since the endpoint is site-scoped downstream.
+	if v := c.Query("involved_user_id"); v != "" {
+		if role, _ := c.Get("role"); role == "admin" {
+			where = append(where, "(t.created_by = ? OR t.assignee_id = ?)")
+			args = append(args, v, v)
+		}
+	}
 
 	var total int
 	db.DB.QueryRow("SELECT COUNT(*) FROM coordination_tasks t WHERE "+strings.Join(where, " AND "), args...).Scan(&total)

@@ -101,7 +101,10 @@ const api = {
   deleteGroup: (id: Id) => instance.delete(`/v1/org/groups/${id}`),
 
   // Sites
-  listSites: () => instance.get('/v1/sites'),
+  // params: optional { user_id } for admin monitoring — scopes the list
+  // to a specific owner. Without params admin sees everything; non-admin
+  // always sees only their own (backend ignores the filter for them).
+  listSites: (params?: Record<string, any>) => instance.get('/v1/sites', { params }),
   createSite: (data: Record<string, any>) => instance.post('/v1/sites', data),
   getSite: (id: Id) => instance.get(`/v1/sites/${id}`),
   updateSite: (id: Id, data: Record<string, any>) => instance.put(`/v1/sites/${id}`, data),
@@ -244,6 +247,7 @@ const api = {
   getMyFrwApiKey: () => instance.get('/v1/auth/my-frw-apikey'),
   saveMyFrwApiKey: (data: Record<string, any>) => instance.put('/v1/auth/my-frw-apikey', data),
   getUserPlatformStatus: (userId: Id) => instance.get(`/v1/users/${userId}/platform-status`),
+  getUserOverview: (userId: Id) => instance.get(`/v1/users/${userId}/overview`),
   testMyAI: () => instance.post('/v1/auth/test-my-ai'),
 
   listExtlinkPool: () => instance.get('/v1/extlink-pool'),

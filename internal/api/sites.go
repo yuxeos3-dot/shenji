@@ -33,17 +33,30 @@ func ListSites(c *gin.Context) {
 	role, _ := c.Get("role")
 	isAdmin := role == "admin"
 
+	// Admin-only filter: ?user_id=N limits the list to that owner. Used
+	// by the 用户监控 page so the admin can drill into a specific employee's
+	// sites without seeing the full cross-tenant list.
+	filterUser := ""
+	if isAdmin {
+		filterUser = c.Query("user_id")
+	}
+
 	query := `
 		SELECT s.id, s.domain, s.name, s.gsc_site_url, s.ga_property_id, s.yandex_host_id,
-		       s.status, s.created_at,
+		       s.status, s.created_at, COALESCE(s.created_by,0),
+		       COALESCE(u.name,''),
 		       (SELECT status FROM audit_tasks WHERE site_id = s.id ORDER BY id DESC LIMIT 1) as last_audit_status,
 		       (SELECT created_at FROM audit_tasks WHERE site_id = s.id ORDER BY id DESC LIMIT 1) as last_audit_time
-		FROM sites s`
+		FROM sites s
+		LEFT JOIN users u ON u.id = s.created_by`
 
 	var args []interface{}
 	if !isAdmin {
 		query += " WHERE s.created_by = ?"
 		args = append(args, userID)
+	} else if filterUser != "" {
+		query += " WHERE s.created_by = ?"
+		args = append(args, filterUser)
 	}
 	query += " ORDER BY s.id DESC"
 
@@ -56,10 +69,10 @@ func ListSites(c *gin.Context) {
 
 	var sites []gin.H
 	for rows.Next() {
-		var id int64
-		var domain, name, gscURL, gaID, yandexID, status, createdAt string
+		var id, createdBy int64
+		var domain, name, gscURL, gaID, yandexID, status, createdAt, ownerName string
 		var lastAuditStatus, lastAuditTime *string
-		if err := rows.Scan(&id, &domain, &name, &gscURL, &gaID, &yandexID, &status, &createdAt, &lastAuditStatus, &lastAuditTime); err != nil {
+		if err := rows.Scan(&id, &domain, &name, &gscURL, &gaID, &yandexID, &status, &createdAt, &createdBy, &ownerName, &lastAuditStatus, &lastAuditTime); err != nil {
 			continue
 		}
 		sites = append(sites, gin.H{
@@ -71,6 +84,8 @@ func ListSites(c *gin.Context) {
 			"yandex_host_id":    yandexID,
 			"status":            status,
 			"created_at":        createdAt,
+			"created_by":        createdBy,
+			"owner_name":        ownerName,
 			"last_audit_status": lastAuditStatus,
 			"last_audit_time":   lastAuditTime,
 		})

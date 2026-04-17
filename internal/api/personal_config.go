@@ -491,18 +491,10 @@ func GetUserPlatformStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "用户 ID 非法"})
 		return
 	}
-	status := gin.H{
-		"user_id":  uid,
-		"gsc":      oauthStatus(uid, "gsc"),
-		"ga":       oauthStatus(uid, "ga"),
-		"yandex":   oauthStatus(uid, "yandex"),
-		"bing":     simpleBound(uid, "SELECT COALESCE(api_key,'') FROM user_bing WHERE user_id = ?"),
-		"telegram": telegramBound(uid),
-		"frw":      simpleBound(uid, "SELECT COALESCE(frw_apikey,'') FROM users WHERE id = ?"),
-		"ai":       aiBound(uid),
-		"sites":    userSiteCount(uid),
-	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": status})
+	ps := platformsSummary(uid)
+	ps["user_id"] = uid
+	ps["sites"] = userSiteCount(uid)
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": ps})
 }
 
 func oauthStatus(uid int64, svc string) gin.H {
@@ -555,6 +547,109 @@ func userSiteCount(uid int64) int {
 	var n int
 	db.DB.QueryRow(`SELECT COUNT(*) FROM sites WHERE created_by = ?`, uid).Scan(&n)
 	return n
+}
+
+// GetUserOverview GET /api/v1/users/:id/overview (admin only)
+// High-level snapshot used by the 用户监控 page header: basic profile,
+// platform binding booleans, site count by status, coord task count
+// by status. Counts only — detail drills use the existing sites /
+// coord endpoints with ?user_id / ?involved_user_id filters.
+func GetUserOverview(c *gin.Context) {
+	var uid int64
+	if _, err := fmtSscanInt64(c.Param("id"), &uid); err != nil || uid <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "用户 ID 非法"})
+		return
+	}
+
+	// Basic profile. Email + role help admin distinguish members with
+	// the same display name; department + group show org placement.
+	var name, email, role, deptName, groupName string
+	var lastLogin sql.NullString
+	err := db.DB.QueryRow(`
+		SELECT u.name, u.email, u.role, COALESCE(u.last_login,''),
+		       COALESCE(d.name,''), COALESCE(g.name,'')
+		FROM users u
+		LEFT JOIN departments d ON d.id = u.department_id
+		LEFT JOIN dept_groups g ON g.id = u.group_id
+		WHERE u.id = ?`, uid,
+	).Scan(&name, &email, &role, &lastLogin, &deptName, &groupName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "用户不存在"})
+		return
+	}
+
+	// Site counts by audit status.
+	var sitesTotal, sitesHealthy, sitesPending, sitesFailed int
+	db.DB.QueryRow(`SELECT COUNT(*) FROM sites WHERE created_by = ?`, uid).Scan(&sitesTotal)
+	db.DB.QueryRow(`
+		SELECT COUNT(*) FROM sites s
+		WHERE s.created_by = ?
+		  AND (SELECT status FROM audit_tasks WHERE site_id = s.id ORDER BY id DESC LIMIT 1) = 'done'`,
+		uid).Scan(&sitesHealthy)
+	db.DB.QueryRow(`
+		SELECT COUNT(*) FROM sites s
+		WHERE s.created_by = ?
+		  AND (SELECT status FROM audit_tasks WHERE site_id = s.id ORDER BY id DESC LIMIT 1) IS NULL`,
+		uid).Scan(&sitesPending)
+	db.DB.QueryRow(`
+		SELECT COUNT(*) FROM sites s
+		WHERE s.created_by = ?
+		  AND (SELECT status FROM audit_tasks WHERE site_id = s.id ORDER BY id DESC LIMIT 1) = 'error'`,
+		uid).Scan(&sitesFailed)
+
+	// Coord task counts by status for tasks the user is involved in
+	// (created OR assigned). A single query with a CASE/SUM avoids
+	// hitting the DB five times.
+	var coordTotal, coordPending, coordInProgress, coordUnderReview, coordDone int
+	db.DB.QueryRow(`
+		SELECT COUNT(*),
+		       COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0),
+		       COALESCE(SUM(CASE WHEN status='in_progress' THEN 1 ELSE 0 END),0),
+		       COALESCE(SUM(CASE WHEN status='under_review' THEN 1 ELSE 0 END),0),
+		       COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END),0)
+		FROM coordination_tasks
+		WHERE created_by = ? OR assignee_id = ?`,
+		uid, uid,
+	).Scan(&coordTotal, &coordPending, &coordInProgress, &coordUnderReview, &coordDone)
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
+		"user_id":     uid,
+		"name":        name,
+		"email":       email,
+		"role":        role,
+		"last_login":  lastLogin.String,
+		"department":  deptName,
+		"group":       groupName,
+		"platforms":   platformsSummary(uid),
+		"sites": gin.H{
+			"total":     sitesTotal,
+			"healthy":   sitesHealthy,
+			"pending":   sitesPending,
+			"failed":    sitesFailed,
+		},
+		"coord": gin.H{
+			"total":        coordTotal,
+			"pending":      coordPending,
+			"in_progress":  coordInProgress,
+			"under_review": coordUnderReview,
+			"done":         coordDone,
+		},
+	}})
+}
+
+// platformsSummary is the inner helper used by both the overview endpoint
+// and the existing /users/:id/platform-status — factored out so they
+// stay consistent as new platforms get added.
+func platformsSummary(uid int64) gin.H {
+	return gin.H{
+		"gsc":      oauthStatus(uid, "gsc"),
+		"ga":       oauthStatus(uid, "ga"),
+		"yandex":   oauthStatus(uid, "yandex"),
+		"bing":     simpleBound(uid, "SELECT COALESCE(api_key,'') FROM user_bing WHERE user_id = ?"),
+		"telegram": telegramBound(uid),
+		"frw":      simpleBound(uid, "SELECT COALESCE(frw_apikey,'') FROM users WHERE id = ?"),
+		"ai":       aiBound(uid),
+	}
 }
 
 // fmtSscanInt64 is a tiny helper so we don't pull in fmt.Sscanf at call sites.
