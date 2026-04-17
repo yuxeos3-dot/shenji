@@ -177,12 +177,21 @@ func CreateEvaluation(c *gin.Context) {
 	}
 
 	uid := c.GetInt64("user_id")
+	if uid <= 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": "未登录或登录已失效"})
+		return
+	}
 	// Look up evaluator display name for the stored row — we denormalise
 	// so the list endpoint doesn't need to join users (which would
 	// confuse the later "admin renamed" case, where we want the
 	// evaluation to show the name that was in effect at write time).
 	var name string
-	db.DB.QueryRow(`SELECT name FROM users WHERE id = ?`, uid).Scan(&name)
+	if err := db.DB.QueryRow(`SELECT name FROM users WHERE id = ?`, uid).Scan(&name); err != nil && err != sql.ErrNoRows {
+		log.Printf("[eval] evaluator name lookup failed uid=%d: %v", uid, err)
+	}
+	if name == "" {
+		name = fmt.Sprintf("用户#%d", uid)
+	}
 
 	_, err := db.DB.Exec(`
 		INSERT INTO report_evaluations

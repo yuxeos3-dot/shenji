@@ -71,7 +71,9 @@ import api from '../api'
 
 const sites = ref([])
 const online = ref({ online_count: 0, user_count: 0, users: [] })
-let onlineTimer = null
+// ref-scoped timer so HMR / rapid remounts can't leak duplicate intervals
+// (module-level `let onlineTimer = null` would survive a hot reload).
+const onlineTimer = ref(null)
 
 const stats = computed(() => [
   { label: '站点总数', value: sites.value.length, icon: '🌐', cls: 'val-sun', sub: '已接入' },
@@ -87,9 +89,15 @@ async function loadOnline() {
 onMounted(async () => {
   try { const res = await api.listSites(); sites.value = res.data } catch (e) { console.error('加载站点列表失败', e) }
   loadOnline()
-  onlineTimer = setInterval(loadOnline, 30000) // refresh every 30s
+  if (onlineTimer.value) clearInterval(onlineTimer.value)
+  onlineTimer.value = setInterval(loadOnline, 30000) // refresh every 30s
 })
-onUnmounted(() => { if (onlineTimer) clearInterval(onlineTimer) })
+onUnmounted(() => {
+  if (onlineTimer.value) {
+    clearInterval(onlineTimer.value)
+    onlineTimer.value = null
+  }
+})
 </script>
 
 <style scoped>

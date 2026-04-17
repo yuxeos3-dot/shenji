@@ -346,11 +346,16 @@ func (r *userRateLimiter) cleanup() {
 }
 
 // UserRateLimit limits per-user requests to maxPerMinute within a 1-minute window.
+// If user_id is missing or non-positive (e.g. unauthenticated request sneaking
+// past an upstream check, or JWT decoded into an unexpected type), we refuse
+// the request outright — otherwise the rate limiter could be bypassed by any
+// request that happens to zero out user_id in the gin context.
 func UserRateLimit(maxPerMinute int) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetInt64("user_id")
-		if userID == 0 {
-			c.Next()
+		if userID <= 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": "未登录或登录已失效"})
+			c.Abort()
 			return
 		}
 

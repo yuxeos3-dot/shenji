@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -71,8 +72,8 @@ func Login(c *gin.Context) {
 	}
 
 	if _, err := db.DB.Exec("UPDATE users SET last_login = ? WHERE id = ?", time.Now(), id); err != nil {
-		// Non-critical: log but don't fail the login
-		_ = err
+		// Non-critical: don't fail the login, but log so we notice DB issues.
+		log.Printf("[auth] update last_login user=%d failed: %v", id, err)
 	}
 
 	// Set the JWT as an httpOnly cookie so an XSS can't exfiltrate it. The

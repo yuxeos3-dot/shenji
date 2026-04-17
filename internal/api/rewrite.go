@@ -129,8 +129,14 @@ func callRewriteAI(prompt string) (interface{}, error) {
 		"max_tokens":  3000,
 		"temperature": 0.7,
 	}
-	jsonBody, _ := json.Marshal(reqBody)
-	req, _ := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(jsonBody))
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("rewrite 请求体序列化失败: %w", err)
+	}
+	req, err := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("rewrite 构造请求失败: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 

@@ -256,7 +256,17 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("站点 %d 巡检异常: %v", siteID, r)
-			db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg='internal panic', finished_at=? WHERE site_id=? AND status='running'", time.Now(), siteID)
+			// Nested recover: if the mark-failed exec itself panics (e.g.
+			// because the DB handle is unusable), we must not leave the
+			// outer recover without logging anything.
+			defer func() {
+				if rr := recover(); rr != nil {
+					log.Printf("站点 %d mark-failed panic: %v", siteID, rr)
+				}
+			}()
+			if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg='internal panic', finished_at=? WHERE site_id=? AND status='running'", time.Now(), siteID); err != nil {
+				log.Printf("站点 %d mark-failed exec 失败: %v", siteID, err)
+			}
 		}
 	}()
 
@@ -267,10 +277,16 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		log.Printf("创建巡检任务失败 站点%d: %v", siteID, err)
 		return
 	}
-	taskID, _ := result.LastInsertId()
+	taskID, err := result.LastInsertId()
+	if err != nil {
+		log.Printf("创建巡检任务 LastInsertId 失败 站点%d: %v", siteID, err)
+		return
+	}
 
 	updateProgress := func(progress int) {
-		db.DB.Exec("UPDATE audit_tasks SET progress=? WHERE id=?", progress, taskID)
+		if _, err := db.DB.Exec("UPDATE audit_tasks SET progress=? WHERE id=?", progress, taskID); err != nil {
+			log.Printf("[audit %d] update progress failed: %v", taskID, err)
+		}
 	}
 
 	// Step 1: standard page crawl
@@ -304,9 +320,11 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		pageRows.Close()
 		for _, p := range pageList {
 			fp := crawler.FetchPage(crawler.URLSpec{PageType: p.name, URL: p.url}, 30*time.Second)
-			now := time.Now().Format("2006-01-02 15:04:05")
-			db.DB.Exec(`UPDATE site_pages SET last_html=?, last_fetched_at=?, status_code=?, ttfb_ms=? WHERE id=?`,
-				fp.HTML, now, fp.StatusCode, fp.TTFB, p.id)
+			now := time.Now().UTC().Format("2006-01-02 15:04:05")
+			if _, err := db.DB.Exec(`UPDATE site_pages SET last_html=?, last_fetched_at=?, status_code=?, ttfb_ms=? WHERE id=?`,
+				fp.HTML, now, fp.StatusCode, fp.TTFB, p.id); err != nil {
+				log.Printf("[audit %d] update site_pages id=%d failed: %v", taskID, p.id, err)
+			}
 			sitePages = append(sitePages, ai.SitePageForPrompt{
 				Name: p.name, URL: p.url, HTML: fp.HTML,
 				LastFetchedAt: now, StatusCode: fp.StatusCode, TTFB: fp.TTFB,
@@ -372,20 +390,23 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		allChapters = append(allChapters, chs...)
 		updateProgress(65 + ((i + 1) * 15 / batchTotal))
 	}
-	model := lastModel
 
 	if len(allChapters) == 0 {
 		snippet := lastRaw
 		if len(snippet) > 100000 {
 			snippet = snippet[:100000]
 		}
-		db.DB.Exec(
+		if _, err := db.DB.Exec(
 			`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, v6_report, raw_ai_response)
 			 VALUES (?, '[]', '[]', '[]', '[]', '', '', ?, '', ?)`,
-			taskID, model, snippet,
-		)
-		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg='所有技术审计批次均失败', finished_at=? WHERE id=?",
-			time.Now(), taskID)
+			taskID, lastModel, snippet,
+		); err != nil {
+			log.Printf("[audit %d] scheduler insert empty results failed: %v", taskID, err)
+		}
+		if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg='所有技术审计批次均失败', finished_at=? WHERE id=?",
+			time.Now(), taskID); err != nil {
+			log.Printf("[audit %d] scheduler mark-failed failed: %v", taskID, err)
+		}
 		telegram.SendNotification("巡检失败", siteName+": 所有技术审计批次均失败")
 		return
 	}
@@ -429,16 +450,23 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, v6_report)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		taskID, string(seoJSON), string(codeJSON), string(secJSON), string(perfJSON),
-		analysisResult.Suggestions, analysisResult.Summary, model, analysisResult.V6Report,
+		analysisResult.Suggestions, analysisResult.Summary, lastModel, analysisResult.V6Report,
 	); err != nil {
-		tx.Rollback()
+		if rbErr := tx.Rollback(); rbErr != nil {
+			log.Printf("[audit %d] scheduler rollback failed: %v", taskID, rbErr)
+		}
 		log.Printf("[audit %d] scheduler insert results failed: %v", taskID, err)
-		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
-			"写入失败: "+err.Error(), time.Now(), taskID)
+		if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
+			"写入失败: "+err.Error(), time.Now(), taskID); err != nil {
+			log.Printf("[audit %d] scheduler mark-failed failed: %v", taskID, err)
+		}
 		return
 	}
 	if _, err := tx.Exec("UPDATE audit_tasks SET status='done', progress=100, finished_at=? WHERE id=?", time.Now(), taskID); err != nil {
-		tx.Rollback()
+		if rbErr := tx.Rollback(); rbErr != nil {
+			log.Printf("[audit %d] scheduler rollback failed: %v", taskID, rbErr)
+		}
+		log.Printf("[audit %d] scheduler mark-done failed: %v", taskID, err)
 		return
 	}
 	if err := tx.Commit(); err != nil {

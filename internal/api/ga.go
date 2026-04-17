@@ -85,25 +85,40 @@ func GACallback(c *gin.Context) {
 }
 
 func getGAAccessToken() (string, error) {
-	var storedAccess, storedRefresh string
-	var expiresAt time.Time
-	err := db.DB.QueryRow(
-		"SELECT access_token, refresh_token, expires_at FROM oauth_tokens WHERE service = 'ga' ORDER BY id DESC LIMIT 1",
-	).Scan(&storedAccess, &storedRefresh, &expiresAt)
-	if err != nil {
-		return "", fmt.Errorf("GA未授权，请先完成 Google Analytics OAuth")
+	loadToken := func() (access, refresh string, expiresAt time.Time, err error) {
+		var storedAccess, storedRefresh string
+		err = db.DB.QueryRow(
+			"SELECT access_token, refresh_token, expires_at FROM oauth_tokens WHERE service = 'ga' ORDER BY id DESC LIMIT 1",
+		).Scan(&storedAccess, &storedRefresh, &expiresAt)
+		if err != nil {
+			return "", "", time.Time{}, fmt.Errorf("GA未授权，请先完成 Google Analytics OAuth")
+		}
+		access, err = DecryptToken(storedAccess)
+		if err != nil {
+			return "", "", time.Time{}, fmt.Errorf("GA token 解密失败: %w", err)
+		}
+		refresh, err = DecryptToken(storedRefresh)
+		if err != nil {
+			return "", "", time.Time{}, fmt.Errorf("GA refresh token 解密失败: %w", err)
+		}
+		return access, refresh, expiresAt, nil
 	}
-	accessToken, err := DecryptToken(storedAccess)
+
+	accessToken, refreshToken, expiresAt, err := loadToken()
 	if err != nil {
-		return "", fmt.Errorf("GA token 解密失败: %w", err)
-	}
-	refreshToken, err := DecryptToken(storedRefresh)
-	if err != nil {
-		return "", fmt.Errorf("GA refresh token 解密失败: %w", err)
+		return "", err
 	}
 	if time.Now().Before(expiresAt) {
 		return accessToken, nil
 	}
+
+	tokenRefreshMu.Lock()
+	defer tokenRefreshMu.Unlock()
+
+	if accessToken, _, expiresAt, err = loadToken(); err == nil && time.Now().Before(expiresAt) {
+		return accessToken, nil
+	}
+
 	clientID := db.GetSetting("gsc_client_id")
 	clientSecret := db.GetSetting("gsc_client_secret")
 	resp, err := http.PostForm("https://oauth2.googleapis.com/token", map[string][]string{
@@ -120,20 +135,26 @@ func getGAAccessToken() (string, error) {
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int    `json:"expires_in"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOAuthResponseBytes)).Decode(&result); err != nil {
 		return "", fmt.Errorf("GA Token 响应解析失败: %w", err)
 	}
 	if result.AccessToken == "" {
 		return "", fmt.Errorf("GA Token刷新失败，请重新授权")
 	}
-	db.DB.Exec("UPDATE oauth_tokens SET access_token=?, expires_at=? WHERE service='ga'",
-		MustEncryptToken(result.AccessToken), time.Now().Add(time.Duration(result.ExpiresIn)*time.Second))
+	if _, err := db.DB.Exec("UPDATE oauth_tokens SET access_token=?, expires_at=? WHERE service='ga'",
+		MustEncryptToken(result.AccessToken), time.Now().Add(time.Duration(result.ExpiresIn)*time.Second)); err != nil {
+		log.Printf("[ga] persist refreshed token failed: %v", err)
+		return "", fmt.Errorf("GA token 存储失败: %w", err)
+	}
 	return result.AccessToken, nil
 }
 
 func ga4Fetch(token, propertyID string, body map[string]interface{}) (json.RawMessage, error) {
 	apiURL := fmt.Sprintf("https://analyticsdata.googleapis.com/v1beta/properties/%s:runReport", propertyID)
-	jsonBody, _ := json.Marshal(body)
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("GA4 请求体序列化失败: %w", err)
+	}
 	req, err := http.NewRequest("POST", apiURL, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, err

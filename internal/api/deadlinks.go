@@ -29,8 +29,11 @@ type DeadLinkJob struct {
 // DeadlinkProgressStats returns (tracked_sites, running_count) for UI display.
 func DeadlinkProgressStats() (tracked, running int) {
 	deadlinkProgress.Range(func(_, v interface{}) bool {
+		j, ok := v.(*DeadLinkJob)
+		if !ok {
+			return true
+		}
 		tracked++
-		j := v.(*DeadLinkJob)
 		j.mu.Lock()
 		if j.Status == "running" {
 			running++
@@ -46,7 +49,11 @@ func DeadlinkProgressStats() (tracked, running int) {
 // their status. Useful when the UI thinks a stale job is still running.
 func ClearDeadlinkProgress() {
 	deadlinkProgress.Range(func(k, v interface{}) bool {
-		j := v.(*DeadLinkJob)
+		j, ok := v.(*DeadLinkJob)
+		if !ok {
+			deadlinkProgress.Delete(k)
+			return true
+		}
 		j.mu.Lock()
 		notRunning := j.Status != "running"
 		j.mu.Unlock()
@@ -65,7 +72,11 @@ func GetDeadLinks(c *gin.Context) {
 
 	// If a check is running, don't hit DB.
 	if v, ok := deadlinkProgress.Load(siteID); ok {
-		j := v.(*DeadLinkJob)
+		j, ok := v.(*DeadLinkJob)
+		if !ok {
+			deadlinkProgress.Delete(siteID)
+			return
+		}
 		j.mu.Lock()
 		s := j.Status
 		j.mu.Unlock()
@@ -149,7 +160,11 @@ func RetryDeadLinks(c *gin.Context) {
 	}
 
 	if v, ok := deadlinkProgress.Load(siteID); ok {
-		j := v.(*DeadLinkJob)
+		j, ok := v.(*DeadLinkJob)
+		if !ok {
+			deadlinkProgress.Delete(siteID)
+			return
+		}
 		j.mu.Lock()
 		s := j.Status
 		j.mu.Unlock()
@@ -176,7 +191,10 @@ func RetryDeadLinks(c *gin.Context) {
 	var items []deadItem
 	for rows.Next() {
 		var d deadItem
-		rows.Scan(&d.id, &d.url)
+		if err := rows.Scan(&d.id, &d.url); err != nil {
+			log.Printf("[deadlinks] retry scan failed: %v", err)
+			continue
+		}
 		items = append(items, d)
 	}
 
@@ -198,15 +216,9 @@ func RetryDeadLinks(c *gin.Context) {
 
 		sem := make(chan struct{}, 20)
 		var wg sync.WaitGroup
-		client := &http.Client{
-			Timeout: 15 * time.Second,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) >= 5 {
-					return http.ErrUseLastResponse
-				}
-				return nil
-			},
-		}
+		// Reuse the crawler's SSRF-aware client so retries can't be used to
+		// probe internal networks via user-supplied URLs.
+		client := crawler.BuildHTTPClient(15 * time.Second)
 
 		for _, item := range items {
 			wg.Add(1)
@@ -227,13 +239,16 @@ func RetryDeadLinks(c *gin.Context) {
 						sc = -1
 					} else {
 						sc = resp.StatusCode
+						_, _ = io.Copy(io.Discard, resp.Body)
 						resp.Body.Close()
 					}
 				}
 				ttfb := time.Since(start).Milliseconds()
-				now := time.Now().Format("2006-01-02T15:04:05Z")
-				db.DB.Exec("UPDATE dead_link_results SET status_code=?, ttfb_ms=?, checked_at=? WHERE id=?",
-					sc, ttfb, now, d.id)
+				now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+				if _, err := db.DB.Exec("UPDATE dead_link_results SET status_code=?, ttfb_ms=?, checked_at=? WHERE id=?",
+					sc, ttfb, now, d.id); err != nil {
+					log.Printf("[deadlinks] retry update id=%d failed: %v", d.id, err)
+				}
 
 				job.mu.Lock()
 				job.Checked++
@@ -252,13 +267,17 @@ func GetDeadLinkProgress(c *gin.Context) {
 		return
 	}
 	if v, ok := deadlinkProgress.Load(siteID); ok {
-		job := v.(*DeadLinkJob)
-		job.mu.Lock()
-		defer job.mu.Unlock()
-		c.JSON(200, gin.H{"code": 0, "data": gin.H{
-			"status": job.Status, "total": job.Total, "checked": job.Checked, "phase": job.Phase,
-		}})
-		return
+		job, ok := v.(*DeadLinkJob)
+		if !ok {
+			deadlinkProgress.Delete(siteID)
+		} else {
+			job.mu.Lock()
+			defer job.mu.Unlock()
+			c.JSON(200, gin.H{"code": 0, "data": gin.H{
+				"status": job.Status, "total": job.Total, "checked": job.Checked, "phase": job.Phase,
+			}})
+			return
+		}
 	}
 	c.JSON(200, gin.H{"code": 0, "data": gin.H{"status": "idle", "total": 0, "checked": 0, "phase": ""}})
 }
@@ -277,7 +296,11 @@ func StartDeadLinkCheck(c *gin.Context) {
 	}
 
 	if v, ok := deadlinkProgress.Load(siteID); ok {
-		j := v.(*DeadLinkJob)
+		j, ok := v.(*DeadLinkJob)
+		if !ok {
+			deadlinkProgress.Delete(siteID)
+			return
+		}
 		j.mu.Lock()
 		s := j.Status
 		j.mu.Unlock()

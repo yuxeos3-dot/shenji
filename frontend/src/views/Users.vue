@@ -180,6 +180,10 @@ import api from '../api'
 const users = ref([])
 const departments = ref([])
 const groups = ref([])
+// Guard flag so a rapid sequence of mutations (e.g. clicking Save twice) can't
+// fire overlapping `loadAll()` calls that finish out of order and leave the
+// UI showing stale data.
+const loading = ref(false)
 const showDialog = ref(false)
 const editId = ref(null)
 const form = ref({ name:'', email:'', password:'', role:'member', telegram_id:'', department_id:null, group_id:null })
@@ -196,6 +200,8 @@ const groupsByDept = computed(() => {
 })
 
 async function loadAll() {
+  if (loading.value) return
+  loading.value = true
   try {
     const [uRes, dRes, gRes] = await Promise.all([
       api.listUsers(),
@@ -208,6 +214,8 @@ async function loadAll() {
   } catch (e) {
     console.error('加载失败', e)
     ElMessage.error('加载数据失败')
+  } finally {
+    loading.value = false
   }
 }
 

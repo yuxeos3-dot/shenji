@@ -106,6 +106,11 @@ func assertEditable(c *gin.Context, taskID int64) (*coordTask, bool) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "加载任务失败"})
 		return nil, false
 	}
+	// Enforce site-level access so users can't mutate coordination tasks
+	// belonging to sites they don't own (IDOR).
+	if !canAccessSite(c, fmt.Sprintf("%d", t.SiteID)) {
+		return nil, false
+	}
 	if t.Status == coordStatusDone {
 		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "任务已完成，不可修改"})
 		return nil, false
@@ -181,11 +186,13 @@ func recordEvent(taskID int64, eventType, fromStatus, toStatus string, actorID i
 // this runs once per request and the users table stays hot.
 func currentUser(c *gin.Context) (int64, string) {
 	uid := c.GetInt64("user_id")
-	if uid == 0 {
+	if uid <= 0 {
 		return 0, ""
 	}
 	var name string
-	db.DB.QueryRow("SELECT name FROM users WHERE id = ?", uid).Scan(&name)
+	if err := db.DB.QueryRow("SELECT name FROM users WHERE id = ?", uid).Scan(&name); err != nil && err != sql.ErrNoRows {
+		log.Printf("[coord] currentUser(%d) lookup failed: %v", uid, err)
+	}
 	return uid, name
 }
 
@@ -471,7 +478,9 @@ func AssignCoordTask(c *gin.Context) {
 
 	// Look up the name for the timeline
 	var assignName string
-	db.DB.QueryRow("SELECT name FROM users WHERE id = ?", body.AssigneeID).Scan(&assignName)
+	if err := db.DB.QueryRow("SELECT name FROM users WHERE id = ?", body.AssigneeID).Scan(&assignName); err != nil && err != sql.ErrNoRows {
+		log.Printf("[coord] AssignCoordTask(%d) assignee lookup failed: %v", id, err)
+	}
 	if assignName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "指定的开发账号不存在"})
 		return

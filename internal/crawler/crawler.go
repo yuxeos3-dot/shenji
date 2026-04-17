@@ -302,8 +302,18 @@ func FetchPage(spec URLSpec, timeout time.Duration) PageResult {
 		result.Error = err.Error()
 		return result
 	}
-	defer resp.Body.Close()
+	defer func() {
+		// Drain remaining body so the underlying TCP connection can be
+		// reused by the transport's idle pool. Otherwise concurrent
+		// crawls eventually exhaust the connection pool on errored
+		// reads.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 
+	// TTFB is captured at the time the response headers arrive. `client.Do`
+	// returns when the HTTP response is available — the body is still
+	// streaming, so this is a faithful first-byte timing.
 	result.TTFB = time.Since(start).Milliseconds()
 	result.StatusCode = resp.StatusCode
 

@@ -43,6 +43,16 @@ func SendToUser(telegramID, title, message string) {
 	sendMessage(botToken, telegramID, text)
 }
 
+// redactToken replaces the bot token in a string with a placeholder.
+// net/http wraps errors with the full URL (including our embedded bot
+// token) — naïvely logging those errors would spill the secret.
+func redactToken(s, token string) string {
+	if token == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, token, "[REDACTED]")
+}
+
 func sendMessage(botToken, chatID, text string) {
 	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
 
@@ -54,14 +64,14 @@ func sendMessage(botToken, chatID, text string) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.PostForm(apiURL, params)
 	if err != nil {
-		log.Printf("Telegram send failed: %v", err)
+		log.Printf("Telegram send failed: %s", redactToken(err.Error(), botToken))
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("Telegram API error (%d): %s", resp.StatusCode, string(body))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		log.Printf("Telegram API error (%d): %s", resp.StatusCode, redactToken(string(body), botToken))
 	}
 }
 
@@ -81,13 +91,13 @@ func TestConnection() error {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.PostForm(apiURL, params)
 	if err != nil {
-		return fmt.Errorf("发送失败: %w", err)
+		return fmt.Errorf("发送失败: %s", redactToken(err.Error(), botToken))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("API错误 (%d): %s", resp.StatusCode, string(body))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return fmt.Errorf("API错误 (%d): %s", resp.StatusCode, redactToken(string(body), botToken))
 	}
 
 	return nil

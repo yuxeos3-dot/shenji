@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -321,8 +322,15 @@ func HasPermission(c *gin.Context, perm string) bool {
 		return true
 	}
 	userID := c.GetInt64("user_id")
+	if userID <= 0 {
+		// Missing or malformed user_id — never grant permission.
+		return false
+	}
 	var permsJSON string
-	db.DB.QueryRow("SELECT COALESCE(permissions,'') FROM users WHERE id=?", userID).Scan(&permsJSON)
+	if err := db.DB.QueryRow("SELECT COALESCE(permissions,'') FROM users WHERE id=?", userID).Scan(&permsJSON); err != nil && err != sql.ErrNoRows {
+		log.Printf("[permissions] load permissions failed for user %d: %v", userID, err)
+		return false
+	}
 	if permsJSON == "" {
 		return false
 	}

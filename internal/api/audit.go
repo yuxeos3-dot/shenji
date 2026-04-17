@@ -26,6 +26,10 @@ func TriggerAudit(c *gin.Context) {
 	siteID := c.Param("id")
 	userID := c.GetInt64("user_id")
 
+	if !canAccessSite(c, siteID) {
+		return
+	}
+
 	// Check site exists
 	var domain, name, urlCat, urlDet, urlNL, urlND, urlSearch, urlStatic string
 	err := db.DB.QueryRow(
@@ -46,7 +50,11 @@ func TriggerAudit(c *gin.Context) {
 		return
 	}
 
-	taskID, _ := result.LastInsertId()
+	taskID, err := result.LastInsertId()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "获取任务 ID 失败"})
+		return
+	}
 
 	// Run audit asynchronously
 	go runAuditTask(taskID, siteID, crawler.SiteConfig{
@@ -67,6 +75,12 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Audit task %d panicked: %v", taskID, r)
+			// Nested recover: never leave the outer goroutine without logging.
+			defer func() {
+				if rr := recover(); rr != nil {
+					log.Printf("[audit %d] mark-failed panic: %v", taskID, rr)
+				}
+			}()
 			if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
 				"internal panic", time.Now(), taskID); err != nil {
 				log.Printf("[audit %d] mark-failed exec 失败: %v", taskID, err)
@@ -75,7 +89,9 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 	}()
 
 	updateProgress := func(progress int) {
-		db.DB.Exec("UPDATE audit_tasks SET progress=? WHERE id=?", progress, taskID)
+		if _, err := db.DB.Exec("UPDATE audit_tasks SET progress=? WHERE id=?", progress, taskID); err != nil {
+			log.Printf("[audit %d] update progress failed: %v", taskID, err)
+		}
 	}
 
 	log.Printf("[audit %d] 开始巡检 site=%s", taskID, siteName)
@@ -119,7 +135,7 @@ func runAuditTask(taskID int64, siteID string, site crawler.SiteConfig, siteName
 
 		for i, p := range pageList {
 			result := crawler.FetchPage(crawler.URLSpec{PageType: p.name, URL: p.url}, 30*time.Second)
-			now := time.Now().Format("2006-01-02 15:04:05")
+			now := time.Now().UTC().Format("2006-01-02 15:04:05")
 			if _, err := db.DB.Exec(`UPDATE site_pages SET last_html=?, last_fetched_at=?, status_code=?, ttfb_ms=? WHERE id=?`,
 				result.HTML, now, result.StatusCode, result.TTFB, p.id); err != nil {
 				log.Printf("[audit %d] update site_pages failed: %v", taskID, err)

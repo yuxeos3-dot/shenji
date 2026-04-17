@@ -276,7 +276,7 @@ const siteConfig = useSiteConfigStore()
 const activeTab = ref('basic')
 const saving = ref(false)
 const settings = ref({})
-const testing = ref({ ai: false, tg: false })
+const testing = ref({ ai: false, tg: false, gsc: false, ga: false, yandex: false })
 const aiSlots = ref([{api_url:'',api_key:'',model:''},{api_url:'',api_key:'',model:''},{api_url:'',api_key:'',model:''}])
 const aiTestResults = ref([])
 const clientIP = ref('')
@@ -389,9 +389,41 @@ async function testTG() { testing.value.tg = true; try { const res = await api.t
 // window.open) so that Google/Yandex's 302 redirect back to our
 // /oauth/*/callback lands in the same tab the user started from —
 // avoiding the "each authorize spawns a new tab" problem users saw.
-async function authGSC() { try { const res = await api.getGSCAuthURL(); window.location.href = res.data.url } catch (e) { console.error(e) } }
-async function authGA() { try { const res = await api.getGAAuthURL(); window.location.href = res.data.url } catch (e) { console.error(e) } }
-async function authYandex() { try { const res = await api.getYandexAuthURL(); window.location.href = res.data.url } catch (e) { console.error(e) } }
+// Each handler flips a loading flag and surfaces any API error to the user
+// so a failed authorize attempt doesn't look like a silent no-op.
+async function authGSC() {
+  testing.value.gsc = true
+  try {
+    const res = await api.getGSCAuthURL()
+    if (res?.data?.url) window.location.href = res.data.url
+    else ElMessage.error('GSC 授权 URL 为空')
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.error || 'GSC 授权发起失败')
+  } finally { testing.value.gsc = false }
+}
+async function authGA() {
+  testing.value.ga = true
+  try {
+    const res = await api.getGAAuthURL()
+    if (res?.data?.url) window.location.href = res.data.url
+    else ElMessage.error('GA 授权 URL 为空')
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.error || 'GA 授权发起失败')
+  } finally { testing.value.ga = false }
+}
+async function authYandex() {
+  testing.value.yandex = true
+  try {
+    const res = await api.getYandexAuthURL()
+    if (res?.data?.url) window.location.href = res.data.url
+    else ElMessage.error('Yandex 授权 URL 为空')
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.error || 'Yandex 授权发起失败')
+  } finally { testing.value.yandex = false }
+}
 </script>
 
 <style scoped>

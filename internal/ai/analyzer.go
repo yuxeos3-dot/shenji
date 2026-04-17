@@ -568,7 +568,10 @@ func CallAIChapters(prompt string) ([]V6Chapter, string, string, error) {
 		"max_tokens":  maxTok,
 		"temperature": 0.2,
 	}
-	jsonBody, _ := json.Marshal(reqBody)
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, "", model, fmt.Errorf("AI chapters 请求体序列化失败: %w", err)
+	}
 
 	client := &http.Client{Timeout: 300 * time.Second}
 	result, err := postAIWithRetry(client, apiURL, apiKey, jsonBody, "ai-chapters")
@@ -1435,7 +1438,10 @@ func CallAIStrategy(prompt string) (*V6Chapter, string, error) {
 		"max_tokens":  16000,
 		"temperature": 0.3,
 	}
-	jsonBody, _ := json.Marshal(reqBody)
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, model, fmt.Errorf("策略 AI 请求体序列化失败: %w", err)
+	}
 
 	client := &http.Client{Timeout: 240 * time.Second}
 	result, err := postAIWithRetry(client, apiURL, apiKey, jsonBody, "ai-strategy")
@@ -1529,8 +1535,14 @@ func TestAIConnection() error {
 		"max_tokens": 10,
 	}
 
-	jsonBody, _ := json.Marshal(reqBody)
-	req, _ := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(jsonBody))
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("请求体序列化失败: %w", err)
+	}
+	req, err := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(jsonBody))
+	if err != nil {
+		return fmt.Errorf("构造请求失败: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 

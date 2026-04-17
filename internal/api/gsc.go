@@ -23,6 +23,12 @@ const gscAPI = "https://www.googleapis.com/webmasters/v3"
 // maxOAuthResponseBytes caps provider response size to prevent memory blow-ups.
 const maxOAuthResponseBytes = 1 << 20 // 1 MiB
 
+// tokenRefreshMu serializes token refresh per-service so two concurrent
+// requests that both see an expired token don't double-refresh and race on
+// the oauth_tokens row (which would lose the newer refresh_token if Google
+// rotates it).
+var tokenRefreshMu sync.Mutex
+
 func GetGSCAuthURL(c *gin.Context) {
 	clientID := db.GetSetting("gsc_client_id")
 	redirectURI := db.GetSetting("gsc_redirect_uri")
@@ -151,24 +157,41 @@ func exchangeGoogleToken(code string) (*OAuthToken, error) {
 }
 
 func getGoogleAccessToken() (string, error) {
-	var storedAccess, storedRefresh string
-	var expiresAt time.Time
-	err := db.DB.QueryRow(
-		"SELECT access_token, refresh_token, expires_at FROM oauth_tokens WHERE service = 'gsc' ORDER BY id DESC LIMIT 1",
-	).Scan(&storedAccess, &storedRefresh, &expiresAt)
-	if err != nil {
-		return "", fmt.Errorf("GSC未授权")
-	}
-	accessToken, err := DecryptToken(storedAccess)
-	if err != nil {
-		return "", fmt.Errorf("GSC token 解密失败: %w", err)
-	}
-	refreshToken, err := DecryptToken(storedRefresh)
-	if err != nil {
-		return "", fmt.Errorf("GSC refresh token 解密失败: %w", err)
+	loadToken := func() (access, refresh string, expiresAt time.Time, err error) {
+		var storedAccess, storedRefresh string
+		err = db.DB.QueryRow(
+			"SELECT access_token, refresh_token, expires_at FROM oauth_tokens WHERE service = 'gsc' ORDER BY id DESC LIMIT 1",
+		).Scan(&storedAccess, &storedRefresh, &expiresAt)
+		if err != nil {
+			return "", "", time.Time{}, fmt.Errorf("GSC未授权")
+		}
+		access, err = DecryptToken(storedAccess)
+		if err != nil {
+			return "", "", time.Time{}, fmt.Errorf("GSC token 解密失败: %w", err)
+		}
+		refresh, err = DecryptToken(storedRefresh)
+		if err != nil {
+			return "", "", time.Time{}, fmt.Errorf("GSC refresh token 解密失败: %w", err)
+		}
+		return access, refresh, expiresAt, nil
 	}
 
+	accessToken, refreshToken, expiresAt, err := loadToken()
+	if err != nil {
+		return "", err
+	}
 	if time.Now().Before(expiresAt) {
+		return accessToken, nil
+	}
+
+	// Two concurrent callers that both see an expired token must not both
+	// hit Google's /token endpoint — the first wins, the second re-reads
+	// the row.
+	tokenRefreshMu.Lock()
+	defer tokenRefreshMu.Unlock()
+
+	// Re-check under the lock in case another goroutine just refreshed.
+	if accessToken, _, expiresAt, err = loadToken(); err == nil && time.Now().Before(expiresAt) {
 		return accessToken, nil
 	}
 
@@ -191,13 +214,19 @@ func getGoogleAccessToken() (string, error) {
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int    `json:"expires_in"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOAuthResponseBytes)).Decode(&result); err != nil {
 		return "", err
+	}
+	if result.AccessToken == "" {
+		return "", fmt.Errorf("GSC token refresh 返回为空 (HTTP %d)", resp.StatusCode)
 	}
 
 	newExpiry := time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
-	db.DB.Exec("UPDATE oauth_tokens SET access_token = ?, expires_at = ? WHERE service = 'gsc'",
-		MustEncryptToken(result.AccessToken), newExpiry)
+	if _, err := db.DB.Exec("UPDATE oauth_tokens SET access_token = ?, expires_at = ? WHERE service = 'gsc'",
+		MustEncryptToken(result.AccessToken), newExpiry); err != nil {
+		log.Printf("[gsc] persist refreshed token failed: %v", err)
+		return "", fmt.Errorf("GSC token 存储失败: %w", err)
+	}
 
 	return result.AccessToken, nil
 }
@@ -206,7 +235,10 @@ func getGoogleAccessToken() (string, error) {
 func gscFetch(token, apiURL, method string, body interface{}) (json.RawMessage, error) {
 	var reqBody io.Reader
 	if body != nil {
-		jsonBody, _ := json.Marshal(body)
+		jsonBody, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("GSC 请求体序列化失败: %w", err)
+		}
 		reqBody = bytes.NewReader(jsonBody)
 	}
 
@@ -337,12 +369,16 @@ func SyncGSCData(c *gin.Context) {
 	devicesJSON := extractRows(results["devices"])
 	countriesJSON := extractRows(results["countries"])
 
-	db.DB.Exec(
+	if _, err := db.DB.Exec(
 		`INSERT OR REPLACE INTO gsc_data (site_id, date, clicks, impressions, ctr, position, keywords_json, pages_json, devices_json, countries_json)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		siteID, ed, totalClicks, totalImpressions, avgCTR, avgPosition,
 		keywordsJSON, pagesJSON, devicesJSON, countriesJSON,
-	)
+	); err != nil {
+		log.Printf("[gsc] persist sync data site=%s failed: %v", siteID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "GSC 数据写入失败"})
+		return
+	}
 	if sid, err := strconv.ParseInt(siteID, 10, 64); err == nil {
 		InvalidateGSC(sid)
 	}

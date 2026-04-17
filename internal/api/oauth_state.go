@@ -58,8 +58,14 @@ func consumeOAuthState(state string) (userID int64, ok bool) {
 	if !exists {
 		return 0, false
 	}
+	// Always remove the entry — whether it's valid or expired, a state
+	// is single-use. Check expiry AFTER reading so we return the correct
+	// validity to the caller.
 	delete(oauthStates, state)
 	if time.Now().After(entry.ExpiresAt) {
+		return 0, false
+	}
+	if entry.UserID <= 0 {
 		return 0, false
 	}
 	return entry.UserID, true
