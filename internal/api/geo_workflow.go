@@ -496,17 +496,22 @@ func runKeywordWorkflow(jobID, userID int64, req StartKeywordWorkflowRequest) {
 	// ───── Step 2: TDK + FAQ extraction ────────────────────────────────
 	setJobStep(jobID, 2, "🔎 正在提取 SEO 元数据（标题 / 描述 / FAQ）...", "running")
 
-	// Feed a trimmed excerpt of the draft to step 2 so the prompt stays
-	// lean; 2000 chars is enough for the model to grasp the topic and
-	// generate meta.
+	// Feed a larger slice of the draft to step 2 than before. Step 2
+	// now also extracts FAQs — which live at the *end* of the article —
+	// so the old 2000-char head-only excerpt would miss them entirely.
+	// 6000 chars comfortably covers the structure on a 2000-word piece.
 	excerpt := draft
 	runes := []rune(excerpt)
-	if len(runes) > 2000 {
-		excerpt = string(runes[:2000]) + "\n\n[...]"
+	if len(runes) > 6000 {
+		// Keep the opening 1500 chars (for topic grounding) and the
+		// final 4500 chars (for the FAQ block and final sections).
+		head := string(runes[:1500])
+		tail := string(runes[len(runes)-4500:])
+		excerpt = head + "\n\n[...中间内容省略...]\n\n" + tail
 	}
 	prompt2 := buildMetaExtractPrompt(req.Keyword, req.TitleText, excerpt)
 
-	metaRaw, _, err := CallAIWithUserConfig(userID, prompt2, 1500)
+	metaRaw, _, err := CallAIWithUserConfig(userID, prompt2, 2500)
 	if err != nil {
 		// Step 2 failure is non-fatal: we still have the draft. Use
 		// simple fallbacks for meta so user can manually edit later.
@@ -544,29 +549,24 @@ func finishJobWithFallback(jobID int64, draft, keyword, title string) {
 
 // ─── Prompts ───────────────────────────────────────────────────────────────
 
-// buildNeutralAntiDetectionPrompt is the heart of the pipeline. It
-// combines four goals at once:
+// buildNeutralAntiDetectionPrompt is the heart of the pipeline. It is
+// tuned specifically for the user's use case:
 //
-//  1. PURPOSE CLARITY — this article is an external-facing informational
-//     piece meant for GEO (AI-search retrieval) and backlink sites,
-//     not a landing page for a product/platform/brand. No sales push.
-//  2. NEUTRAL + CLINICAL TONE — the keyword universe is adult-industry,
-//     but output must read like an encyclopedia entry or lifestyle column:
-//     informational, educational, culturally curious — never titillating,
-//     never explicit, never promotional.
-//  3. LOW AI-DETECTION — concrete humanization techniques: ban formulaic
-//     connectors, force second-person voice, require one admitted
-//     drawback, require uneven sentence lengths, require concrete numbers.
-//  4. NATURAL INTERNAL LINKING — uses the site's real page list so the
-//     AI embeds [anchor](/real/url) rather than hallucinating URLs.
-//
-// Critical non-negotiables enforced by explicit 禁用词 blocklists:
-//   - NO gambling jargon (平台 / 注册 / 优惠 / 流水 / 赔率 / 转盘 / 博彩 / 娱乐城)
-//     — the workflow originally forked from a 博彩 template, we scrub
-//     every trace of it because those keywords poison rankings and
-//     mismatch the actual adult content vertical.
-//   - NO sensory descriptions (身体部位 / 行为过程 / 感官刺激 / 暗示性比喻)
-//   - NO promotional/sales CTAs (立即 / 马上 / 限时 / 爆款 / 最佳推荐)
+//   - VERTICAL: adult entertainment (影视 / 直播 / 个人创作者经济).
+//   - PURPOSE: GEO / AI-answer retrieval (ChatGPT, Gemini, Perplexity
+//     抓取时要能从中提取结构化答案); secondary purpose is external
+//     backlinks on third-party sites.
+//   - FAQ-HEAVY: AI answer engines lift Q&A pairs preferentially, so
+//     every section header is framed as an answerable question and
+//     each answer leads with its conclusion.
+//   - NEUTRAL: discuss the industry, never describe or suggest content;
+//     no seductive or promotional modifiers.
+//   - ZERO GAMBLING LEAKAGE: the template was forked from a 博彩
+//     codebase so we keep an aggressive 禁用词 blocklist.
+//   - LOW AI DETECTION: standard humanization — banned cliches,
+//     second-person voice, sentence-length variation, concrete numbers,
+//     admitted limits.
+//   - NATURAL INTERNAL LINKING from site_pages.
 func buildNeutralAntiDetectionPrompt(
 	req StartKeywordWorkflowRequest,
 	knowledge string,
@@ -574,8 +574,6 @@ func buildNeutralAntiDetectionPrompt(
 ) string {
 	year := fmt.Sprintf("%d", time.Now().Year())
 
-	// Site pages block — empty = no site-specific internal linking
-	// guidance beyond "write generic relative paths".
 	var pagesBlock strings.Builder
 	if len(pages) > 0 {
 		pagesBlock.WriteString("【站内可用内链清单】（写作时请从中挑选 2-4 条，在合适位置用 [锚文本](URL) 格式自然嵌入，锚文本要契合上下文，禁止机械堆砌）：\n")
@@ -594,20 +592,18 @@ func buildNeutralAntiDetectionPrompt(
 	angleBlock := ""
 	switch req.WritingAngle {
 	case "评测":
-		angleBlock = "【写作视角】资料汇总与中立对比——以信息整理者身份呈现多方观点，避免任何推销、避免打分结论。\n"
+		angleBlock = "【写作视角】产业资讯整理——以观察者视角讲述行业动态、平台分类、主流现象，不对任何具体作品/创作者作推销。\n"
 	case "攻略":
-		angleBlock = "【写作视角】知识科普——解释关键概念、讨论常见误区、给出一般性注意事项，语气像百科条目或生活方式专栏。\n"
+		angleBlock = "【写作视角】常识科普——讲清楚一个概念/术语/现象是什么、从哪来、为什么被关注，像 Vox 或 The Verge 的解释性报道。\n"
 	case "对比":
-		angleBlock = "【写作视角】横向信息对比——把同主题下不同类别/流派/做法并列呈现，只做事实描述，不下好坏判断。\n"
+		angleBlock = "【写作视角】横向资料汇整——把同主题下不同流派/地域/时期的情况并列陈述，只做事实对照不做价值判断。\n"
 	case "新手":
-		angleBlock = "【写作视角】入门科普——用通俗语言拆解术语，讲清楚概念由来和社会背景，语气温和包容。\n"
+		angleBlock = "【写作视角】入门知识——用日常语言讲清楚行话和背景，适合第一次关注这个话题的读者。\n"
 	}
 
-	// NOTE: string concatenation (not Sprintf) because the user-supplied
-	// keyword could contain '%' which would otherwise mangle formatting.
-	return `你是一名资深内容编辑，常年为生活方式、健康科普、文化研究类媒体撰稿，擅长把敏感或小众话题写成信息量高、语气克制的长文。
+	return `你是一名资深内容编辑，常年为生活方式、文化观察、娱乐产业类媒体撰稿，擅长把敏感话题写成信息量高、语气克制的长文。
 
-现在请围绕以下关键词写一篇 Markdown 文章：
+请围绕以下关键词写一篇 Markdown 文章：
 
 【核心关键词】` + req.Keyword + `
 【建议标题】` + req.TitleText + `
@@ -617,115 +613,156 @@ func buildNeutralAntiDetectionPrompt(
 ` + angleBlock + knowledgeBlock + pagesBlock.String() + `
 
 ━━━━━ 文章定位（必读！）━━━━━
-这是一篇用于 SEO/GEO/外链目的的信息型文章，发布在第三方内容站点或资讯站。
-它不是任何平台、品牌、产品的推广页，也不是销售页。
-核心目的是：
-- 让搜索引擎（Google/Bing）把这篇内容识别为权威信息源
-- 让生成式 AI（ChatGPT/Gemini/Perplexity）抓取时能从中提取结构化答案
-- 以自然密度布局关键词，建立主题相关性
-禁止任何促销口吻（"马上""立即""限时"）、禁止任何"推荐某某"的定性表达。
+这是一篇面向 GEO/AI 抓取 和 外链发布 的信息型文章。
+核心目标是：让 ChatGPT / Gemini / Perplexity / Google AI Overviews 在回答相关问题时，能从本文中直接抽取结构化答案。
+因此本文的最高优先级是：
+  ① 每个段落能独立回答一个问题（句首先给结论，再展开细节）
+  ② 大量真实的长尾 FAQ（AI 引擎特别偏爱 Q&A 配对）
+  ③ 事实密度高、数据具体、来源可追溯（年份 / 比例 / 机构名）
+  ④ 自然关键词密度，不做关键词堆砌
+
+这不是品牌推广页、不是平台宣传页、不是导购评测。
+全文不得出现任何"推荐""首选""必看""不容错过""最佳"这类导购用语。
 
 ━━━━━ 选题角度（关键）━━━━━
-该关键词可能涉及成人话题。你的写作定位不是面向从业者或消费者，而是面向：
-- 对该话题感兴趣的普通读者（想了解"这是什么""为什么存在""社会怎么看"）
-- 研究型/学术型检索者（查定义、查历史、查数据）
-- 通过 AI 搜索该话题的一般用户（想要事实、概念、常识）
+该关键词属于成人娱乐领域（可能涉及影视、直播、创作者经济、订阅制产品等产业现象）。
+你的写作视角是：**产业观察者 / 文化记者 / 行业分析师**。
 
-所以内容必须围绕以下之一切入：
-- 话题的定义、起源、历史演变
-- 相关的文化、社会、心理、语言学背景
-- 现象层面的客观描述（而非操作层面的指南）
-- 常见误区的澄清、学术或媒体视角的观点汇总
-- 相关的法律法规、行业现状、市场规模等宏观数据
+允许并鼓励谈这些：
+- 行业历史、商业模式演变、市场规模（用具体数字）
+- 订阅制 / 付费墙 / 创作者分成 等模式分类与差异
+- 不同地区的合规差异、法律法规、内容分级制度
+- 社会现象、文化解读、媒体研究视角、学术讨论
+- 用户群体画像（年龄段、地域分布、消费习惯的宏观统计）
+- 创作者经济的经济学分析（定价、留存、收入分布的公开数据）
+- 技术演变（AI 生成内容对行业冲击、DRM、支付通道、年龄验证）
 
-绝不允许：
-- 教读者如何获取、使用、操作任何产品或服务
-- 任何带动作指令的"步骤教学"（"第一步...第二步..."除非是抽象流程）
-- 感官性、刺激性、煽动性的描写
+严禁出现这些：
+- 任何具体作品、演员、创作者姓名的推荐或排名
+- 任何带动作的指引（"如何观看""在哪里下载""怎样订阅"）
+- 任何感官、情感、诱惑性的修饰词
+- 任何暗示"读完就能看到 / 买到 / 获取"的钩子
 
-━━━━━ 禁用词清单（严格）━━━━━
-【博彩/游戏类】以下词一律禁止出现（哪怕只是比喻）：
-平台、注册、优惠、流水、赔率、转盘、彩金、娱乐城、博彩、赌场、跑路、赔付、押注、下注、线上游戏、电子游艺、真人视讯、百家乐、老虎机、体育博彩、即时返水
+━━━━━ 禁用词清单（最高优先级硬约束）━━━━━
+【博彩 / 游戏类】出现其中任何一个词 = 整篇作废。输出前必须自查：
+注册、优惠、流水、赔率、转盘、彩金、娱乐城、博彩、赌场、跑路、赔付、押注、下注
+返水、返利、首充、次充、稳赢、稳赚、百家乐、老虎机、体育博彩、真人视讯、电子游艺、即时返水
+"存款 / 提款"（当作博彩语境使用时）
+"平台"如果与"注册 / 优惠 / 存款"任一词共同出现也禁止（单独作为中性词用于"视频平台""订阅平台"时例外）
 
-【露骨/感官类】以下词一律禁止出现：
-具体身体部位的直接描写、任何行为过程的细节、"性感"、"诱人"、"销魂"、"激情"、"火辣"、任何俚语化的性暗示表达
+【诱导 / 暗示类】一律禁止：
+诱人、销魂、激情、火辣、狂野、欲望、渴望、性感、撩人、勾引、挑逗、刺激
+"让你欲罢不能""满足你所有幻想""深夜福利""老司机""懂的都懂"
+任何身体部位的直接描写或俚语化替代词
 
-【促销类】以下词一律禁止出现：
-马上、立即、限时、爆款、必选、最佳推荐、首选、不容错过、抓紧、赶紧、值得拥有
+【促销 / 导购类】一律禁止：
+马上、立即、限时、爆款、必选、首选、最佳、不容错过、赶紧、抓紧、值得拥有、强烈推荐
+"推荐给你""你会爱上""超值""独家""免费获取"
 
-━━━━━ 语言基调 ━━━━━
-- 整体像一本百科词条、一篇生活方式专栏、或一份行业报告的摘要
-- 涉及敏感内容时使用中性术语（例如："成年内容产业"而不是任何俚语；"亲密关系"而不是行为动词）
-- 可以出现医学、社会学、心理学、法学、经济学的专业术语（符合学术杂志风格）
-- 描写事实时只谈现象不谈感受，绝不代入第一人称经验性描写
+━━━━━ GEO 优化：AI 抓取友好型结构（最高优先级！）━━━━━
+这篇文章的最终读者是 AI 搜索引擎，所以结构必须对 AI 抽取友好：
+
+1. **所有 H2 / H3 标题本身是问题或明确陈述，不是模糊类别**
+   不要："行业现状"（太笼统）
+   要："` + year + ` 年成人娱乐产业的市场规模有多大？"
+   或："订阅制和按次付费模式有什么区别"
+
+2. **每个段落的第一句直接给结论，AI 抓取时可以直接用作答案**
+   不要："近年来，随着互联网技术的发展，订阅制在..."
+   要："订阅制是目前成人娱乐领域最主流的商业模式。根据 2024 年..."
+
+3. **关键数据独立成短句，便于 AI 摘引**
+   不要把数字埋在复杂从句里
+   好例子："2023 年全球订阅制成人娱乐市场规模约 150 亿美元。"
+
+4. **使用结构化标签强化事实密度**
+   - 用 > 引用块标注定义、数据来源、权威引述
+   - 用 **粗体** 标注核心数字和专有名词
+   - 用表格对比不同维度（年份 / 地区 / 类型 / 占比）
+
+5. **长尾 FAQ 是本文最重要的部分**（结尾至少 6-8 个 Q&A）
+   每个 Q 必须是真实用户会在 AI 里问的问法：
+   "什么是..."、"为什么..."、"...有多少"、"...是怎么运作的"、"...和 XX 有什么区别"、"...合法吗"、"...市场规模"、"...怎么发展起来的"
+   每个 A 必须 80 字以上，首句直接给答案，后续补充背景
 
 ━━━━━ 反 AI 检测要求（逐条执行）━━━━━
 1. 禁用模板连接词：不要"首先""其次""然后""最后""综上所述""值得注意的是""众所周知""在数字时代""随着...的发展"
-2. 连接词口语化：不要"然而""此外""并且"，改用"不过""另外""再说""换句话讲"
-3. 句子长短交替：不要连续 3 句都是相近长度；短句（10 字以内）和长句（30 字以上）要混着来
-4. 至少 1 次用第二人称直接对话读者：如"你可能会问..."、"想清楚这一点..."、"如果你第一次接触这个话题..."
-5. 至少 1 次坦承局限或边界：哪怕话题本身中性，也要点出 1 个需要读者自行判断的地方（例如"数据来源差异较大"、"不同地区认定标准不同"）
-6. 至少 2 个具体数字（比例 / 年份 / 金额 / 数量等）——数字越具体越像真人写的，例如"约 87%"而不是"大多数"
-7. 严禁空洞形容词：不要"丰富的""多元的""优质的""专业的"作结论，全部换成具体事实
+2. 连接词口语化：不要"然而""此外""并且"，改用"不过""另外""再说""换句话讲""话说回来"
+3. 句长交替：不要连续 3 句长度相近；短句（10 字内）和长句（30 字以上）混着来
+4. 至少 1 处第二人称对话：如"你可能好奇..."、"先别急着下结论..."、"如果你第一次听说这个词..."
+5. 至少 1 处坦承局限或数据争议：如"不同研究机构口径差异较大"、"这方面公开数据非常有限"
+6. 至少 3 个具体数字（比例 / 年份 / 金额 / 人数）——越具体越像真人写的，用"约 87%"而非"大多数"
+7. 严禁空洞形容词："丰富的""多元的""优质的""巨大的""显著的"全部换成具体事实
 
 ━━━━━ 结构与格式 ━━━━━
-1. 全文 Markdown，从 ## 二级标题开始（不要 # 一级标题，留给网站模板）
-2. 至少 1 个 Markdown 表格（| 格式，含表头分隔行）——用于并列/对比/数据聚合
-3. 至少 1 个有序或无序列表段落
-4. 标题或首段出现"` + year + `"年份标签（增强时效感）
-5. 结尾包含 3-5 个 FAQ（以"## 常见问题"开头，每问每答用 ### 小标题 + 段落，答案不少于 60 字）
-6. 关键词以自然密度分布 4-8 次（含变体），不要机械重复
-7. 禁止前言（"在这篇文章中我将...""让我们开始吧"之类），直接进入第一个 ## 标题
+- 全文 Markdown，从 ## 二级标题开始（不要 # 一级标题，留给网站模板）
+- 至少 3 个 ## 二级标题 + 若干 ### 三级标题；每个标题都是可回答的问题
+- 至少 1 个 Markdown 表格（含表头分隔行）——用于并列 / 对比 / 数据聚合
+- 至少 1 处 > 引用块（标注定义、数据来源或权威陈述）
+- 标题或首段含"` + year + `"年份标签
+- **结尾必须有"## 常见问题"章节，包含 6-8 个 ### 问题子标题 + 答案段落**（FAQ 是本文最核心模块）
+- 关键词以自然密度分布 4-8 次（含变体），不要机械重复
+- 禁止前言（"在这篇文章中我将..."），直接进入第一个 ## 标题
 
 ━━━━━ 内链处理 ━━━━━
 - 只能使用上面【站内可用内链清单】里的 URL
 - 锚文本必须是 2-8 字的自然词组，与上下文语义衔接
-- 禁止堆砌锚文本或在同一段出现 2 个以上内链
-- 如果清单为空，本篇允许不包含内链
+- 禁止堆砌；同一段最多 1 个内链
+- 清单为空时可不插入内链
 
 ━━━━━ 输出要求 ━━━━━
 - 直接从 ## 标题开始输出，不要任何解释 / 说明 / 代码块包裹
 - 不要输出本提示中的任何指令原文
+- 输出前自我检查一遍：禁用词清单里的任何一个词是否在你的草稿里？如果有，必须重写该处
 - 全文只输出文章本身（Markdown）`
 }
 
 // buildMetaExtractPrompt produces step-2's tight JSON-only prompt.
+// Step 1 already generates 6-8 FAQs inside the article body, so
+// Step 2's job is narrower: pick a solid meta_title + meta_desc
+// and surface the FAQs that are already in the draft as a
+// structured array (for schema.org FAQ injection on the site).
 // We use string concatenation (not Sprintf) — a user-supplied keyword
 // containing "%" would otherwise corrupt the format directives.
 func buildMetaExtractPrompt(keyword, title, excerpt string) string {
 	year := fmt.Sprintf("%d", time.Now().Year())
-	return `你是 SEO 元数据生成助手。下面是一篇信息型文章的开头摘要，请据此生成 SEO 标题 / 描述 / FAQ。
+	return `你是 SEO / GEO 元数据提取助手。下面是一篇已写好的信息型文章（主题偏成人娱乐产业分析，目标是被 AI 搜索引擎引用）。
+
+请从中提取 SEO 元数据 + 已存在的 FAQ 列表。
 
 【核心关键词】` + keyword + `
 【建议标题】` + title + `
 
-【文章摘要】
+【文章内容】
 ` + excerpt + `
 
-任务：输出一个 JSON 对象（注意是纯 JSON，不要 markdown 代码块，不要解释文字），字段如下：
-- meta_title：SEO 标题，50 字以内，必须包含核心关键词和年份【` + year + `】
-                     语气客观中立，像词典条目或百科标题，禁止任何推销口吻
-- meta_description：Meta 描述，140-160 字，开头带【` + year + `】标签
-                     内容必须是信息性、知识性陈述，不得有行动号召（如"马上""立即"）
-                     不得使用"平台""注册""优惠""评测""首选""最佳"等词
-- faq：一个数组，含 3-5 个问答，每个元素 {"q":"问题","a":"回答，60 字以上，事实陈述不推销"}
+任务：输出纯 JSON（不要 markdown 代码块，不要解释文字），字段：
+- meta_title：SEO 标题，50 字内
+    必须含核心关键词 + 年份【` + year + `】
+    语气像维基百科条目或产业报告摘要，禁止推销
+- meta_description：Meta 描述，140-160 字
+    【` + year + `】开头，全文必须是事实陈述
+    禁止行动号召（"马上""立即""推荐"）
+- faq：从正文"## 常见问题"章节里提取出来的 Q&A 数组
+    每个元素 {"q":"问题","a":"答案，至少 60 字"}
+    按正文里的顺序保留，不要改写问题，只做必要的答案精简
+    正文如果有 6 个 FAQ 就返回 6 个，有 8 个就返回 8 个
+    正文没有 FAQ 章节时返回空数组
 
-━━━━━ 硬性禁用词（所有字段都不能出现）━━━━━
-博彩类：平台、注册、优惠、流水、赔率、转盘、彩金、娱乐城、博彩、赌场、押注、下注
-露骨类：任何身体部位、性感、诱人、销魂、激情、火辣、各类性暗示俚语
-促销类：马上、立即、限时、爆款、必选、最佳推荐、首选、抓紧
+━━━━━ 硬性禁用词（任何字段都不能出现）━━━━━
+博彩类：注册、优惠、流水、赔率、转盘、彩金、娱乐城、博彩、赌场、跑路、押注、下注、稳赢、首充、百家乐、老虎机、体育博彩、真人视讯
+诱导类：性感、诱人、销魂、激情、火辣、欲望、撩人、勾引、深夜福利、老司机、懂的都懂
+促销类：马上、立即、限时、爆款、必选、最佳推荐、首选、抓紧、不容错过
 
 ━━━━━ 语气要求 ━━━━━
-- 全部字段保持中性、学术化、信息化语气
-- 像维基百科条目、像研究报告摘要、像专业杂志的 FAQ 栏目
-- 标题可以用"概述""发展""现状""常见问题""社会视角""文化背景"这类中性词汇作引子
-- faq 问题必须是信息检索型长尾（"什么是..."、"为什么..."、"...的历史是怎样"、"...在不同国家有什么差异"）
-- 绝不出现"哪家好""哪个值得买""如何选择推荐"这类导购式问题
+- 全部字段保持 "产业观察 / 文化记者 / 行业分析" 的客观语气
+- 标题可以用"市场规模""发展历程""模式解析""现状与争议""常见问题"这类引子
+- 不做任何价值判断或推荐
 
 直接输出 JSON，不要任何其他字符。
 
-示例格式（字段示意，请生成真实内容而不是复制示例）：
-{"meta_title":"【` + year + `】XX概述：定义、历史与常见问题","meta_description":"【` + year + `】本文梳理 XX 的定义、社会背景与常见疑问，数据来源包括...","faq":[{"q":"什么是 XX","a":"60 字以上的事实陈述..."}]}`
+示例格式（字段示意，请生成真实内容）：
+{"meta_title":"【` + year + `】XX 市场规模、模式分类与常见问题","meta_description":"【` + year + `】本文整理 XX 的定义、产业模式与 2024 年市场数据，数据来源包括...","faq":[{"q":"什么是 XX","a":"60 字以上的事实陈述..."}]}`
 }
 
 // parseMetaResponse extracts meta_title, meta_desc, faq JSON from the
