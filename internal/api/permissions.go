@@ -36,7 +36,7 @@ var PermissionTree = []PermNode{
 		{Code: "sites.create", Label: "创建站点"},
 		{Code: "sites.edit", Label: "编辑站点"},
 		{Code: "sites.delete", Label: "删除站点"},
-		{Code: "sites.pages", Label: "管理页面"},
+		{Code: "sites.pages", Label: "管理页面（增/删/抓取源码）"},
 		{Code: "sites.audit", Label: "触发审计"},
 		{Code: "sites.audit_view", Label: "查看审计报告"},
 		{Code: "sites.audit_delete", Label: "删除审计记录"},
@@ -47,8 +47,9 @@ var PermissionTree = []PermNode{
 		{Code: "geo.keywords", Label: "管理关键词库"},
 		{Code: "geo.prompts", Label: "管理 Prompt 模板"},
 		{Code: "geo.knowledge", Label: "管理知识库"},
-		{Code: "geo.tasks", Label: "管理生成任务"},
-		{Code: "geo.tasks_run", Label: "执行生成（调用 AI）"},
+		{Code: "geo.tasks", Label: "管理批量生成任务"},
+		{Code: "geo.tasks_run", Label: "执行批量生成（调用 AI）"},
+		{Code: "geo.workflow", Label: "关键词 AI 写作工作流（逐词生成 + TDK + FAQ）"},
 		{Code: "geo.articles", Label: "查看文章"},
 		{Code: "geo.articles_review", Label: "审核文章"},
 		{Code: "geo.articles_publish", Label: "发布文章"},
@@ -77,24 +78,42 @@ var PermissionTree = []PermNode{
 		{Code: "coord.create", Label: "从审计报告创建任务"},
 		{Code: "coord.edit", Label: "编辑 / 删除任务"},
 		{Code: "coord.assign", Label: "分配给开发（启动）"},
-		{Code: "coord.comment", Label: "添加备注"},
+		{Code: "coord.comment", Label: "添加备注 / 附件 / 提问回复"},
 		{Code: "coord.submit", Label: "标记修改完毕（开发）"},
-		{Code: "coord.verify", Label: "验收审计完成（关闭）"},
+		{Code: "coord.test_pages", Label: "管理测试服页面（添加 / 抓取源码）"},
+		{Code: "coord.pre_audit", Label: "运行 AI 预审核"},
+		{Code: "coord.verify", Label: "验收通过（关闭任务）"},
+		{Code: "coord.reject", Label: "打回修改"},
 	}},
-	{Code: "reports", Label: "每日汇报", Children: []PermNode{
-		{Code: "reports.view", Label: "查看汇报列表"},
-		{Code: "reports.write", Label: "写汇报"},
-		{Code: "reports.polish", Label: "AI 润色"},
-		{Code: "reports.export", Label: "导出汇报"},
+	{Code: "reports", Label: "汇报管理", Children: []PermNode{
+		// Daily
+		{Code: "reports.daily.view", Label: "查看日报"},
+		{Code: "reports.daily.write", Label: "写日报"},
+		{Code: "reports.daily.polish", Label: "日报 AI 润色"},
+		{Code: "reports.daily.export", Label: "导出日报"},
+		// Weekly
+		{Code: "reports.weekly.view", Label: "查看周报"},
+		{Code: "reports.weekly.write", Label: "写 / 生成 / 提交周报"},
+		{Code: "reports.weekly.polish", Label: "周报 AI 润色"},
+		// Monthly
+		{Code: "reports.monthly.view", Label: "查看月报"},
+		{Code: "reports.monthly.write", Label: "写 / 生成 / 提交月报"},
+		{Code: "reports.monthly.polish", Label: "月报 AI 润色"},
+		// Evaluation (admin-only, kept in tree for visibility)
+		{Code: "reports.evaluate", Label: "评价下级汇报（仅管理员）"},
 	}},
-	{Code: "users", Label: "用户管理", Children: []PermNode{
+	{Code: "users", Label: "用户管理（仅管理员）", Children: []PermNode{
 		{Code: "users.view", Label: "查看用户列表"},
 		{Code: "users.create", Label: "创建用户"},
 		{Code: "users.edit", Label: "编辑用户"},
 		{Code: "users.delete", Label: "删除用户"},
 		{Code: "users.permissions", Label: "设置用户权限"},
 	}},
-	{Code: "settings", Label: "系统设置", Children: []PermNode{
+	{Code: "org", Label: "组织结构（仅管理员）", Children: []PermNode{
+		{Code: "org.view", Label: "查看部门 / 组"},
+		{Code: "org.manage", Label: "管理部门 / 组"},
+	}},
+	{Code: "settings", Label: "系统设置（仅管理员）", Children: []PermNode{
 		{Code: "settings.view", Label: "查看系统设置"},
 		{Code: "settings.edit", Label: "修改系统设置"},
 		{Code: "settings.test_ai", Label: "测试 AI 接口"},
@@ -102,7 +121,123 @@ var PermissionTree = []PermNode{
 	}},
 }
 
-// GetPermissionTree returns the full tree for the frontend to render checkboxes.
+// MigrateLegacyPermissions runs once at startup and rewrites every user's
+// stored permission list from the old flat codes to the new granular
+// codes. Called from main() after DB.Init().
+//
+// Mapping:
+//
+//	reports.view    → reports.daily.view + reports.weekly.view + reports.monthly.view
+//	reports.write   → reports.daily.write + reports.weekly.write + reports.monthly.write
+//	reports.polish  → reports.daily.polish + reports.weekly.polish + reports.monthly.polish
+//	reports.export  → reports.daily.export
+//	geo.tasks_run   → geo.tasks_run + geo.workflow (auto-grant new workflow perm
+//	                  to anyone who already had batch-generate rights)
+//	coord.verify    → coord.verify + coord.pre_audit + coord.reject + coord.test_pages
+//	                  (if a user could verify before, they need the whole
+//	                  verify-phase toolbox now that it's split)
+//
+// Idempotent: already-migrated users (those whose list contains any of the
+// new codes) are not re-processed; also dedup on write. Safe to leave in
+// place across restarts.
+//
+// We set a settings flag `perm_migrated_v2` on success so subsequent boots
+// skip the scan entirely. The flag lookup is one tiny SQL call; if it's
+// set we return immediately.
+func MigrateLegacyPermissions() {
+	// Skip if already done.
+	var done string
+	db.DB.QueryRow(`SELECT COALESCE(value,'') FROM settings WHERE key='perm_migrated_v2'`).Scan(&done)
+	if done == "1" {
+		return
+	}
+
+	// Map old code → list of new codes to add alongside.
+	expansions := map[string][]string{
+		"reports.view":   {"reports.daily.view", "reports.weekly.view", "reports.monthly.view"},
+		"reports.write":  {"reports.daily.write", "reports.weekly.write", "reports.monthly.write"},
+		"reports.polish": {"reports.daily.polish", "reports.weekly.polish", "reports.monthly.polish"},
+		"reports.export": {"reports.daily.export"},
+		"geo.tasks_run":  {"geo.tasks_run", "geo.workflow"},
+		"coord.verify":   {"coord.verify", "coord.pre_audit", "coord.reject", "coord.test_pages"},
+	}
+	// Old codes that get fully replaced (removed after expansion).
+	obsolete := map[string]bool{
+		"reports.view":   true,
+		"reports.write":  true,
+		"reports.polish": true,
+		"reports.export": true,
+	}
+
+	rows, err := db.DB.Query(`SELECT id, COALESCE(permissions,'') FROM users WHERE permissions IS NOT NULL AND permissions <> ''`)
+	if err != nil {
+		log.Printf("[perm-migration] list users: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	type u struct {
+		id    int64
+		perms string
+	}
+	var toUpdate []u
+	for rows.Next() {
+		var x u
+		if err := rows.Scan(&x.id, &x.perms); err != nil {
+			continue
+		}
+		toUpdate = append(toUpdate, x)
+	}
+	rows.Close()
+
+	migrated := 0
+	for _, x := range toUpdate {
+		var list []string
+		if err := json.Unmarshal([]byte(x.perms), &list); err != nil {
+			log.Printf("[perm-migration] user %d: unmarshal failed: %v", x.id, err)
+			continue
+		}
+		changed := false
+		seen := map[string]bool{}
+		next := make([]string, 0, len(list)+8)
+		for _, code := range list {
+			if adds, ok := expansions[code]; ok {
+				changed = true
+				for _, a := range adds {
+					if !seen[a] {
+						seen[a] = true
+						next = append(next, a)
+					}
+				}
+				if obsolete[code] {
+					continue // drop the legacy code itself
+				}
+			}
+			if !seen[code] {
+				seen[code] = true
+				next = append(next, code)
+			}
+		}
+		if !changed {
+			continue
+		}
+		js, _ := json.Marshal(next)
+		if _, err := db.DB.Exec(`UPDATE users SET permissions = ? WHERE id = ?`, string(js), x.id); err != nil {
+			log.Printf("[perm-migration] user %d: update failed: %v", x.id, err)
+			continue
+		}
+		migrated++
+	}
+	// Set completion flag whether or not any user needed migrating.
+	db.DB.Exec(`INSERT INTO settings(key, value) VALUES('perm_migrated_v2','1')
+		ON CONFLICT(key) DO UPDATE SET value='1'`)
+	if migrated > 0 {
+		log.Printf("[perm-migration] migrated %d user(s) to v2 permission codes", migrated)
+	}
+}
+
+// ─── Permission loading / saving ────────────────────────────────────────────
+
 func GetPermissionTree(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "data": PermissionTree})
 }

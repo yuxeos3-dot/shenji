@@ -27,6 +27,14 @@ func main() {
 	// Initialize database
 	db.Init()
 
+	// One-time migration of permission codes from flat v1 codes
+	// (reports.view/write/polish/export) to granular v2 codes
+	// (reports.daily.*, reports.weekly.*, reports.monthly.*, plus
+	// new geo.workflow, coord.pre_audit, coord.reject, coord.test_pages).
+	// Idempotent — writes a flag into settings when done and no-ops
+	// on every subsequent boot.
+	api.MigrateLegacyPermissions()
+
 	// Warm the 4-platform data cache right after the DB is ready so first
 	// request hits a primed cache. Done in a goroutine — the HTTP server
 	// comes up immediately; if an early read loses the race it'll lazy-load
@@ -196,11 +204,11 @@ func main() {
 		v1.POST("/sites/:id/yandex/sync", api.RequirePermission("data.sync_yandex"), api.SyncYandexData)
 		v1.GET("/sites/:id/yandex", api.RequirePermission("data.view"), api.GetYandexData)
 
-		// Reports
-		v1.GET("/reports", api.RequirePermission("reports.view"), api.ListReports)
-		v1.POST("/reports", api.RequirePermission("reports.write"), api.SubmitReport)
-		v1.POST("/reports/polish", api.RequirePermission("reports.polish"), api.PolishReport)
-		v1.GET("/reports/export", api.RequirePermission("reports.export"), api.ExportReports) // must be before /:date
+		// Reports (daily — 日报)
+		v1.GET("/reports", api.RequirePermission("reports.daily.view"), api.ListReports)
+		v1.POST("/reports", api.RequirePermission("reports.daily.write"), api.SubmitReport)
+		v1.POST("/reports/polish", api.RequirePermission("reports.daily.polish"), api.PolishReport)
+		v1.GET("/reports/export", api.RequirePermission("reports.daily.export"), api.ExportReports) // must be before /:date
 
 		// Weekly reports (周汇报). MUST be registered before /:date or
 		// else gin routes /reports/weekly to the daily GetReportByDate
@@ -208,14 +216,14 @@ func main() {
 		// /reports/weekly/123 would also misroute.
 		weekly := v1.Group("/reports/weekly")
 		{
-			weekly.GET("", api.RequirePermission("reports.view"), api.ListWeeklyReports)
-			weekly.GET("/all", api.RequirePermission("reports.view"), api.AdminListAllWeeklyReports)
-			weekly.POST("/generate", api.RequirePermission("reports.write"), api.GenerateWeeklyReport)
-			weekly.GET("/:id", api.RequirePermission("reports.view"), api.GetWeeklyReport)
-			weekly.PUT("/:id", api.RequirePermission("reports.write"), api.UpdateWeeklyReport)
-			weekly.POST("/:id/submit", api.RequirePermission("reports.write"), api.SubmitWeeklyReport)
-			weekly.POST("/:id/polish", api.RequirePermission("reports.polish"), api.PolishWeeklyReport)
-			weekly.DELETE("/:id", api.RequirePermission("reports.write"), api.DeleteWeeklyReport)
+			weekly.GET("", api.RequirePermission("reports.weekly.view"), api.ListWeeklyReports)
+			weekly.GET("/all", api.RequirePermission("reports.weekly.view"), api.AdminListAllWeeklyReports)
+			weekly.POST("/generate", api.RequirePermission("reports.weekly.write"), api.GenerateWeeklyReport)
+			weekly.GET("/:id", api.RequirePermission("reports.weekly.view"), api.GetWeeklyReport)
+			weekly.PUT("/:id", api.RequirePermission("reports.weekly.write"), api.UpdateWeeklyReport)
+			weekly.POST("/:id/submit", api.RequirePermission("reports.weekly.write"), api.SubmitWeeklyReport)
+			weekly.POST("/:id/polish", api.RequirePermission("reports.weekly.polish"), api.PolishWeeklyReport)
+			weekly.DELETE("/:id", api.RequirePermission("reports.weekly.write"), api.DeleteWeeklyReport)
 		}
 
 		// Monthly reports (月汇报). Same caveat as weekly: register
@@ -223,22 +231,24 @@ func main() {
 		// reports whose week_start falls in the given (year, month).
 		monthly := v1.Group("/reports/monthly")
 		{
-			monthly.GET("", api.RequirePermission("reports.view"), api.ListMonthlyReports)
-			monthly.GET("/all", api.RequirePermission("reports.view"), api.AdminListAllMonthlyReports)
-			monthly.POST("/generate", api.RequirePermission("reports.write"), api.GenerateMonthlyReport)
-			monthly.GET("/:id", api.RequirePermission("reports.view"), api.GetMonthlyReport)
-			monthly.PUT("/:id", api.RequirePermission("reports.write"), api.UpdateMonthlyReport)
-			monthly.POST("/:id/submit", api.RequirePermission("reports.write"), api.SubmitMonthlyReport)
-			monthly.POST("/:id/polish", api.RequirePermission("reports.polish"), api.PolishMonthlyReport)
-			monthly.DELETE("/:id", api.RequirePermission("reports.write"), api.DeleteMonthlyReport)
+			monthly.GET("", api.RequirePermission("reports.monthly.view"), api.ListMonthlyReports)
+			monthly.GET("/all", api.RequirePermission("reports.monthly.view"), api.AdminListAllMonthlyReports)
+			monthly.POST("/generate", api.RequirePermission("reports.monthly.write"), api.GenerateMonthlyReport)
+			monthly.GET("/:id", api.RequirePermission("reports.monthly.view"), api.GetMonthlyReport)
+			monthly.PUT("/:id", api.RequirePermission("reports.monthly.write"), api.UpdateMonthlyReport)
+			monthly.POST("/:id/submit", api.RequirePermission("reports.monthly.write"), api.SubmitMonthlyReport)
+			monthly.POST("/:id/polish", api.RequirePermission("reports.monthly.polish"), api.PolishMonthlyReport)
+			monthly.DELETE("/:id", api.RequirePermission("reports.monthly.write"), api.DeleteMonthlyReport)
 		}
 
-		v1.GET("/reports/:date", api.RequirePermission("reports.view"), api.GetReportByDate)
+		v1.GET("/reports/:date", api.RequirePermission("reports.daily.view"), api.GetReportByDate)
 
-		// Report evaluations (admin 对日/周/月汇报的评价). GET is gated
-		// by the handler (owner or admin); POST/DELETE are admin-only
-		// via middleware so the handler can assume the role already.
-		v1.GET("/evaluations", api.RequirePermission("reports.view"), api.ListEvaluations)
+		// Report evaluations. GET is visible to anyone who can read
+		// at least daily reports (the handler itself further gates by
+		// owner vs admin). POST/DELETE stay admin-only via middleware;
+		// reports.evaluate in the permission tree is informational —
+		// a non-admin cannot currently evaluate no matter the flag.
+		v1.GET("/evaluations", api.RequirePermission("reports.daily.view"), api.ListEvaluations)
 		v1.POST("/evaluations", middleware.AdminRequired(), api.CreateEvaluation)
 		v1.POST("/evaluations/polish", middleware.AdminRequired(), api.PolishEvaluation)
 		v1.DELETE("/evaluations/:id", middleware.AdminRequired(), api.DeleteEvaluation)
@@ -298,18 +308,18 @@ func main() {
 			coord.GET("/attachments/:id/file", api.RequirePermission("coord.view"), api.ServeCoordAttachment)
 			coord.DELETE("/attachments/:id", api.RequirePermission("coord.comment"), api.DeleteCoordAttachment)
 
-			// Pre-audit (待验收) — reviewer attaches test-server URLs,
-			// fetches their HTML, runs AI verdict, then manually accepts
-			// (VerifyCoordTask above) or rejects (RejectCoordTask below).
-			// Test-page CRUD uses coord.verify perm since these only make
-			// sense during the verify phase.
+			// Pre-audit (待验收). Separate permission codes for each
+			// distinct admin action: managing the test-page list,
+			// running AI audit, accepting (verify), and rejecting.
+			// A reviewer can be limited to "only read test pages" by
+			// granting coord.view alone.
 			coord.GET("/tasks/:id/test-pages", api.RequirePermission("coord.view"), api.ListCoordTestPages)
-			coord.POST("/tasks/:id/test-pages", api.RequirePermission("coord.verify"), api.CreateCoordTestPage)
-			coord.DELETE("/tasks/:id/test-pages/:page_id", api.RequirePermission("coord.verify"), api.DeleteCoordTestPage)
-			coord.POST("/tasks/:id/test-pages/:page_id/fetch", api.RequirePermission("coord.verify"), api.FetchCoordTestPage)
+			coord.POST("/tasks/:id/test-pages", api.RequirePermission("coord.test_pages"), api.CreateCoordTestPage)
+			coord.DELETE("/tasks/:id/test-pages/:page_id", api.RequirePermission("coord.test_pages"), api.DeleteCoordTestPage)
+			coord.POST("/tasks/:id/test-pages/:page_id/fetch", api.RequirePermission("coord.test_pages"), api.FetchCoordTestPage)
 			coord.GET("/tasks/:id/test-pages/:page_id/source", api.RequirePermission("coord.view"), api.GetCoordTestPageSource)
-			coord.POST("/tasks/:id/pre-audit", api.RequirePermission("coord.verify"), api.PreAuditCoordTask)
-			coord.POST("/tasks/:id/reject", api.RequirePermission("coord.verify"), api.RejectCoordTask)
+			coord.POST("/tasks/:id/pre-audit", api.RequirePermission("coord.pre_audit"), api.PreAuditCoordTask)
+			coord.POST("/tasks/:id/reject", api.RequirePermission("coord.reject"), api.RejectCoordTask)
 		}
 
 		// Cache management (admin only)
@@ -362,10 +372,13 @@ func main() {
 			// Per-keyword async AI writing workflow (both GEO + ExtLink
 			// share this backend; differentiate via content_type in the
 			// request body). Returns job id immediately, frontend polls.
-			geo.POST("/keyword/workflow/start", api.RequirePermission("geo.tasks_run"), api.GeoStartKeywordWorkflow)
+			// Uses a dedicated perm (geo.workflow) separate from the
+			// batch-task runner (geo.tasks_run) because teams often want
+			// to grant one without the other.
+			geo.POST("/keyword/workflow/start", api.RequirePermission("geo.workflow"), api.GeoStartKeywordWorkflow)
 			geo.GET("/keyword/workflow/jobs", api.RequirePermission("geo.view"), api.GeoListWorkflowJobs)
 			geo.GET("/keyword/workflow/:id", api.RequirePermission("geo.view"), api.GeoGetWorkflowJob)
-			geo.POST("/keyword/workflow/:id/apply", api.RequirePermission("geo.tasks_run"), api.GeoApplyWorkflowJob)
+			geo.POST("/keyword/workflow/:id/apply", api.RequirePermission("geo.workflow"), api.GeoApplyWorkflowJob)
 		}
 	}
 
