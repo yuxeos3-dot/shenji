@@ -1,7 +1,7 @@
 package api
 
 import (
-	"fmt"
+	"log"
 	"net/http"
 
 	"seo-system/internal/db"
@@ -184,6 +184,7 @@ func UpdateSite(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "更新失败"})
 		return
 	}
+	WriteAuditLog(c, "update_site", "site", id, req.Domain)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "更新成功"})
 }
 
@@ -203,7 +204,11 @@ func DeleteSite(c *gin.Context) {
 
 	execInTx := func(query string, args ...interface{}) error {
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("%s: %w", query, err)
+			// Log the query (so operators can diagnose) but do NOT include
+			// it in the client response — it lowers an attacker's cost of
+			// mapping the schema.
+			log.Printf("[delete_site] step failed: %s: %v", query, err)
+			return err
 		}
 		return nil
 	}
@@ -226,7 +231,7 @@ func DeleteSite(c *gin.Context) {
 	for _, s := range steps {
 		if err := execInTx(s.query, s.args...); err != nil {
 			_ = tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 			return
 		}
 	}

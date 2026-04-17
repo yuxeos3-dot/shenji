@@ -175,7 +175,7 @@ const loading = ref(false)
 const showDialog = ref(false)
 const editId = ref(null)
 const capExpanded = ref(false)
-const form = ref({ domain: '', name: '', gsc_site_url: '', ga_property_id: '', yandex_host_id: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' })
+const form = ref({ domain: '', name: '', gsc_site_url: '', ga_property_id: '', yandex_host_id: '', bing_site_url: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' })
 
 const activeSites = computed(() => sites.value.filter(s => s.status === 'active').length)
 const auditedSites = computed(() => sites.value.filter(s => s.last_audit_status === 'done').length)
@@ -231,9 +231,6 @@ async function deleteSite(row) {
     await ElMessageBox.confirm(`确定要删除站点「${row.name || row.domain}」吗？删除后不可恢复。`, '确认删除', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' })
     await api.deleteSite(row.id); ElMessage.success('站点已删除'); loadSites()
   } catch (e) { if (e !== 'cancel') console.error('删除站点失败', e) }
-}
-async function triggerAudit(row) {
-  try { const res = await api.triggerAudit(row.id); ElMessage.success(`巡检已启动（任务ID：${res.data.task_id}）— 将自动抓取最新源码后开始分析`); loadSites() } catch (e) { console.error('触发巡检失败', e) }
 }
 onMounted(loadSites)
 </script>

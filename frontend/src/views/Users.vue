@@ -29,9 +29,9 @@
     </div>
 
     <el-dialog v-model="showDialog" :title="editId ? '✏️ 编辑用户' : '👤 添加用户'" width="450px">
-      <div class="form-group"><label>姓名</label><input v-model="form.name" /></div>
-      <div class="form-group"><label>邮箱</label><input v-model="form.email" type="email" /></div>
-      <div v-if="!editId" class="form-group"><label>密码</label><input v-model="form.password" type="password" /></div>
+      <div class="form-group"><label>姓名</label><input v-model="form.name" @keyup.enter="saveUser" /></div>
+      <div class="form-group"><label>邮箱</label><input v-model="form.email" type="email" @keyup.enter="saveUser" /></div>
+      <div v-if="!editId" class="form-group"><label>密码 <span style="font-weight:400;color:var(--ink-hint);font-size:12px">（至少 12 位，含大小写字母和数字）</span></label><input v-model="form.password" type="password" @keyup.enter="saveUser" /></div>
       <div class="form-group">
         <label>角色</label>
         <el-select v-model="form.role" style="width:100%">

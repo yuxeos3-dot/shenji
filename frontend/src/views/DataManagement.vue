@@ -246,6 +246,23 @@ const yandexData = ref([])
 // ── Cached data per site to avoid re-fetching ──
 const cache = {}
 
+// Track the in-flight request per site so we can cancel late responses that
+// would otherwise clobber the current selection.
+let flightController = null
+// Cap the cache size — without this, a user rotating through 100 sites
+// keeps all 100 GSC/GA/Bing/Yandex payloads in memory forever.
+const CACHE_MAX = 12
+const cacheOrder = []
+function rememberCache(id) {
+  const pos = cacheOrder.indexOf(id)
+  if (pos >= 0) cacheOrder.splice(pos, 1)
+  cacheOrder.push(id)
+  while (cacheOrder.length > CACHE_MAX) {
+    const stale = cacheOrder.shift()
+    delete cache[stale]
+  }
+}
+
 // ── Formatters ──
 const fmt = (n) => { n = Math.round(n || 0); if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'; if (n >= 1000) return (n / 1000).toFixed(1) + 'K'; return n.toLocaleString() }
 const fmtDur = (s) => { s = Math.round(s || 0); if (s < 60) return s + 's'; return Math.floor(s / 60) + 'm' + (s % 60) + 's' }
@@ -305,29 +322,44 @@ async function loadSiteData(forceRefresh = false) {
     gaData.value = cache[id].ga
     bingData.value = cache[id].bing
     yandexData.value = cache[id].yandex
+    rememberCache(id)
     return
   }
+
+  // Cancel any in-flight load so a late response can't overwrite the
+  // newly-selected site's data.
+  if (flightController) flightController.abort()
+  const controller = new AbortController()
+  flightController = controller
+  const signal = controller.signal
 
   loading.value = true
   try {
     const [g, a, b, y] = await Promise.all([
-      api.getGSCData(id, 30).catch(() => ({ data: [] })),
-      api.getGAData(id).catch(() => ({ data: [] })),
-      api.getBingData(id).catch(() => ({ data: [] })),
-      api.getYandexData(id).catch(() => ({ data: [] })),
+      api.getGSCData(id, 30, { signal }).catch(() => ({ data: [] })),
+      api.getGAData(id, { signal }).catch(() => ({ data: [] })),
+      api.getBingData(id, { signal }).catch(() => ({ data: [] })),
+      api.getYandexData(id, { signal }).catch(() => ({ data: [] })),
     ])
+    if (signal.aborted || selectedSiteId.value !== id) return // stale
+
     gscData.value = g.data || []
     gaData.value = a.data || []
     bingData.value = b.data || []
     yandexData.value = y.data || []
 
-    // Cache it
+    // Cache it (bounded LRU)
     cache[id] = { gsc: gscData.value, ga: gaData.value, bing: bingData.value, yandex: yandexData.value }
+    rememberCache(id)
   } catch (e) {
-    console.error(e)
-    ElMessage.error('加载数据失败')
+    if (!signal.aborted) {
+      console.error(e)
+      ElMessage.error('加载数据失败')
+    }
+  } finally {
+    if (flightController === controller) flightController = null
+    loading.value = false
   }
-  loading.value = false
 }
 
 function onSiteChange() {

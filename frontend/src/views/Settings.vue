@@ -107,7 +107,7 @@
           <div class="platform-block">
             <div class="platform-name">🔷 Bing Webmaster Tools</div>
             <div class="field-row">
-              <label class="field-label">API Key &nbsp;<a href="https://www.bing.com/webmasters/home" target="_blank" style="font-size:11.5px;color:var(--info);font-weight:600">Bing站长后台 →</a></label>
+              <label class="field-label">API Key &nbsp;<a href="https://www.bing.com/webmasters/home" target="_blank" rel="noopener noreferrer" style="font-size:11.5px;color:var(--info);font-weight:600">Bing站长后台 →</a></label>
               <input class="field-input" v-model="settings.bing_api_key" type="password" placeholder="在 Bing 站长工具 → 设置 → API 访问 中生成" autocomplete="new-password" />
               <div class="field-hint">填写后在各站点数据中心可同步 Bing 搜索数据（点击/展示/关键词/收录）</div>
             </div>
@@ -275,7 +275,6 @@ const activeTab = ref('basic')
 const saving = ref(false)
 const settings = ref({})
 const testing = ref({ ai: false, tg: false })
-const showKey = ref({ ai: false, gsc: false, yandex: false, tg: false })
 const aiSlots = ref([{api_url:'',api_key:'',model:''},{api_url:'',api_key:'',model:''},{api_url:'',api_key:'',model:''}])
 const aiTestResults = ref([])
 const clientIP = ref('')
@@ -375,11 +374,10 @@ async function saveSchedule() {
   await save()
 }
 
-async function testAI() { testing.value.ai = true; try { const res = await api.testAI(); ElMessage.success(res.data) } catch (e) { console.error(e) } finally { testing.value.ai = false } }
 async function testTG() { testing.value.tg = true; try { const res = await api.testTelegram(); ElMessage.success(res.data) } catch (e) { console.error(e) } finally { testing.value.tg = false } }
-async function authGSC() { try { const res = await api.getGSCAuthURL(); window.open(res.data.url, '_blank') } catch (e) { console.error(e) } }
-async function authGA() { try { const res = await api.getGAAuthURL(); window.open(res.data.url, '_blank') } catch (e) { console.error(e) } }
-async function authYandex() { try { const res = await api.getYandexAuthURL(); window.open(res.data.url, '_blank') } catch (e) { console.error(e) } }
+async function authGSC() { try { const res = await api.getGSCAuthURL(); window.open(res.data.url, '_blank', 'noopener,noreferrer') } catch (e) { console.error(e) } }
+async function authGA() { try { const res = await api.getGAAuthURL(); window.open(res.data.url, '_blank', 'noopener,noreferrer') } catch (e) { console.error(e) } }
+async function authYandex() { try { const res = await api.getYandexAuthURL(); window.open(res.data.url, '_blank', 'noopener,noreferrer') } catch (e) { console.error(e) } }
 </script>
 
 <style scoped>

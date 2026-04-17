@@ -46,6 +46,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import { copyToClipboard } from '../utils/clipboard'
 import TaskStatusCard from '../components/audit/TaskStatusCard.vue'
 import IssueList from '../components/audit/IssueList.vue'
 
@@ -57,12 +58,9 @@ const downloading = ref(false)
 let pollTimer = null
 
 async function copyRaw() {
-  try {
-    await navigator.clipboard.writeText(result.value?.raw_ai_response || '')
-    ElMessage.success('已复制到剪贴板')
-  } catch (e) {
-    console.error('复制失败', e)
-  }
+  const ok = await copyToClipboard(result.value?.raw_ai_response || '')
+  if (ok) ElMessage.success('已复制到剪贴板')
+  else ElMessage.error('复制失败，请手动选择文本复制')
 }
 
 async function downloadReport() {

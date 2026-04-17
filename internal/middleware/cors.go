@@ -11,8 +11,10 @@ import (
 // allowedOrigins caches the parsed ALLOWED_ORIGINS whitelist.
 var allowedOrigins []string
 
-// devCORS is true only when GIN_MODE != "release" AND ALLOWED_ORIGINS is empty.
-// In release mode with no whitelist, CORS is refused (fail-closed).
+// devCORS is true only when ALLOW_DEV_CORS=1 is explicitly set AND
+// ALLOWED_ORIGINS is empty. Previously this defaulted to "on" whenever
+// GIN_MODE != release, which meant forgetting to set GIN_MODE=release in
+// production silently reflected any Origin + credentials.
 var devCORS bool
 
 func init() {
@@ -25,11 +27,11 @@ func init() {
 		}
 	}
 	if len(allowedOrigins) == 0 {
-		if os.Getenv("GIN_MODE") == "release" {
-			log.Println("[cors] WARNING: ALLOWED_ORIGINS is empty in release mode — all cross-origin requests will be rejected.")
-		} else {
+		if os.Getenv("ALLOW_DEV_CORS") == "1" {
 			devCORS = true
-			log.Println("[cors] dev mode: reflecting Origin with credentials. Set ALLOWED_ORIGINS before deploying.")
+			log.Println("[cors] ALLOW_DEV_CORS=1 — reflecting any Origin with credentials. DO NOT use in production.")
+		} else {
+			log.Println("[cors] ALLOWED_ORIGINS is empty — all cross-origin requests rejected (fail-closed). Set ALLOWED_ORIGINS=https://example.com or ALLOW_DEV_CORS=1 for local dev.")
 		}
 	}
 }
@@ -55,7 +57,10 @@ func CORS() gin.HandlerFunc {
 		// If origin is not allowed, no ACAO header → browser blocks the response.
 
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
+		// X-CSRF-Token must be listed so browsers let the double-submit
+		// header through on cross-origin preflight. Without it, every
+		// cross-origin write from the SPA is rejected.
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization, X-CSRF-Token, X-Requested-With")
 		c.Header("Access-Control-Max-Age", "86400")
 
 		if c.Request.Method == "OPTIONS" {

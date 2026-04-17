@@ -27,14 +27,12 @@ const instance = axios.create({
 })
 
 instance.interceptors.request.use(config => {
-  // Bearer-token fallback for clients persisting via localStorage. Once the
-  // cookie is set by /login, the cookie takes precedence server-side.
-  const legacyToken = localStorage.getItem('token')
-  if (legacyToken && !config.headers.Authorization) {
-    config.headers.Authorization = `Bearer ${legacyToken}`
-  }
   // CSRF double-submit: mirror the csrf_token cookie into X-CSRF-Token for
-  // state-changing methods.
+  // state-changing methods. The auth cookie is httpOnly and handled by the
+  // browser automatically (via withCredentials). We deliberately do NOT
+  // read localStorage here: an older build used to stash the JWT there,
+  // and a stale or attacker-controlled value would otherwise get replayed
+  // on every request AND bypass CSRF (Bearer clients are exempt server-side).
   const method = (config.method || 'get').toLowerCase()
   if (method !== 'get' && method !== 'head' && method !== 'options') {
     const csrf = readCookie('csrf_token')
@@ -57,6 +55,7 @@ instance.interceptors.response.use(
   },
   error => {
     if (error.response?.status === 401) {
+      // Scrub any lingering legacy token — harmless if absent.
       localStorage.removeItem('token')
       router.push('/login')
     }
@@ -130,17 +129,20 @@ const api = {
   // GSC
   getGSCAuthURL: () => instance.get('/v1/oauth/gsc'),
   syncGSC: (siteId: Id) => instance.post(`/v1/sites/${siteId}/gsc/sync`),
-  getGSCData: (siteId: Id, days?: number) => instance.get(`/v1/sites/${siteId}/gsc`, { params: { days } }),
+  getGSCData: (siteId: Id, days?: number, config?: Record<string, any>) =>
+    instance.get(`/v1/sites/${siteId}/gsc`, { params: { days }, ...(config || {}) }),
 
   // GA
   getGAAuthURL: () => instance.get('/v1/oauth/ga'),
   syncGA: (siteId: Id) => instance.post(`/v1/sites/${siteId}/ga/sync`),
-  getGAData: (siteId: Id) => instance.get(`/v1/sites/${siteId}/ga`),
+  getGAData: (siteId: Id, config?: Record<string, any>) =>
+    instance.get(`/v1/sites/${siteId}/ga`, config),
 
   // Yandex
   getYandexAuthURL: () => instance.get('/v1/oauth/yandex'),
   syncYandex: (siteId: Id) => instance.post(`/v1/sites/${siteId}/yandex/sync`),
-  getYandexData: (siteId: Id) => instance.get(`/v1/sites/${siteId}/yandex`),
+  getYandexData: (siteId: Id, config?: Record<string, any>) =>
+    instance.get(`/v1/sites/${siteId}/yandex`, config),
 
   // Reports
   listReports: (params?: Record<string, any>) => instance.get('/v1/reports', { params }),
@@ -151,7 +153,8 @@ const api = {
 
   // Bing Webmaster
   syncBing: (siteId: Id) => instance.post(`/v1/sites/${siteId}/bing/sync`),
-  getBingData: (siteId: Id) => instance.get(`/v1/sites/${siteId}/bing`),
+  getBingData: (siteId: Id, config?: Record<string, any>) =>
+    instance.get(`/v1/sites/${siteId}/bing`, config),
 
   // Settings & Permissions
   getOnlineUsers: () => instance.get('/v1/auth/online'),

@@ -90,7 +90,9 @@ func main() {
 		v1.POST("/auth/change-password", api.ChangePassword)
 		v1.GET("/auth/me", api.GetMe)
 		v1.GET("/auth/csrf", api.GetCSRFToken)
-		v1.GET("/auth/online", api.GetOnlineUsersAPI)
+		// Online presence shows every user's email + IP — route it through
+		// the ACL so the frontend menu "在线用户" can be gated per-user.
+		v1.GET("/auth/online", api.RequirePermission("dashboard.online"), api.GetOnlineUsersAPI)
 		v1.GET("/auth/my-permissions", api.GetMyPermissions)
 		v1.GET("/auth/my-ai-config", api.GetMyAIConfig)
 		v1.PUT("/auth/my-ai-config", api.SaveMyAIConfig)

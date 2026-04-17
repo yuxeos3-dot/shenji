@@ -19,7 +19,9 @@ type LoginRequest struct {
 
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password" binding:"required"`
-	NewPassword string `json:"new_password" binding:"required,min=8"`
+	// min=12 matches ValidatePassword — keep these in sync or the user
+	// sees two different "密码至少 N 位" messages back-to-back.
+	NewPassword string `json:"new_password" binding:"required,min=12"`
 }
 
 func Login(c *gin.Context) {
@@ -117,7 +119,7 @@ func Logout(c *gin.Context) {
 func ChangePassword(c *gin.Context) {
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "新密码至少8个字符"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "新密码至少 12 位，且需含大小写字母和数字"})
 		return
 	}
 	if err := ValidatePassword(req.NewPassword); err != nil {

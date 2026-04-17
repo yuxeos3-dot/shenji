@@ -22,7 +22,7 @@
       <div class="page-row" v-for="p in pages" :key="p.id">
         <div class="page-info">
           <span class="page-name">{{ p.name }}</span>
-          <a :href="p.url" target="_blank" class="page-url">{{ p.url }}</a>
+          <a :href="p.url" target="_blank" rel="noopener noreferrer" class="page-url">{{ p.url }}</a>
         </div>
         <div class="page-meta" v-if="p.last_fetched_at">
           <span :class="['page-status', p.status_code===200?'status-ok':'status-err']">{{ p.status_code }}</span>

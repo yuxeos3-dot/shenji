@@ -56,7 +56,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { ElMessage } from 'element-plus'
@@ -94,7 +94,9 @@ const pageTitle = computed(() => {
   return 'SEO巡站系统'
 })
 
-onMounted(() => { userStore.fetchUser() })
+// router.beforeEach in router/index.ts already calls fetchUser() before
+// rendering any authed route, so there's no need to call it again here —
+// doing so was causing two /auth/me requests on every first-load.
 
 async function handleLogout() {
   await userStore.logout()

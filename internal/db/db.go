@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"log"
 	"os"
+	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 	"golang.org/x/crypto/bcrypt"
@@ -268,7 +270,14 @@ func Init() {
 		log.Fatalf("Failed to open database: %v", err)
 	}
 
-	DB.SetMaxOpenConns(1)
+	// SQLite + WAL supports many concurrent readers; pinning MaxOpenConns=1
+	// serialised *everything*, so a single slow audit read blocked the
+	// entire API. Allow a pool of readers while still funnelling writes
+	// through the busy_timeout. The driver will only ever use one writer
+	// at a time because SQLite itself enforces that.
+	DB.SetMaxOpenConns(10)
+	DB.SetMaxIdleConns(5)
+	DB.SetConnMaxLifetime(30 * time.Minute)
 
 	// Additional PRAGMAs (idempotent).
 	for _, p := range []string{
@@ -444,7 +453,18 @@ func Init() {
 		`CREATE INDEX IF NOT EXISTS idx_spider_visited_at ON spider_logs(visited_at)`,
 	}
 	for _, m := range migrations {
-		DB.Exec(m) // ignore errors (column/table already exists)
+		if _, err := DB.Exec(m); err != nil {
+			// SQLite's "duplicate column name"/"table already exists" is
+			// expected on every startup after the first — the migrations
+			// are idempotent. Anything else is a real bug that we would
+			// previously have swallowed and never noticed.
+			msg := err.Error()
+			if strings.Contains(msg, "duplicate") ||
+				strings.Contains(msg, "already exists") {
+				continue
+			}
+			log.Printf("[migration] %.80q: %v", m, err)
+		}
 	}
 
 	seedDefaultAdmin()
@@ -469,11 +489,15 @@ func seedDefaultAdmin() {
 	password := os.Getenv("ADMIN_INIT_PASSWORD")
 	generated := false
 	if password == "" {
-		buf := make([]byte, 16)
+		// Generate a random password that definitely satisfies the policy
+		// (>=12 chars, >=1 upper, >=1 lower, >=1 digit). Starting with a
+		// fixed "Aa1" prefix + 20 random chars keeps it memorable-free
+		// while guaranteeing complexity.
+		buf := make([]byte, 20)
 		if _, err := rand.Read(buf); err != nil {
 			log.Fatalf("Failed to generate admin password: %v", err)
 		}
-		password = base64.RawURLEncoding.EncodeToString(buf)
+		password = "Aa1" + base64.RawURLEncoding.EncodeToString(buf)
 		generated = true
 	}
 

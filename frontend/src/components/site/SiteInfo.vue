@@ -10,7 +10,7 @@
       <div class="info-item">
         <span class="info-label">域名</span>
         <span class="info-val">
-          <a :href="site.domain" target="_blank" class="domain-link">
+          <a :href="site.domain" target="_blank" rel="noopener noreferrer" class="domain-link">
             {{ site.domain }} <span class="link-icon">↗</span>
           </a>
         </span>

@@ -101,7 +101,7 @@
             <tr v-for="d in bingData" :key="d.date"><td class="dc">{{ d.date }}</td><td class="num c">{{ fmt(d.clicks) }}</td><td class="num g">{{ fmt(d.impressions) }}</td><td class="num y">{{ ((d.ctr||0)*100).toFixed(2) }}%</td><td class="num p">{{ (d.avg_position||0).toFixed(1) }}</td><td class="num" style="color:var(--info)">{{ fmt(d.index_count) }}</td></tr>
           </tbody></table>
         </template>
-        <div v-else class="eh">暂无Bing数据。需要：<br>1. 站点详情填写「Bing Site URL」<br>2. 系统设置配置「Bing API Key」（<a href="https://www.bing.com/webmasters/home" target="_blank" style="color:var(--info);font-weight:600">Bing站长后台获取 →</a>）<br>3. 点击「同步Bing」</div>
+        <div v-else class="eh">暂无Bing数据。需要：<br>1. 站点详情填写「Bing Site URL」<br>2. 系统设置配置「Bing API Key」（<a href="https://www.bing.com/webmasters/home" target="_blank" rel="noopener noreferrer" style="color:var(--info);font-weight:600">Bing站长后台获取 →</a>）<br>3. 点击「同步Bing」</div>
       </div>
 
       <!-- Yandex -->

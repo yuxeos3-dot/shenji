@@ -182,6 +182,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import apiClient from '../api'
+import { copyToClipboard } from '../utils/clipboard'
 
 const sites = ref([])
 const selectedSiteId = ref(null)
@@ -240,7 +241,10 @@ async function rewriteContent() {
 }
 
 function copyText(text) {
-  navigator.clipboard.writeText(text).then(() => ElMessage.success('已复制到剪贴板'))
+  copyToClipboard(text).then(ok => {
+    if (ok) ElMessage.success('已复制到剪贴板')
+    else ElMessage.error('复制失败，请手动选择文本复制')
+  })
 }
 
 function loadHistory(h) {

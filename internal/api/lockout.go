@@ -25,6 +25,45 @@ var (
 	lockouts  = map[string]*lockoutEntry{}
 )
 
+// Start a background sweeper so lockouts don't accumulate forever when an
+// attacker cycles through many email addresses. Entries are removed once
+// they've been unlocked and have no fresh failures inside the rolling
+// window.
+func init() {
+	go func() {
+		t := time.NewTicker(10 * time.Minute)
+		defer t.Stop()
+		for range t.C {
+			sweepLockouts()
+		}
+	}()
+}
+
+func sweepLockouts() {
+	now := time.Now()
+	cutoff := now.Add(-accountLockoutWindow)
+	lockoutMu.Lock()
+	defer lockoutMu.Unlock()
+	for key, entry := range lockouts {
+		// Still locked → keep.
+		if now.Before(entry.lockedUntil) {
+			continue
+		}
+		// Prune stale failure timestamps.
+		kept := entry.failures[:0]
+		for _, t := range entry.failures {
+			if t.After(cutoff) {
+				kept = append(kept, t)
+			}
+		}
+		entry.failures = kept
+		// No pending lock and no recent failures → drop the entry.
+		if len(entry.failures) == 0 {
+			delete(lockouts, key)
+		}
+	}
+}
+
 // normalizeEmail lowercases + trims to avoid case-sensitivity sidestepping
 // the lockout counter. We key on email because an attacker can rotate IPs
 // but needs to guess a stable account.

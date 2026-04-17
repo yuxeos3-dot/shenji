@@ -165,6 +165,7 @@ import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import { copyToClipboard } from '../utils/clipboard'
 
 const router = useRouter()
 const today = new Date().toISOString().slice(0, 10)
@@ -276,10 +277,9 @@ async function submit() {
 }
 
 async function copyPolished() {
-  try {
-    await navigator.clipboard.writeText(polishedContent.value)
-    ElMessage.success('已复制')
-  } catch (e) { console.error(e) }
+  const ok = await copyToClipboard(polishedContent.value)
+  if (ok) ElMessage.success('已复制')
+  else ElMessage.error('复制失败，请手动选择文本复制')
 }
 </script>
 

@@ -81,7 +81,7 @@
                 <span :class="['status-dot', statusClass(r.status_code)]">{{ r.status_code || '?' }}</span>
               </td>
               <td class="url-cell">
-                <a :href="r.url" target="_blank" class="url-link">{{ r.url }}</a>
+                <a :href="r.url" target="_blank" rel="noopener noreferrer" class="url-link">{{ r.url }}</a>
               </td>
               <td class="source-cell">{{ r.source_page }}</td>
               <td class="ttfb-cell">{{ r.ttfb_ms ? r.ttfb_ms + 'ms' : '—' }}</td>

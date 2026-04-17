@@ -59,6 +59,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import { copyToClipboard } from '../utils/clipboard'
 import SiteInfo from '../components/site/SiteInfo.vue'
 import PageManager from '../components/site/PageManager.vue'
 import AuditHistory from '../components/site/AuditHistory.vue'
@@ -200,8 +201,10 @@ async function viewSource(p) {
   } catch (e) { console.error('查看源码失败', e) }
 }
 
-function copySource() {
-  navigator.clipboard.writeText(sourceData.value.html || '').then(() => ElMessage.success('源码已复制'))
+async function copySource() {
+  const ok = await copyToClipboard(sourceData.value.html || '')
+  if (ok) ElMessage.success('源码已复制')
+  else ElMessage.error('复制失败，请手动选择文本复制')
 }
 
 async function saveSchedule(config) {
