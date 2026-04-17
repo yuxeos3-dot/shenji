@@ -57,12 +57,13 @@ func main() {
 	r.Use(api.MetricsCounter())
 
 	// Public health endpoint — used by load balancers / monitoring. Reports
-	// DB reachability. Deliberately outside the auth group.
-	r.GET("/healthz", api.Healthz)
+	// DB reachability. Deliberately outside the auth group. Lives under
+	// /api/ so reverse proxies that only forward /api/* still hit it.
+	r.GET("/api/healthz", api.Healthz)
 
 	// Prometheus-style metrics endpoint (no-auth by default; wrap with reverse
 	// proxy ACL if the host is public).
-	r.GET("/metrics", api.Metrics)
+	r.GET("/api/metrics", api.Metrics)
 
 	// Auth routes (no auth required)
 	r.POST("/api/auth/login", middleware.LoginRateLimit(), api.Login)
