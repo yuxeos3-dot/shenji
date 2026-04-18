@@ -20,8 +20,6 @@ func escapeHTML(s string) string {
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	return s
 }
-	return s
-}
 
 // Send delivers a formatted notification via the supplied bot token and
 // chat id. The caller is responsible for resolving credentials.

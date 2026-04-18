@@ -97,14 +97,14 @@ func CSRFProtect() gin.HandlerFunc {
 		}
 
 		header := c.GetHeader(CSRFHeaderName)
-		cookie, _ := c.Cookie(CSRFCookieName)
+		csrfCookie, _ := c.Cookie(CSRFCookieName)
 		// Constant-time comparison avoids leaking the cookie via response-
 		// time side channels (the attacker controls `header`, so a plain
 		// `header != cookie` short-circuits byte-by-byte).
 		headerValid := ValidateCSRFToken(header)
-		cookieValid := ValidateCSRFToken(cookie)
-		equal := subtle.ConstantTimeCompare([]byte(header), []byte(cookie)) == 1
-		if header == "" || cookie == "" || !equal || !headerValid || !cookieValid {
+		cookieValid := ValidateCSRFToken(csrfCookie)
+		equal := subtle.ConstantTimeCompare([]byte(header), []byte(csrfCookie)) == 1
+		if header == "" || csrfCookie == "" || !equal || !headerValid || !cookieValid {
 			c.AbortWithStatusJSON(http.StatusForbidden,
 				gin.H{"code": -1, "error": "CSRF token 缺失或无效"})
 			return
