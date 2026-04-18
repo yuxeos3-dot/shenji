@@ -10,8 +10,10 @@
       </div>
     </div>
 
-    <!-- Online Users -->
-    <div class="panel online-panel" v-if="online.users.length">
+    <!-- Online Users — admin-only. Members not only don't see other
+         people's IPs, the query hook itself doesn't fire so there's
+         no 403-toast noise on mount. -->
+    <div class="panel online-panel" v-if="isAdmin && online.users.length">
       <div class="panel-header">
         <h2><span class="online-dot"></span> 在线用户 <span class="online-badge">{{ online.online_count }} 个会话 · {{ online.user_count }} 人在线</span></h2>
       </div>
@@ -68,19 +70,39 @@
 <script setup>
 import { computed } from 'vue'
 import { useSites, useOnlineUsers } from '../composables/useApi'
+import { useUserStore } from '../stores/user'
+
+const userStore = useUserStore()
+const isAdmin = computed(() => userStore.isAdmin())
 
 const { data: sitesData } = useSites()
-const { data: onlineData } = useOnlineUsers()
+// Only admins hit /v1/auth/online — the endpoint is AdminRequired on
+// the backend, so calling it from a member view would surface a 403
+// error toast + pollute the audit log. Conditional enabling means the
+// query never fires for members and their Dashboard is clean.
+const { data: onlineData } = useOnlineUsers(isAdmin.value)
 
 const sites = computed(() => sitesData.value || [])
 const online = computed(() => onlineData.value || { online_count: 0, user_count: 0, users: [] })
 
-const stats = computed(() => [
-  { label: '站点总数', value: sites.value.length, icon: '🌐', cls: 'val-sun', sub: '已接入' },
-  { label: '健康站点', value: sites.value.filter(s => s.last_audit_status === 'done').length, icon: '✅', cls: 'val-ok', sub: '审计通过' },
-  { label: '待审计', value: sites.value.filter(s => !s.last_audit_status).length, icon: '⏳', cls: 'val-warn', sub: '未开始' },
-  { label: '在线人数', value: online.value.user_count, icon: '👥', cls: 'val-ok', sub: online.value.online_count + ' 个会话' },
-])
+// Stats row: "在线人数" card is admin-only for the same reason the
+// online panel is. Members see the three site-related cards only.
+const stats = computed(() => {
+  const base = [
+    { label: '站点总数', value: sites.value.length, icon: '🌐', cls: 'val-sun', sub: '已接入' },
+    { label: '健康站点', value: sites.value.filter(s => s.last_audit_status === 'done').length, icon: '✅', cls: 'val-ok', sub: '审计通过' },
+    { label: '待审计', value: sites.value.filter(s => !s.last_audit_status).length, icon: '⏳', cls: 'val-warn', sub: '未开始' },
+  ]
+  if (isAdmin.value) {
+    base.push({
+      label: '在线人数',
+      value: online.value.user_count,
+      icon: '👥', cls: 'val-ok',
+      sub: online.value.online_count + ' 个会话',
+    })
+  }
+  return base
+})
 </script>
 
 <style scoped>

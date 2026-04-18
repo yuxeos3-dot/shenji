@@ -30,6 +30,11 @@ export function useOnlineUsers(enabled = true) {
       const res = await api.getOnlineUsers()
       return res.data
     },
+    // `enabled` gates the initial fetch too — without this, a member's
+    // Dashboard mount would still fire one GET /v1/auth/online that
+    // 403s and spawns an error toast. With it, the query is dormant
+    // until isAdmin flips true (which it won't for members).
+    enabled,
     refetchInterval: enabled ? 30_000 : false,
   })
 }

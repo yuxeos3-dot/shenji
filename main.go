@@ -175,7 +175,12 @@ func main() {
 		v1.GET("/auth/csrf", api.GetCSRFToken)
 		// Online presence shows every user's email + IP — route it through
 		// the ACL so the frontend menu "在线用户" can be gated per-user.
-		v1.GET("/auth/online", api.RequirePermission("dashboard.online"), api.GetOnlineUsersAPI)
+		// Online users list is admin-only — it exposes other employees'
+		// real IP addresses which members should never see. The
+		// dashboard.online permission code stays in the tree as an
+		// AdminOnly marker so the UI doesn't offer the checkbox, but
+		// enforcement is via AdminRequired here.
+		v1.GET("/auth/online", middleware.AdminRequired(), api.GetOnlineUsersAPI)
 		v1.GET("/auth/my-permissions", api.GetMyPermissions)
 		v1.GET("/auth/my-ai-config", api.GetMyAIConfig)
 		v1.PUT("/auth/my-ai-config", api.SaveMyAIConfig)

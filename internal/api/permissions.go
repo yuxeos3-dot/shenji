@@ -45,7 +45,12 @@ type PermNode struct {
 var PermissionTree = []PermNode{
 	{Code: "dashboard", Label: "仪表盘", Children: []PermNode{
 		{Code: "dashboard.view", Label: "查看仪表盘"},
-		{Code: "dashboard.online", Label: "查看在线用户"},
+		// Online users list is admin-only: it surfaces other employees'
+		// real IP addresses and session counts, which members have no
+		// business seeing across tenants. Flagged AdminOnly so the
+		// member perm picker hides the checkbox; the route itself is
+		// now AdminRequired (see main.go) for defense-in-depth.
+		{Code: "dashboard.online", Label: "查看在线用户（仅管理员）", AdminOnly: true},
 	}},
 	{Code: "data", Label: "数据管理", Children: []PermNode{
 		{Code: "data.view", Label: "查看数据面板"},
@@ -196,6 +201,84 @@ var PermissionTree = []PermNode{
 func MigrateLegacyPermissions() {
 	migrateLegacyPermissionsV3()
 	migrateLegacyPermissionsV4()
+	migrateLegacyPermissionsV5()
+}
+
+// migrateLegacyPermissionsV5 strips every permission code that is now
+// flagged AdminOnly from non-admin users' stored lists. The default-
+// all-checked behaviour on CreateUser + self-registration handed out
+// codes like dashboard.online before that code was marked AdminOnly —
+// the UI has since hidden the checkbox, but the database rows still
+// carry the grant and GetMyPermissions would keep returning it.
+//
+// This walks every user with role != 'admin' and filters out any code
+// that the current tree flags as AdminOnly. Idempotent, keyed by flag
+// perm_migrated_v5.
+func migrateLegacyPermissionsV5() {
+	var done string
+	db.DB.QueryRow(`SELECT COALESCE(value,'') FROM settings WHERE key='perm_migrated_v5'`).Scan(&done)
+	if done == "1" {
+		return
+	}
+
+	adminOnly := adminOnlyCodes()
+	if len(adminOnly) == 0 {
+		db.DB.Exec(`INSERT INTO settings(key, value) VALUES('perm_migrated_v5','1')
+			ON CONFLICT(key) DO UPDATE SET value='1'`)
+		return
+	}
+
+	rows, err := db.DB.Query(
+		`SELECT id, COALESCE(permissions,'') FROM users
+		 WHERE role <> 'admin' AND permissions IS NOT NULL AND permissions <> ''`)
+	if err != nil {
+		log.Printf("[perm-migration-v5] list users: %v", err)
+		return
+	}
+	type u struct {
+		id    int64
+		perms string
+	}
+	var toUpdate []u
+	for rows.Next() {
+		var x u
+		if err := rows.Scan(&x.id, &x.perms); err != nil {
+			continue
+		}
+		toUpdate = append(toUpdate, x)
+	}
+	rows.Close()
+
+	migrated := 0
+	for _, x := range toUpdate {
+		var list []string
+		if err := json.Unmarshal([]byte(x.perms), &list); err != nil {
+			continue
+		}
+		filtered := make([]string, 0, len(list))
+		changed := false
+		for _, code := range list {
+			if _, bad := adminOnly[code]; bad {
+				changed = true
+				continue
+			}
+			filtered = append(filtered, code)
+		}
+		if !changed {
+			continue
+		}
+		js, _ := json.Marshal(filtered)
+		if _, err := db.DB.Exec(`UPDATE users SET permissions=$1 WHERE id=$2`, string(js), x.id); err != nil {
+			log.Printf("[perm-migration-v5] user %d update: %v", x.id, err)
+			continue
+		}
+		migrated++
+	}
+	db.DB.Exec(`INSERT INTO settings(key, value) VALUES('perm_migrated_v5','1')
+		ON CONFLICT(key) DO UPDATE SET value='1'`)
+	if migrated > 0 {
+		log.Printf("[perm-migration-v5] stripped admin-only codes from %d member(s)", migrated)
+	}
 }
 
 // migrateLegacyPermissionsV3 is the original flat-code → granular-code
