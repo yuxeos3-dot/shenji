@@ -5,12 +5,14 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"seo-system/internal/ai"
 	"seo-system/internal/db"
 	"seo-system/internal/telegram"
 
 	"github.com/gin-gonic/gin"
+	"github.com/robfig/cron/v3"
 )
 
 var sensitiveKeys = map[string]bool{
@@ -136,6 +138,23 @@ func SaveSettings(c *gin.Context) {
 		// Skip masked values for sensitive keys (user didn't change them).
 		if sensitiveKeys[key] && strings.HasPrefix(value, "****") {
 			continue
+		}
+		// Validate auto_audit_cron: must be parseable and interval >= 1 hour.
+		if key == "auto_audit_cron" && value != "" {
+			parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+			sched, err := parser.Parse(value)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "cron 表达式无效: " + err.Error()})
+				return
+			}
+			// Reject intervals shorter than 1 hour.
+			now := time.Now()
+			next1 := sched.Next(now)
+			next2 := sched.Next(next1)
+			if next2.Sub(next1) < time.Hour {
+				c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "巡检间隔不能小于 1 小时"})
+				return
+			}
 		}
 		if err := db.SetSetting(key, value); err != nil {
 			// Don't fail the whole request — a single rotten legacy key
