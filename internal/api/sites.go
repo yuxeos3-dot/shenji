@@ -232,15 +232,30 @@ func DeleteSite(c *gin.Context) {
 		query string
 		args  []interface{}
 	}{
+		// Platform data
 		{"DELETE FROM dead_link_results WHERE site_id = ?", []interface{}{id}},
 		{"DELETE FROM external_links WHERE site_id = ?", []interface{}{id}},
 		{"DELETE FROM site_pages WHERE site_id = ?", []interface{}{id}},
 		{"DELETE FROM gsc_data WHERE site_id = ?", []interface{}{id}},
 		{"DELETE FROM ga_data WHERE site_id = ?", []interface{}{id}},
+		{"DELETE FROM bing_data WHERE site_id = ?", []interface{}{id}},
 		{"DELETE FROM yandex_data WHERE site_id = ?", []interface{}{id}},
+		{"DELETE FROM spider_logs WHERE site_id = ?", []interface{}{id}},
+		// Audit cascade (results/pages reference tasks)
 		{"DELETE FROM audit_results WHERE task_id IN (SELECT id FROM audit_tasks WHERE site_id = ?)", []interface{}{id}},
 		{"DELETE FROM audit_pages   WHERE task_id IN (SELECT id FROM audit_tasks WHERE site_id = ?)", []interface{}{id}},
 		{"DELETE FROM audit_tasks WHERE site_id = ?", []interface{}{id}},
+		// Coordination cascade (events/attachments/test_pages reference tasks)
+		{"DELETE FROM coord_test_pages WHERE task_id IN (SELECT id FROM coordination_tasks WHERE site_id = ?)", []interface{}{id}},
+		{"DELETE FROM coordination_attachments WHERE task_id IN (SELECT id FROM coordination_tasks WHERE site_id = ?)", []interface{}{id}},
+		{"DELETE FROM coordination_events WHERE task_id IN (SELECT id FROM coordination_tasks WHERE site_id = ?)", []interface{}{id}},
+		{"DELETE FROM coordination_tasks WHERE site_id = ?", []interface{}{id}},
+		// GEO content cascade (titles reference title_libs)
+		{"DELETE FROM geo_workflow_jobs WHERE site_id = ?", []interface{}{id}},
+		{"DELETE FROM geo_articles WHERE site_id = ?", []interface{}{id}},
+		{"DELETE FROM geo_titles WHERE lib_id IN (SELECT id FROM geo_title_libs WHERE site_id = ?)", []interface{}{id}},
+		{"DELETE FROM geo_title_libs WHERE site_id = ?", []interface{}{id}},
+		// Finally, the site itself
 		{"DELETE FROM sites WHERE id = ?", []interface{}{id}},
 	}
 	for _, s := range steps {
