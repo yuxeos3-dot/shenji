@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log"
 	"fmt"
 	"net/http"
 	"strconv"

@@ -222,7 +222,7 @@ func SubmitFRWGeneration(c *gin.Context) {
 	}
 
 	var id int64
-	err := db.DB.QueryRow(`INSERT INTO ai_generations (user_id, kind, mode, prompt, source_url, frw_task_id, status, progress) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+	err = db.DB.QueryRow(`INSERT INTO ai_generations (user_id, kind, mode, prompt, source_url, frw_task_id, status, progress) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
 		userID, kind, in.Mode, in.Prompt, in.SourceURL, res.TaskID, res.Status, res.Progress).Scan(&id)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "保存任务失败: " + err.Error()})

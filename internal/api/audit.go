@@ -10,6 +10,7 @@ import (
 	"seo-system/internal/ai"
 	"seo-system/internal/crawler"
 	"seo-system/internal/db"
+	"seo-system/internal/telegram"
 
 	"github.com/gin-gonic/gin"
 )
@@ -41,7 +42,7 @@ func TriggerAudit(c *gin.Context) {
 	}
 
 	var taskID int64
-	err := db.DB.QueryRow(
+	err = db.DB.QueryRow(
 		"INSERT INTO audit_tasks (site_id, triggered_by, status) VALUES ($1, $2, 'running') RETURNING id",
 		siteID, userID,
 	).Scan(&taskID)
@@ -247,7 +248,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=$1, finished_at=$2 WHERE id=$3",
 			"所有技术审计批次均失败", time.Now(), taskID)
 		log.Printf("[audit %d] 所有技术审计批次均失败", taskID)
-		NotifyUser(ownerUserID, "审计失败", siteName+" 审计失败：AI 调用异常")
+		telegram.NotifyUser(ownerUserID, "审计失败", siteName+" 审计失败：AI 调用异常")
 		return
 	}
 
@@ -315,7 +316,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	}
 
 	log.Printf("[audit %d] 完成: %s", taskID, analysisResult.Summary)
-	NotifyUser(ownerUserID, "审计完成", siteName+" 审计完成: "+analysisResult.Summary)
+	telegram.NotifyUser(ownerUserID, "审计完成", siteName+" 审计完成: "+analysisResult.Summary)
 }
 
 func DeleteAudit(c *gin.Context) {

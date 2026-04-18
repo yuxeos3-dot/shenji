@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"seo-system/internal/db"
+	"seo-system/internal/telegram"
 	"seo-system/internal/httpx"
 
 	"github.com/gin-gonic/gin"
@@ -135,7 +136,7 @@ func SubmitReport(c *gin.Context) {
 	// happened to own the global bot.)
 	var userName string
 	db.DB.QueryRow("SELECT name FROM users WHERE id = $1", userID).Scan(&userName)
-	NotifyUser(userID, "每日汇报已提交", userName+" 提交了 "+reportDate+" 的工作汇报")
+	telegram.NotifyUser(userID, "每日汇报已提交", userName+" 提交了 "+reportDate+" 的工作汇报")
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "汇报提交成功"})
 }

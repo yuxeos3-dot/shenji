@@ -183,7 +183,7 @@ func UploadCoordAttachment(c *gin.Context) {
 
 	// Now the attachment row.
 	var aID int64
-	err := db.DB.QueryRow(
+	err = db.DB.QueryRow(
 		`INSERT INTO coordination_attachments
 		 (task_id, event_id, filename, filepath, size, mime, uploaded_by)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,

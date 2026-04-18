@@ -101,8 +101,8 @@ func GetDeadLinks(c *gin.Context) {
 
 	// Filter
 	statusFilter := c.Query("status_filter") // dead / redirect / ok / all
-	where := fmt.Sprintf("site_id = $%d", len(args)+1)
 	args := []interface{}{siteID}
+	where := fmt.Sprintf("site_id = $%d", len(args))
 	switch statusFilter {
 	case "dead":
 		where += " AND (status_code >= 400 OR status_code <= 0)"

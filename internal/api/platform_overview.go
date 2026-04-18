@@ -283,7 +283,7 @@ func yandexCardsForUser(userID int64, sd, ed string) ([]map[string]interface{}, 
 	if err != nil {
 		return nil, nil
 	}
-	yandexUserID, err := getYandexUserIDCached(token)
+	yandexUserID, err := getYandexUserIDCached(userID, token)
 	if err != nil {
 		return nil, err
 	}
