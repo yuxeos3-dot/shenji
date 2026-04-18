@@ -334,6 +334,11 @@ func DeleteUser(c *gin.Context) {
 		{"DELETE FROM daily_reports WHERE user_id = ?", []interface{}{id}},
 		// Shared backlink pool: preserve data, null-out the creator reference.
 		{"UPDATE extlink_pool SET created_by = 0 WHERE created_by = ?", []interface{}{id}},
+		// #51: Cascade-clean per-user platform config / credentials tables.
+		{"DELETE FROM user_oauth_config WHERE user_id = ?", []interface{}{id}},
+		{"DELETE FROM user_oauth_tokens WHERE user_id = ?", []interface{}{id}},
+		{"DELETE FROM user_telegram WHERE user_id = ?", []interface{}{id}},
+		{"DELETE FROM user_bing WHERE user_id = ?", []interface{}{id}},
 		// Finally, delete the user.
 		{"DELETE FROM users WHERE id = ?", []interface{}{id}},
 	}
