@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"net"
@@ -39,11 +41,17 @@ type Claims struct {
 }
 
 func GenerateToken(userID int64, email, role string) (string, error) {
+	// Generate random jti (JWT ID) for unique token identification
+	jtiBytes := make([]byte, 16)
+	rand.Read(jtiBytes)
+	jti := base64.RawURLEncoding.EncodeToString(jtiBytes)
+
 	claims := Claims{
 		UserID: userID,
 		Email:  email,
 		Role:   role,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
@@ -69,6 +77,51 @@ func extractJWT(c *gin.Context) string {
 	return ""
 }
 
+
+// ─── Token invalidation cache (30s TTL) ────────────────────────────────────
+
+type tokenInvalidationEntry struct {
+	invalidatedAfter int64
+	fetchedAt        time.Time
+}
+
+var (
+	tokenInvalidationCache = make(map[int64]*tokenInvalidationEntry)
+	tokenInvalidationMu    sync.RWMutex
+)
+
+const tokenInvalidationTTL = 30 * time.Second
+
+// getTokenInvalidatedAfter returns the token_invalidated_after value for a user,
+// using a 30s TTL cache to avoid hitting the DB on every request.
+func getTokenInvalidatedAfter(userID int64) int64 {
+	tokenInvalidationMu.RLock()
+	if entry, ok := tokenInvalidationCache[userID]; ok && time.Since(entry.fetchedAt) < tokenInvalidationTTL {
+		tokenInvalidationMu.RUnlock()
+		return entry.invalidatedAfter
+	}
+	tokenInvalidationMu.RUnlock()
+
+	var val int64
+	db.DB.QueryRow("SELECT COALESCE(token_invalidated_after, 0) FROM users WHERE id = ?", userID).Scan(&val)
+
+	tokenInvalidationMu.Lock()
+	tokenInvalidationCache[userID] = &tokenInvalidationEntry{
+		invalidatedAfter: val,
+		fetchedAt:        time.Now(),
+	}
+	tokenInvalidationMu.Unlock()
+	return val
+}
+
+// InvalidateTokenCache removes a user's entry from the cache so the next
+// request re-reads from DB. Called after logout / password change.
+func InvalidateTokenCache(userID int64) {
+	tokenInvalidationMu.Lock()
+	delete(tokenInvalidationCache, userID)
+	tokenInvalidationMu.Unlock()
+}
+
 func AuthRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenStr := extractJWT(c)
@@ -90,6 +143,17 @@ func AuthRequired() gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": "Token无效或已过期"})
 			c.Abort()
 			return
+		}
+
+		// Check token invalidation: if JWT was issued before the user's
+		// token_invalidated_after timestamp, reject it.
+		if claims.IssuedAt != nil {
+			invalidatedAfter := getTokenInvalidatedAfter(claims.UserID)
+			if invalidatedAfter > 0 && claims.IssuedAt.Time.Unix() < invalidatedAfter {
+				c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": "登录已失效，请重新登录"})
+				c.Abort()
+				return
+			}
 		}
 
 		c.Set("user_id", claims.UserID)

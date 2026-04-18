@@ -109,6 +109,15 @@ func Login(c *gin.Context) {
 }
 
 func Logout(c *gin.Context) {
+	// Invalidate all existing tokens for this user by setting
+	// token_invalidated_after to the current unix timestamp.
+	userID := c.GetInt64("user_id")
+	if userID > 0 {
+		now := time.Now().Unix()
+		db.DB.Exec("UPDATE users SET token_invalidated_after = ? WHERE id = ?", now, userID)
+		middleware.InvalidateTokenCache(userID)
+	}
+
 	// Expire both cookies. Empty value + MaxAge<0 tells the browser to drop them.
 	secure := isHTTPS(c)
 	c.SetSameSite(http.SameSiteStrictMode)
@@ -153,6 +162,11 @@ func ChangePassword(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "更新密码失败"})
 		return
 	}
+
+	// Invalidate all existing tokens so other sessions are forced to re-login.
+	now := time.Now().Unix()
+	db.DB.Exec("UPDATE users SET token_invalidated_after = ? WHERE id = ?", now, userID)
+	middleware.InvalidateTokenCache(userID)
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "密码修改成功"})
 }
