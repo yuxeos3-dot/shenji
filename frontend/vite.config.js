@@ -15,6 +15,9 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
+      // Never ship source maps to production — they expose the full
+      // source tree and make reverse-engineering trivial.
+      sourcemap: false,
       // Split the vendor bundle so returning visitors only re-download the
       // app chunks that actually changed. element-plus is the big one;
       // isolating it lets the browser cache it across deployments.
