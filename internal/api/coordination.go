@@ -593,6 +593,23 @@ func VerifyCoordTask(c *gin.Context) {
 		return
 	}
 
+	// #36: Require a completed audit (status='done') for the site created
+	// after the task was submitted, so the verifier has fresh evidence.
+	var auditCount int
+	submittedRef := t.SubmittedAt
+	if submittedRef == nil {
+		submittedRef = &t.CreatedAt
+	}
+	db.DB.QueryRow(
+		`SELECT COUNT(*) FROM audit_tasks
+		 WHERE site_id = ? AND status = 'done' AND created_at > ?`,
+		t.SiteID, *submittedRef,
+	).Scan(&auditCount)
+	if auditCount == 0 {
+		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "验收前需要先完成一次新的站点审计"})
+		return
+	}
+
 	uid, uname := currentUser(c)
 	now := time.Now().UTC()
 	_, err := db.DB.Exec(
