@@ -898,11 +898,8 @@ func seedDefaultSettings() {
 		"auto_audit_cron":           "0 9 * * *",
 		"auto_audit_interval_hours": "0",
 		"max_concurrent_audit":      "3",
-		"ai_api_url":                "https://ai.router.team/v1",
-		"ai_model":                  "claude-sonnet-4-6",
 		"ip_whitelist":              "",
 		"spider_ingest_api_key":     "", // Set via admin UI; empty disables /api/spider/ingest
-		"frw_apikey":                "", // Global fallback for FRW image/video gen apikey
 	}
 
 	for k, v := range defaults {
