@@ -1392,6 +1392,12 @@ func repairJSON(s string) string {
 
 	stack, inString, rewind := scan(s)
 
+	// If the JSON structure is already complete (not mid-string and no
+	// unclosed containers), skip the rewind logic entirely.
+	if !inString && len(stack) == 0 {
+		return s
+	}
+
 	// If the tail is mid-string, rewind to the last clean element boundary.
 	if inString && rewind > 0 {
 		s = s[:rewind]
