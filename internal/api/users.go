@@ -138,8 +138,17 @@ func CreateUser(c *gin.Context) {
 		return
 	}
 
+	// Wrap INSERT + permission UPDATE in a single transaction so the
+	// user row is never visible without its intended permissions.
+	tx, txErr := db.DB.Begin()
+	if txErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "创建失败"})
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	var id int64
-	err := db.DB.QueryRow(
+	err = tx.QueryRow(
 		`INSERT INTO users (name, email, password, role, department_id, group_id)
 		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 		req.Name, req.Email, string(hash), req.Role, req.DepartmentID, req.GroupID,
@@ -149,22 +158,20 @@ func CreateUser(c *gin.Context) {
 		return
 	}
 
-
-	// Initial permissions — skip entirely for admins (they have all
-	// perms implicitly) and when the caller didn't send any (empty
-	// list = "apply no perms", nil = "don't touch").
-	//
-	// If the permission validation fails here we've already inserted
-	// the user, so we return 200 with a warning rather than rolling
-	// back — the admin can fix perms from the row action instead.
+	// Initial permissions - skip for admins (they have all perms implicitly).
 	if req.Role != "admin" && len(req.Permissions) > 0 {
 		cleaned, permErr := cleanPermissionList(req.Permissions)
 		if permErr == nil {
 			js, _ := json.Marshal(cleaned)
-			db.DB.Exec("UPDATE users SET permissions=$1 WHERE id=$2", string(js), id)
+			tx.Exec("UPDATE users SET permissions=$1 WHERE id=$2", string(js), id)
 		} else {
 			log.Printf("[create_user] id=%d perms rejected: %v", id, permErr)
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "创建失败"})
+		return
 	}
 
 	WriteAuditLog(c, "create_user", "user", fmt.Sprintf("%d", id), req.Email)
@@ -216,36 +223,37 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 
-	// If this call would demote the last admin, refuse. This protects the
-	// system from "locking everyone out" when the sole admin edits their
-	// own record and accidentally picks role=member.
-	if req.Role != "" && req.Role != "admin" {
-		var curRole string
-		if err := db.DB.QueryRow("SELECT role FROM users WHERE id = $1", id).Scan(&curRole); err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "用户不存在"})
+	// Use a transaction with SELECT FOR UPDATE to prevent TOCTOU race
+	// when checking admin count then updating the role.
+	tx, err := db.DB.Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "更新失败"})
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Lock the user row to prevent concurrent role changes.
+	var curRole string
+	var curDept, curGroup int64
+	if err := tx.QueryRow(
+		"SELECT role, COALESCE(department_id, 0), COALESCE(group_id, 0) FROM users WHERE id = $1 FOR UPDATE", id,
+	).Scan(&curRole, &curDept, &curGroup); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "用户不存在"})
+		return
+	}
+
+	// If this call would demote the last admin, refuse.
+	if req.Role != "" && req.Role != "admin" && curRole == "admin" {
+		var adminCount int
+		tx.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'admin'").Scan(&adminCount)
+		if adminCount <= 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "不能降级最后一个管理员"})
 			return
-		}
-		if curRole == "admin" {
-			var adminCount int
-			db.DB.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'admin'").Scan(&adminCount)
-			if adminCount <= 1 {
-				c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "不能降级最后一个管理员"})
-				return
-			}
 		}
 	}
 
 	// If department or group is being changed, validate the pair.
-	// The pointer trick on the request type lets us tell "not sent"
-	// from "sent as 0" (unassigning).
 	if req.DepartmentID != nil || req.GroupID != nil {
-		// Load current values to fill in whichever side the caller
-		// didn't send — so a partial update ("just change the group")
-		// still gets validated against the existing department.
-		var curDept, curGroup int64
-		db.DB.QueryRow(
-			"SELECT COALESCE(department_id, 0), COALESCE(group_id, 0) FROM users WHERE id = $1", id,
-		).Scan(&curDept, &curGroup)
 		newDept := curDept
 		newGroup := curGroup
 		if req.DepartmentID != nil {
@@ -254,9 +262,6 @@ func UpdateUser(c *gin.Context) {
 		if req.GroupID != nil {
 			newGroup = *req.GroupID
 		}
-		// If the caller changed department but didn't explicitly
-		// specify a group, reset group to 0 — a group under the old
-		// department would be invalid under the new one.
 		if req.DepartmentID != nil && req.GroupID == nil && newDept != curDept {
 			newGroup = 0
 		}
@@ -264,7 +269,7 @@ func UpdateUser(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 			return
 		}
-		if _, err := db.DB.Exec(
+		if _, err := tx.Exec(
 			"UPDATE users SET department_id = $1, group_id = $2 WHERE id = $3",
 			newDept, newGroup, id,
 		); err != nil {
@@ -273,11 +278,16 @@ func UpdateUser(c *gin.Context) {
 		}
 	}
 
-	_, err := db.DB.Exec(
+	_, err = tx.Exec(
 		"UPDATE users SET name = COALESCE(NULLIF($1, ''), name), email = COALESCE(NULLIF($2, ''), email), role = COALESCE(NULLIF($3, ''), role), telegram_id = $4 WHERE id = $5",
 		req.Name, req.Email, req.Role, req.TelegramID, id,
 	)
 	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "更新失败"})
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "更新失败"})
 		return
 	}
@@ -297,32 +307,31 @@ func DeleteUser(c *gin.Context) {
 		return
 	}
 
-	// Prevent deleting the last admin — losing every admin wedges the
-	// system until someone edits the DB by hand.
+	// Cascade delete in a single transaction with the admin-count check
+	// inside so there is no TOCTOU gap between checking and deleting.
+	tx, err := db.DB.Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Lock the user row and check admin count atomically.
 	var role string
-	if err := db.DB.QueryRow("SELECT role FROM users WHERE id = $1", id).Scan(&role); err != nil {
+	if err := tx.QueryRow("SELECT role FROM users WHERE id = $1 FOR UPDATE", id).Scan(&role); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "用户不存在"})
 		return
 	}
 	if role == "admin" {
 		var adminCount int
-		db.DB.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'admin'").Scan(&adminCount)
+		tx.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'admin'").Scan(&adminCount)
 		if adminCount <= 1 {
 			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "不能删除最后一个管理员"})
 			return
 		}
 	}
 
-	// Cascade delete in a single transaction. Without this, sites.created_by
-	// and daily_reports.user_id end up pointing at a non-existent user id,
-	// which (a) silently breaks canAccessSite ownership checks and (b) leaves
-	// orphan rows that COUNT/JOIN queries still see.
-	tx, err := db.DB.Begin()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
-		return
-	}
-	steps := []struct {
+		steps := []struct {
 		q    string
 		args []interface{}
 	}{
@@ -350,7 +359,6 @@ func DeleteUser(c *gin.Context) {
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		_ = tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 		return
 	}

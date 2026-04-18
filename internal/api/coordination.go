@@ -248,8 +248,17 @@ func CreateCoordTask(c *gin.Context) {
 	}
 
 	uid, uname := currentUser(c)
+
+	// Wrap task INSERT + event INSERTs in a single transaction.
+	tx, txErr := db.DB.Begin()
+	if txErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "创建失败"})
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	var taskID int64
-	err := db.DB.QueryRow(
+	err := tx.QueryRow(
 		`INSERT INTO coordination_tasks
 		 (site_id, audit_task_id, issue_id, issue_title, issue_severity,
 		  issue_module, issue_chapter, issue_snapshot, note, status,
@@ -266,12 +275,28 @@ func CreateCoordTask(c *gin.Context) {
 	}
 
 	// Timeline: task was created (+ optionally assigned in the same call).
-	recordEvent(taskID, "create", "", coordStatusPending, uid, uname, req.Note)
+	tx.Exec(
+		`INSERT INTO coordination_events
+		 (task_id, event_type, from_status, to_status, actor_id, actor_name, note)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		taskID, "create", "", coordStatusPending, uid, uname, req.Note,
+	)
 	if req.AssigneeID > 0 {
 		var asignName string
 		db.DB.QueryRow("SELECT name FROM users WHERE id = $1", req.AssigneeID).Scan(&asignName)
-		recordEvent(taskID, "assign", coordStatusPending, coordStatusPending, uid, uname,
-			fmt.Sprintf("分配给 %s", asignName))
+		tx.Exec(
+			`INSERT INTO coordination_events
+			 (task_id, event_type, from_status, to_status, actor_id, actor_name, note)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			taskID, "assign", coordStatusPending, coordStatusPending, uid, uname,
+			fmt.Sprintf("分配给 %s", asignName),
+		)
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("[coord] CreateCoordTask commit failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "创建失败"})
+		return
 	}
 
 	WriteAuditLog(c, "coord_create", "coordination_task", fmt.Sprintf("%d", taskID), req.IssueTitle)

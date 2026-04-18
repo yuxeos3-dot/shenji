@@ -427,8 +427,16 @@ func GeoApplyWorkflowJob(c *gin.Context) {
 		kwField = job.Keyword // keep simple; meta_title is separate column
 	}
 
+	// Wrap article INSERT + title/job UPDATEs in a single transaction.
+	tx, txErr := db.DB.Begin()
+	if txErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存文章失败"})
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	var articleID int64
-	err := db.DB.QueryRow(
+	err = tx.QueryRow(
 		`INSERT INTO geo_articles
 		 (task_id, title_id, site_id, title, content, excerpt, keywords,
 		  meta_title, meta_description, ai_model, word_count, status, review_status, content_type)
@@ -444,10 +452,16 @@ func GeoApplyWorkflowJob(c *gin.Context) {
 
 	// Mark source keyword as used (if any) + tag job with article id.
 	if job.TitleID > 0 {
-		db.DB.Exec(`UPDATE geo_titles SET is_used=1, used_at=CURRENT_TIMESTAMP WHERE id=$1`, job.TitleID)
+		tx.Exec(`UPDATE geo_titles SET is_used=1, used_at=CURRENT_TIMESTAMP WHERE id=$1`, job.TitleID)
 	}
-	db.DB.Exec(`UPDATE geo_workflow_jobs SET article_id=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2`,
+	tx.Exec(`UPDATE geo_workflow_jobs SET article_id=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2`,
 		articleID, id)
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("[geo-workflow] apply commit: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存文章失败"})
+		return
+	}
 
 	WriteAuditLog(c, "geo_workflow_apply", "geo_article",
 		fmt.Sprintf("%d", articleID), title)
