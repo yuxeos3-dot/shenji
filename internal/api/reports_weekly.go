@@ -336,7 +336,7 @@ func GenerateWeeklyReport(c *gin.Context) {
 	}
 
 	var id int64
-	err := db.DB.QueryRow(
+	err = db.DB.QueryRow(
 		`INSERT INTO weekly_reports
 		 (user_id, week_start, week_end, content, source_daily_ids, status)
 		 VALUES ($1, $2, $3, $4, $5, 'draft') RETURNING id`,

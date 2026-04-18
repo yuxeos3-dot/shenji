@@ -319,7 +319,7 @@ func GenerateMonthlyReport(c *gin.Context) {
 	}
 
 	var id int64
-	err := db.DB.QueryRow(
+	err = db.DB.QueryRow(
 		`INSERT INTO monthly_reports
 		 (user_id, year, month, content, source_weekly_ids, status)
 		 VALUES ($1, $2, $3, $4, $5, 'draft') RETURNING id`,

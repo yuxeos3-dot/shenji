@@ -301,7 +301,7 @@ func resolveYandexHost(token, yandexUserID, domain string, appUserID int64) (str
 	if v, ok := resolveCacheGet(cacheKey); ok {
 		return v, nil
 	}
-	raw, err := yandexFetch(token, "/user/"+url.PathEscape(userID)+"/hosts")
+	raw, err := yandexFetch(token, "/user/"+url.PathEscape(yandexUserID)+"/hosts")
 	if err != nil {
 		return "", fmt.Errorf("获取 Yandex 站点列表失败: %w", err)
 	}

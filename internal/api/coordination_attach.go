@@ -172,7 +172,7 @@ func UploadCoordAttachment(c *gin.Context) {
 	// Record an event first so the timeline shows WHO uploaded WHAT,
 	// and we can point the attachment row back at that event.
 	var eventID int64
-	err := db.DB.QueryRow(
+	err = db.DB.QueryRow(
 		`INSERT INTO coordination_events
 		 (task_id, event_type, from_status, to_status, actor_id, actor_name, note)
 		 VALUES ($1, 'upload', $2, $3, $4, $5, $6) RETURNING id`,
