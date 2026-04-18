@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"seo-system/internal/db"
+	"seo-system/internal/secure"
 
 	"github.com/gin-gonic/gin"
 )
@@ -67,6 +68,18 @@ func SaveMyAIConfig(c *gin.Context) {
 		newKey := cfg.Slots[i].APIKey
 		if isMaskedKey(newKey, oldKey) {
 			cfg.Slots[i].APIKey = oldKey
+		}
+	}
+	// Encrypt API keys at rest before storing
+	for i := range cfg.Slots {
+		if cfg.Slots[i].APIKey != "" {
+			enc, err := secure.Encrypt(cfg.Slots[i].APIKey)
+			if err != nil {
+				log.Printf("[user_ai] encrypt api_key for user %d slot %d: %v", userID, i, err)
+				c.JSON(500, gin.H{"code": -1, "error": "加密失败"})
+				return
+			}
+			cfg.Slots[i].APIKey = enc
 		}
 	}
 	js, _ := json.Marshal(cfg)
@@ -146,6 +159,18 @@ func loadUserAIConfig(userID int64) UserAIConfig {
 	if raw != "" {
 		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 			log.Printf("[user_ai] unmarshal ai_configs for user %d failed: %v", userID, err)
+		}
+	}
+	// Decrypt API keys; legacy plaintext values pass through unchanged.
+	for i := range cfg.Slots {
+		if cfg.Slots[i].APIKey != "" {
+			dec, err := secure.Decrypt(cfg.Slots[i].APIKey)
+			if err != nil {
+				// Legacy plaintext — keep as-is, will be encrypted on next save.
+				log.Printf("[user_ai] decrypt api_key for user %d slot %d: %v (treating as plaintext)", userID, i, err)
+			} else {
+				cfg.Slots[i].APIKey = dec
+			}
 		}
 	}
 	return cfg
