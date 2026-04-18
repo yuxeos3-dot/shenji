@@ -7,13 +7,15 @@
       <div class="login-card">
         <div class="form-group">
           <label>邮箱</label>
-          <input v-model="form.email" type="email" placeholder="请输入邮箱" autocomplete="username" @keyup.enter="handleLogin" />
+          <input v-model="emailValue" type="email" placeholder="请输入邮箱" autocomplete="username" @keyup.enter="handleLogin" :class="{ 'input-error': emailError }" />
+          <span v-if="emailError" class="field-error">{{ emailError }}</span>
         </div>
         <div class="form-group">
           <label>密码</label>
-          <input v-model="form.password" type="password" placeholder="请输入密码" autocomplete="current-password" @keyup.enter="handleLogin" />
+          <input v-model="passwordValue" type="password" placeholder="请输入密码" autocomplete="current-password" @keyup.enter="handleLogin" :class="{ 'input-error': passwordError }" />
+          <span v-if="passwordError" class="field-error">{{ passwordError }}</span>
         </div>
-        <button class="login-btn" @click="handleLogin" :disabled="loading">
+        <button class="login-btn" @click="handleLogin" :disabled="loading || !meta.valid">
           <span v-if="loading">登录中...</span>
           <span v-else>☀ 登录系统</span>
         </button>
@@ -26,25 +28,30 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useForm, useField } from 'vee-validate'
+import { toTypedSchema } from '@vee-validate/zod'
 import { useUserStore } from '../stores/user'
 import { useSiteConfigStore, APP_VERSION } from '../stores/siteConfig'
 import { ElMessage } from 'element-plus'
+import { loginSchema } from '../validation/schemas'
 
 const router = useRouter()
 const userStore = useUserStore()
 const siteConfig = useSiteConfigStore()
 const appVersion = APP_VERSION
 const loading = ref(false)
-const form = ref({ email: '', password: '' })
 
-async function handleLogin() {
-  if (!form.value.email || !form.value.password) {
-    ElMessage.warning('请输入邮箱和密码')
-    return
-  }
+const { meta, handleSubmit } = useForm({
+  validationSchema: toTypedSchema(loginSchema),
+})
+
+const { value: emailValue, errorMessage: emailError } = useField('email')
+const { value: passwordValue, errorMessage: passwordError } = useField('password')
+
+const handleLogin = handleSubmit(async (values) => {
   loading.value = true
   try {
-    await userStore.login(form.value.email, form.value.password)
+    await userStore.login(values.email, values.password)
     ElMessage.success('登录成功')
     router.push('/dashboard')
   } catch (e) {
@@ -54,7 +61,7 @@ async function handleLogin() {
   } finally {
     loading.value = false
   }
-}
+})
 </script>
 
 <style scoped>
@@ -128,4 +135,16 @@ async function handleLogin() {
 }
 .login-btn:disabled { opacity: .7; cursor: not-allowed; transform: none; }
 .login-note { margin-top: 20px; font-size: 12px; color: var(--ink-hint); }
+
+.field-error {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--err, #ef4444);
+  font-weight: 600;
+}
+.input-error {
+  border-color: var(--err, #ef4444) !important;
+  box-shadow: 0 0 0 3px rgba(239,68,68,.14) !important;
+}
 </style>

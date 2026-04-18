@@ -12,11 +12,14 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
     "@tanstack/vue-query": "^5.62.0",
+    "@vee-validate/zod": "^4.14.0",
     "axios": "^1.15.0",
     "element-plus": "^2.13.7",
     "pinia": "^3.0.4",
     "vue": "^3.5.32",
-    "vue-router": "^4.6.4"
+    "vee-validate": "^4.14.0",
+    "vue-router": "^4.6.4",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
     "@tsconfig/node22": "^22.0.5",
