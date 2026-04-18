@@ -18,10 +18,12 @@ func WriteAuditLog(c *gin.Context, action, targetType, targetID, detail string) 
 	email, _ := c.Get("email")
 	emailStr, _ := email.(string)
 	ip := c.ClientIP()
-	db.DB.Exec(
+	if _, err := db.DB.Exec(
 		"INSERT INTO audit_logs (user_id, user_email, action, target_type, target_id, detail, ip) VALUES (?,?,?,?,?,?,?)",
 		userID, emailStr, action, targetType, targetID, detail, ip,
-	)
+	); err != nil {
+		log.Printf("[audit_log] failed to write audit log (action=%s, target=%s/%s): %v", action, targetType, targetID, err)
+	}
 }
 
 // ListAuditLogs returns paginated, filterable audit log entries (admin only).
