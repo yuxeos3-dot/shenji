@@ -88,48 +88,118 @@
       </div>
     </div>
 
-    <!-- 站点列表 -->
-    <div class="panel table-panel">
-      <el-table :data="sites" v-loading="loading" class="sunrise-table" :header-cell-style="headerCellStyle" :row-class-name="tableRowClassName">
-        <el-table-column prop="name" label="站点名称" min-width="160">
-          <template #default="{ row }">
-            <div class="site-name-cell">
-              <span class="site-icon">🌐</span>
-              <span class="site-name-text">{{ row.name || row.domain }}</span>
+    <!-- 站点列表 — admin sees a collapsible per-owner view so sites
+         with the same domain across users don't stack anonymously.
+         Members keep the flat single-owner table they had before. -->
+    <template v-if="userStore.isAdmin()">
+      <div class="panel owner-panel" v-loading="loading">
+        <div v-if="!sites.length" class="empty-cell" style="padding:40px;text-align:center;color:var(--ink-hint)">
+          暂无站点
+        </div>
+        <div v-else>
+          <div v-for="group in sitesByOwner" :key="group.ownerId" class="owner-group">
+            <div class="owner-head" @click="toggleOwner(group.ownerId)">
+              <div class="owner-left">
+                <span class="owner-caret">{{ openOwners.has(group.ownerId) ? '▼' : '▶' }}</span>
+                <span class="owner-avatar">{{ (group.ownerName || '?')[0] }}</span>
+                <span class="owner-name">{{ group.ownerName || '（未知用户）' }}</span>
+                <span class="owner-count">{{ group.sites.length }} 个站点</span>
+              </div>
             </div>
-          </template>
-        </el-table-column>
-        <el-table-column prop="domain" label="域名" min-width="180">
-          <template #default="{ row }"><span class="domain-text">{{ row.domain }}</span></template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
-          <template #default="{ row }">
-            <span class="status-badge" :class="'status-' + row.status">
-              {{ row.status === 'active' ? '🟢 启用' : '⚪ 停用' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="last_audit_status" label="最近巡检" width="120">
-          <template #default="{ row }">
-            <span v-if="row.last_audit_status" class="audit-badge" :class="'audit-' + row.last_audit_status">{{ auditLabel(row.last_audit_status) }}</span>
-            <span v-else class="no-audit">暂未巡检</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="添加时间" width="160">
-          <template #default="{ row }"><span class="date-text">{{ row.created_at }}</span></template>
-        </el-table-column>
-        <el-table-column label="操作" width="360" fixed="right">
-          <template #default="{ row }">
-            <div class="action-btns">
-              <el-button class="btn-action btn-edit" size="small" @click="editSite(row)">✏️ 编辑</el-button>
-              <el-button class="btn-action btn-detail" size="small" @click="$router.push(`/sites/${row.id}`)">📋 详情</el-button>
-              <el-button class="btn-action btn-data" size="small" @click="$router.push(`/sites/${row.id}/data`)">📊 数据</el-button>
-              <el-button class="btn-action btn-delete" size="small" @click="deleteSite(row)">🗑️ 删除</el-button>
+            <div v-if="openOwners.has(group.ownerId)" class="owner-sites">
+              <el-table
+                :data="group.sites"
+                class="sunrise-table"
+                :header-cell-style="headerCellStyle"
+                :row-class-name="tableRowClassName"
+              >
+                <el-table-column prop="name" label="站点名称" min-width="160">
+                  <template #default="{ row }">
+                    <div class="site-name-cell">
+                      <span class="site-icon">🌐</span>
+                      <span class="site-name-text">{{ row.name || row.domain }}</span>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="domain" label="域名" min-width="180">
+                  <template #default="{ row }"><span class="domain-text">{{ row.domain }}</span></template>
+                </el-table-column>
+                <el-table-column prop="status" label="状态" width="100">
+                  <template #default="{ row }">
+                    <span class="status-badge" :class="'status-' + row.status">
+                      {{ row.status === 'active' ? '🟢 启用' : '⚪ 停用' }}
+                    </span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="last_audit_status" label="最近巡检" width="120">
+                  <template #default="{ row }">
+                    <span v-if="row.last_audit_status" class="audit-badge" :class="'audit-' + row.last_audit_status">{{ auditLabel(row.last_audit_status) }}</span>
+                    <span v-else class="no-audit">暂未巡检</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="created_at" label="添加时间" width="160">
+                  <template #default="{ row }"><span class="date-text">{{ row.created_at }}</span></template>
+                </el-table-column>
+                <el-table-column label="操作" width="360" fixed="right">
+                  <template #default="{ row }">
+                    <div class="action-btns">
+                      <el-button class="btn-action btn-edit" size="small" @click="editSite(row)">✏️ 编辑</el-button>
+                      <el-button class="btn-action btn-detail" size="small" @click="$router.push(`/sites/${row.id}`)">📋 详情</el-button>
+                      <el-button class="btn-action btn-data" size="small" @click="$router.push(`/sites/${row.id}/data`)">📊 数据</el-button>
+                      <el-button class="btn-action btn-delete" size="small" @click="deleteSite(row)">🗑️ 删除</el-button>
+                    </div>
+                  </template>
+                </el-table-column>
+              </el-table>
             </div>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <template v-else>
+      <div class="panel table-panel">
+        <el-table :data="sites" v-loading="loading" class="sunrise-table" :header-cell-style="headerCellStyle" :row-class-name="tableRowClassName">
+          <el-table-column prop="name" label="站点名称" min-width="160">
+            <template #default="{ row }">
+              <div class="site-name-cell">
+                <span class="site-icon">🌐</span>
+                <span class="site-name-text">{{ row.name || row.domain }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="domain" label="域名" min-width="180">
+            <template #default="{ row }"><span class="domain-text">{{ row.domain }}</span></template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="100">
+            <template #default="{ row }">
+              <span class="status-badge" :class="'status-' + row.status">
+                {{ row.status === 'active' ? '🟢 启用' : '⚪ 停用' }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="last_audit_status" label="最近巡检" width="120">
+            <template #default="{ row }">
+              <span v-if="row.last_audit_status" class="audit-badge" :class="'audit-' + row.last_audit_status">{{ auditLabel(row.last_audit_status) }}</span>
+              <span v-else class="no-audit">暂未巡检</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="created_at" label="添加时间" width="160">
+            <template #default="{ row }"><span class="date-text">{{ row.created_at }}</span></template>
+          </el-table-column>
+          <el-table-column label="操作" width="360" fixed="right">
+            <template #default="{ row }">
+              <div class="action-btns">
+                <el-button class="btn-action btn-edit" size="small" @click="editSite(row)">✏️ 编辑</el-button>
+                <el-button class="btn-action btn-detail" size="small" @click="$router.push(`/sites/${row.id}`)">📋 详情</el-button>
+                <el-button class="btn-action btn-data" size="small" @click="$router.push(`/sites/${row.id}/data`)">📊 数据</el-button>
+                <el-button class="btn-action btn-delete" size="small" @click="deleteSite(row)">🗑️ 删除</el-button>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </template>
 
     <!-- 添加/编辑弹窗 -->
     <el-dialog v-model="showDialog" :title="editId ? '✏️ 编辑站点' : '🌐 添加站点'" width="560px" class="sunrise-dialog" :close-on-click-modal="false">
@@ -211,6 +281,38 @@ const importText = ref('')
 const importing = ref(false)
 
 const activeSites = computed(() => sites.value.filter(s => s.status === 'active').length)
+
+// Admin-only: group sites by their owner so two users sharing the same
+// domain (UNIQUE(domain, created_by) allows this intentionally) no
+// longer stack as anonymous duplicate rows. Each group is collapsible;
+// default all collapsed so cold load matches the "don't dump everyone's
+// data at once" product rule.
+const sitesByOwner = computed(() => {
+  const byId = new Map()
+  for (const s of sites.value) {
+    const key = s.created_by || 0
+    if (!byId.has(key)) {
+      byId.set(key, {
+        ownerId: key,
+        ownerName: s.owner_name || '',
+        sites: [],
+      })
+    }
+    byId.get(key).sites.push(s)
+  }
+  // Stable order: largest owner first, then by owner id ascending for
+  // ties so the layout doesn't reshuffle on every refresh.
+  return [...byId.values()].sort((a, b) => {
+    if (b.sites.length !== a.sites.length) return b.sites.length - a.sites.length
+    return a.ownerId - b.ownerId
+  })
+})
+const openOwners = ref(new Set())
+function toggleOwner(id) {
+  const next = new Set(openOwners.value)
+  if (next.has(id)) next.delete(id); else next.add(id)
+  openOwners.value = next
+}
 const auditedSites = computed(() => sites.value.filter(s => s.last_audit_status === 'done').length)
 
 const headerCellStyle = () => ({ background: 'linear-gradient(135deg, var(--sun), var(--coral))', color: '#FFFFFF', fontWeight: '800', fontSize: '12px', letterSpacing: '0.04em', border: 'none', padding: '14px 12px' })
@@ -373,6 +475,31 @@ onMounted(loadSites)
 .panel { background:var(--surface); border:1.5px solid var(--border-light); border-radius:var(--r); box-shadow:var(--s1); transition:box-shadow .2s; }
 .panel:hover { box-shadow:var(--s2); }
 .table-panel { overflow:hidden; padding:0; }
+
+/* Admin per-owner grouping view */
+.owner-panel { overflow:hidden; padding:0; }
+.owner-group { border-bottom:1px solid var(--border-light); }
+.owner-group:last-child { border-bottom:none; }
+.owner-head {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 20px; cursor:pointer; user-select:none;
+  background:var(--surface); transition:background .15s;
+}
+.owner-head:hover { background:var(--surface-2); }
+.owner-left { display:flex; align-items:center; gap:12px; }
+.owner-caret { font-size:10px; color:var(--ink-soft); width:12px; }
+.owner-avatar {
+  width:30px; height:30px; border-radius:50%;
+  background:linear-gradient(135deg,var(--sun),var(--coral));
+  color:#fff; font-weight:800; font-size:13px;
+  display:flex; align-items:center; justify-content:center;
+}
+.owner-name { font-weight:700; color:var(--ink); font-size:14px; }
+.owner-count {
+  background:var(--sun-light); color:var(--sun-deep);
+  padding:2px 10px; border-radius:12px; font-size:12px; font-weight:700;
+}
+.owner-sites { padding:0 14px 14px; background:var(--surface-2); }
 
 .sunrise-table { --el-table-border-color:var(--border-light); --el-table-row-hover-bg-color:var(--sun-glow); --el-table-bg-color:transparent; width:100%; }
 :deep(.sunrise-table td.el-table__cell) { padding:13px 12px; border-bottom:1px solid var(--border-light); font-size:13.5px; }
