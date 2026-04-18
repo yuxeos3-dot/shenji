@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -62,7 +63,30 @@ func main() {
 	defer scheduler.Stop()
 
 	// Setup Gin
-	r := gin.Default()
+	// Use gin.New() instead of gin.Default() so we can attach a custom
+	// logger that redacts query parameters on OAuth callback paths
+	// (security audit #65). Recovery is handled by our RecoverLogger.
+	r := gin.New()
+	r.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
+		path := param.Path
+		// Redact query string on OAuth callback paths to avoid logging
+		// tokens/codes/state values.
+		if strings.Contains(path, "/oauth/") {
+			if idx := strings.Index(path, "?"); idx >= 0 {
+				path = path[:idx] + "?[REDACTED]"
+			}
+		}
+		return fmt.Sprintf("[GIN] %s | %3d | %13v | %15s | %-7s %s
+",
+			param.TimeStamp.Format("2006/01/02 - 15:04:05"),
+			param.StatusCode,
+			param.Latency,
+			param.ClientIP,
+			param.Method,
+			path,
+		)
+	}))
+	r.Use(gin.Recovery())
 
 	// Tell gin which proxy addresses can set X-Forwarded-For / X-Real-IP,
 	// otherwise c.ClientIP() is spoofable and IP whitelist + login rate limit
