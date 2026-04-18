@@ -66,14 +66,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
-import api from '../api'
+import { computed } from 'vue'
+import { useSites, useOnlineUsers } from '../composables/useApi'
 
-const sites = ref([])
-const online = ref({ online_count: 0, user_count: 0, users: [] })
-// ref-scoped timer so HMR / rapid remounts can't leak duplicate intervals
-// (module-level `let onlineTimer = null` would survive a hot reload).
-const onlineTimer = ref(null)
+const { data: sitesData } = useSites()
+const { data: onlineData } = useOnlineUsers()
+
+const sites = computed(() => sitesData.value || [])
+const online = computed(() => onlineData.value || { online_count: 0, user_count: 0, users: [] })
 
 const stats = computed(() => [
   { label: '站点总数', value: sites.value.length, icon: '🌐', cls: 'val-sun', sub: '已接入' },
@@ -81,23 +81,6 @@ const stats = computed(() => [
   { label: '待审计', value: sites.value.filter(s => !s.last_audit_status).length, icon: '⏳', cls: 'val-warn', sub: '未开始' },
   { label: '在线人数', value: online.value.user_count, icon: '👥', cls: 'val-ok', sub: online.value.online_count + ' 个会话' },
 ])
-
-async function loadOnline() {
-  try { const res = await api.getOnlineUsers(); online.value = res.data } catch (e) { console.error('加载在线用户失败', e) }
-}
-
-onMounted(async () => {
-  try { const res = await api.listSites(); sites.value = res.data } catch (e) { console.error('加载站点列表失败', e) }
-  loadOnline()
-  if (onlineTimer.value) clearInterval(onlineTimer.value)
-  onlineTimer.value = setInterval(loadOnline, 30000) // refresh every 30s
-})
-onUnmounted(() => {
-  if (onlineTimer.value) {
-    clearInterval(onlineTimer.value)
-    onlineTimer.value = null
-  }
-})
 </script>
 
 <style scoped>

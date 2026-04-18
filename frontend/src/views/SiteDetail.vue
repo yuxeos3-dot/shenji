@@ -55,8 +55,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 import { copyToClipboard } from '../utils/clipboard'
@@ -66,11 +67,10 @@ import AuditHistory from '../components/site/AuditHistory.vue'
 import ScheduleConfig from '../components/site/ScheduleConfig.vue'
 
 const route = useRoute()
-const site = ref({})
-const audits = ref([])
+const queryClient = useQueryClient()
+const siteId = computed(() => route.params.id)
 const auditing = ref(false)
 
-const sitePages = ref([])
 const showSource = ref(false)
 const sourceData = ref({})
 const fetchingAll = ref(false)
@@ -81,50 +81,69 @@ const intervalHours = ref(24)
 const dailyHour = ref(9)
 const savingSched = ref(false)
 
-const pollTimer = ref(null)
+// Determine if any audit is running to enable fast polling
+const hasRunning = computed(() =>
+  audits.value.some(a => a.status === 'running' || a.status === 'pending')
+)
 
-function clearPoll() {
-  if (pollTimer.value) {
-    clearTimeout(pollTimer.value)
-    pollTimer.value = null
+const { data: siteData, refetch: refetchSite } = useQuery({
+  queryKey: ['site', siteId],
+  queryFn: async () => {
+    const res = await api.getSite(siteId.value)
+    return res.data
+  },
+  enabled: computed(() => !!siteId.value),
+  refetchInterval: computed(() => hasRunning.value ? 3000 : false),
+})
+
+const { data: auditsData, refetch: refetchAudits } = useQuery({
+  queryKey: ['audits', siteId],
+  queryFn: async () => {
+    const res = await api.listAudits(siteId.value)
+    return res.data
+  },
+  enabled: computed(() => !!siteId.value),
+  refetchInterval: computed(() => hasRunning.value ? 3000 : false),
+})
+
+const { data: pagesData, refetch: refetchPages } = useQuery({
+  queryKey: ['sitePages', siteId],
+  queryFn: async () => {
+    const res = await api.listSitePages(siteId.value)
+    return res.data
+  },
+  enabled: computed(() => !!siteId.value),
+})
+
+const site = computed(() => siteData.value || {})
+const audits = computed(() =>
+  (auditsData.value || []).map(a => ({ ...a, downloading: false }))
+)
+const sitePages = ref([])
+
+// Sync pages data from query into ref (needs ref for per-item fetching state)
+watch(() => pagesData.value, (val) => {
+  sitePages.value = (val || []).map(p => ({ ...p, fetching: false }))
+}, { immediate: true })
+
+// Sync schedule config from site data
+watch(site, (s) => {
+  if (!s || !s.id) return
+  schedEnabled.value = s.audit_schedule_enabled === 'true'
+  if (s.audit_interval_hours > 0) {
+    schedMode.value = 'interval'
+    intervalHours.value = s.audit_interval_hours
+  } else {
+    schedMode.value = 'daily'
+    dailyHour.value = s.audit_daily_hour >= 0 ? s.audit_daily_hour : 9
   }
+}, { immediate: true })
+
+function loadData() {
+  refetchSite()
+  refetchAudits()
+  refetchPages()
 }
-
-async function loadData() {
-  clearPoll()
-  try {
-    const [siteRes, auditsRes, pagesRes] = await Promise.allSettled([
-      api.getSite(route.params.id),
-      api.listAudits(route.params.id),
-      api.listSitePages(route.params.id),
-    ])
-    if (siteRes.status === 'fulfilled') {
-      site.value = siteRes.value.data
-      const s = siteRes.value.data
-      schedEnabled.value = s.audit_schedule_enabled === 'true'
-      if (s.audit_interval_hours > 0) {
-        schedMode.value = 'interval'
-        intervalHours.value = s.audit_interval_hours
-      } else {
-        schedMode.value = 'daily'
-        dailyHour.value = s.audit_daily_hour >= 0 ? s.audit_daily_hour : 9
-      }
-    }
-    if (auditsRes.status === 'fulfilled') {
-      audits.value = auditsRes.value.data.map(a => ({ ...a, downloading: false }))
-    }
-    if (pagesRes.status === 'fulfilled') {
-      sitePages.value = (pagesRes.value.data || []).map(p => ({ ...p, fetching: false }))
-    }
-  } catch (e) { console.error('加载站点数据失败', e) }
-
-  const hasRunning = audits.value.some(a => a.status === 'running' || a.status === 'pending')
-  if (hasRunning) pollTimer.value = setTimeout(loadData, 3000)
-}
-
-onMounted(loadData)
-onUnmounted(clearPoll)
-watch(() => route.params.id, (id) => { if (id) { clearPoll(); loadData() } })
 
 async function downloadReport(taskId) {
   const audit = audits.value.find(a => a.id === taskId)

@@ -1,4 +1,5 @@
 import { createApp } from 'vue'
+import { VueQueryPlugin } from '@tanstack/vue-query'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
@@ -24,5 +25,17 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 // starts with a safe fallback title and updates reactively once loaded.
 const siteConfig = useSiteConfigStore(pinia)
 siteConfig.refresh()
+
+app.use(VueQueryPlugin, {
+  queryClientConfig: {
+    defaultOptions: {
+      queries: {
+        staleTime: 30_000,
+        refetchOnWindowFocus: true,
+        retry: 1,
+      },
+    },
+  },
+})
 
 app.mount('#app')
