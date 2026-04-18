@@ -182,6 +182,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import { copyToClipboard } from '../utils/clipboard'
 
 const props = defineProps({
   kind: { type: String, required: true }, // 'image' | 'video'
@@ -310,10 +311,17 @@ async function publishOne(row) {
     ElMessage.error(e?.response?.data?.error || '发布失败')
   }
 }
-function copyURL(row) {
+async function copyURL(row) {
+  // navigator.clipboard is only available on HTTPS / localhost; the
+  // shared helper does an execCommand fallback so intranet HTTP deploys
+  // still get a working "copy" button instead of a silent throw.
   const url = row.local_path ? location.origin + row.local_path : row.result_url
-  navigator.clipboard.writeText(url)
-  ElMessage.success('链接已复制')
+  const ok = await copyToClipboard(url)
+  if (ok) {
+    ElMessage.success('链接已复制')
+  } else {
+    ElMessage.error('复制失败，请手动选中链接')
+  }
 }
 async function deleteOne(row) {
   try {

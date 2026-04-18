@@ -118,8 +118,28 @@ func ImportExtlinkPool(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "data": gin.H{"imported": count}})
 }
 
+// DeleteExtlinkPoolItem removes an entry from the shared backlink pool.
+// The extlinks.delete permission gates access at the route; we *also*
+// enforce ownership here so a non-admin can't wipe rows imported by a
+// colleague. Admin still acts as escape hatch for stale / orphan rows.
 func DeleteExtlinkPoolItem(c *gin.Context) {
-	db.DB.Exec("DELETE FROM extlink_pool WHERE id=$1", c.Param("id"))
+	id := c.Param("id")
+	uid := c.GetInt64("user_id")
+	role, _ := c.Get("role")
+
+	var createdBy int64
+	if err := db.DB.QueryRow("SELECT COALESCE(created_by, 0) FROM extlink_pool WHERE id = $1", id).Scan(&createdBy); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "外链不存在"})
+		return
+	}
+	if role != "admin" && createdBy != uid {
+		c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "只能删除自己导入的外链"})
+		return
+	}
+	if _, err := db.DB.Exec("DELETE FROM extlink_pool WHERE id=$1", id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
+		return
+	}
 	c.JSON(200, gin.H{"code": 0, "data": "删除成功"})
 }
 

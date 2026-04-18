@@ -240,11 +240,18 @@ async function rewriteContent() {
   rewriting.value.content = false
 }
 
-function copyText(text) {
-  copyToClipboard(text).then(ok => {
+async function copyText(text) {
+  // Promise chain previously had no .catch — a rejection (e.g. user
+  // denied clipboard permission in a prompt) vanished silently. Await
+  // + try/catch makes both happy-path and deny-path user-visible.
+  try {
+    const ok = await copyToClipboard(text)
     if (ok) ElMessage.success('已复制到剪贴板')
     else ElMessage.error('复制失败，请手动选择文本复制')
-  })
+  } catch (e) {
+    console.error('copyText failed', e)
+    ElMessage.error('复制失败，请手动选择文本复制')
+  }
 }
 
 function loadHistory(h) {
