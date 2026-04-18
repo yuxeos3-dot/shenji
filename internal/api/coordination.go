@@ -290,6 +290,13 @@ func ListCoordTasks(c *gin.Context) {
 	if sid := c.Query("site_id"); sid != "" {
 		where = append(where, "t.site_id = ?")
 		args = append(args, sid)
+	} else {
+		role, _ := c.Get("role")
+		if role != "admin" {
+			userID := c.GetInt64("user_id")
+			where = append(where, "t.site_id IN (SELECT id FROM sites WHERE created_by = ?)")
+			args = append(args, userID)
+		}
 	}
 	if s := c.Query("status"); s != "" {
 		if !validCoordStatus(s) {
@@ -820,6 +827,13 @@ func CoordStats(c *gin.Context) {
 	if siteID != "" {
 		q += " WHERE site_id = ?"
 		args = append(args, siteID)
+	} else {
+		role, _ := c.Get("role")
+		if role != "admin" {
+			userID := c.GetInt64("user_id")
+			q += " WHERE site_id IN (SELECT id FROM sites WHERE created_by = ?)"
+			args = append(args, userID)
+		}
 	}
 	q += " GROUP BY status"
 
