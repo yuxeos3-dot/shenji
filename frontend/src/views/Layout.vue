@@ -200,7 +200,7 @@ const visibleGroups = computed(() => {
 // Bumped to v2 alongside the "no auto-expand + collapsed-by-default"
 // decision; existing users (who had every group expanded by habit)
 // reset to the clean collapsed state on next load.
-const COLLAPSE_KEY = 'nav-collapsed-v2'
+const COLLAPSE_KEY = 'xunzhan:nav-collapsed-v2'
 const collapsed = ref(new Set())
 const hasSaved = (() => {
   try { return localStorage.getItem(COLLAPSE_KEY) != null } catch { return false }
