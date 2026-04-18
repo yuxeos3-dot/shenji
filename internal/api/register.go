@@ -37,8 +37,9 @@ import (
 type RegisterRequest struct {
 	TGName       string `json:"tg_name" binding:"required"`
 	TGID         string `json:"tg_id"` // optional, e.g. "@username"
-	Nickname     string `json:"nickname" binding:"required"`    // 花名
-	EmployeeID   string `json:"employee_id" binding:"required"` // 工号
+	Nickname     string `json:"nickname" binding:"required"`     // 花名
+	EmployeeID   string `json:"employee_id" binding:"required"`  // 工号
+	Email        string `json:"email" binding:"required,email"`  // 登录邮箱
 	// InviteCode is optional — every registration still goes through
 	// admin review, so a code is more a "VIP fast-track" hint than a
 	// true gate. When present, it's validated + consumed; when empty,
@@ -65,6 +66,10 @@ func Register(c *gin.Context) {
 	req.Nickname = strings.TrimSpace(req.Nickname)
 	req.EmployeeID = strings.TrimSpace(req.EmployeeID)
 	req.InviteCode = strings.TrimSpace(req.InviteCode)
+	// Email is the login identifier — normalize to lowercase so the
+	// case-insensitive unique index on users.email behaves predictably
+	// and Login's LOWER(email)=$1 lookup matches.
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 
 	if req.Password != req.Confirm {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "两次输入的密码不一致"})
@@ -100,21 +105,27 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	// Synthesize a unique email so the existing UNIQUE NOT NULL constraint
-	// is satisfied. The format keeps employee_id readable and signals to
-	// admins that this is a self-registered account when they browse the
-	// users table.
-	email := strings.ToLower(req.EmployeeID) + "@register.local"
-
-	// Check for collision on either email or employee_id BEFORE insert
-	// so we can give a clear error rather than a generic UNIQUE violation.
-	var dupID int64
-	_ = db.DB.QueryRow(
-		"SELECT id FROM users WHERE LOWER(email) = $1 OR LOWER(employee_id) = $2",
-		email, strings.ToLower(req.EmployeeID),
-	).Scan(&dupID)
-	if dupID > 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "该工号已被注册"})
+	// Check for collisions on email OR employee_id BEFORE insert so we
+	// can give a clear error rather than a generic UNIQUE violation.
+	// Both fields are compared case-insensitively to match their indexes.
+	var dupField string
+	err := db.DB.QueryRow(
+		`SELECT CASE
+		        WHEN LOWER(email) = $1 THEN 'email'
+		        WHEN LOWER(employee_id) = $2 THEN 'employee_id'
+		        ELSE ''
+		        END
+		 FROM users
+		 WHERE LOWER(email) = $1 OR LOWER(employee_id) = $2
+		 LIMIT 1`,
+		req.Email, strings.ToLower(req.EmployeeID),
+	).Scan(&dupField)
+	if err == nil && dupField != "" {
+		msg := "该工号已被注册"
+		if dupField == "email" {
+			msg = "该邮箱已被注册"
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": msg})
 		return
 	}
 
@@ -141,7 +152,7 @@ func Register(c *gin.Context) {
 		  tg_name, nickname, employee_id, invite_code, register_status)
 		 VALUES ($1, $2, $3, 'member', $4, $5, $6, $7, $8, $9, $10, 'pending')
 		 RETURNING id`,
-		req.Nickname, email, string(hash), req.TGID,
+		req.Nickname, req.Email, string(hash), req.TGID,
 		req.DepartmentID, req.GroupID,
 		req.TGName, req.Nickname, req.EmployeeID, matched,
 	).Scan(&newID)

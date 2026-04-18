@@ -73,6 +73,16 @@
           </div>
 
           <div class="form-group">
+            <label>邮箱 <span class="req">*</span></label>
+            <input
+              v-model="regForm.email"
+              type="email"
+              placeholder="登录用的邮箱，请确保能收到邮件"
+              autocomplete="email"
+            />
+          </div>
+
+          <div class="form-group">
             <label>邀请码（选填）</label>
             <input v-model="regForm.invite_code" placeholder="没有可留空，管理员会统一审核" />
           </div>
@@ -149,6 +159,7 @@ const regForm = reactive({
   tg_id: '',
   nickname: '',
   employee_id: '',
+  email: '',
   invite_code: '',
   department_id: null,
   group_id: null,
@@ -211,6 +222,7 @@ async function handleRegister() {
     ['tg_name', 'TG名称'],
     ['nickname', '花名'],
     ['employee_id', '工号'],
+    ['email', '邮箱'],
     ['password', '密码'],
     ['confirm', '确认密码'],
   ]
@@ -219,6 +231,12 @@ async function handleRegister() {
       ElMessage.warning('请填写' + label)
       return
     }
+  }
+  // Basic email shape — backend re-validates via binding:"email", this
+  // just saves a round-trip for obvious typos.
+  if (!/^\S+@\S+\.\S+$/.test(regForm.email.trim())) {
+    ElMessage.warning('邮箱格式不正确')
+    return
   }
   if (!regForm.department_id) {
     ElMessage.warning('请选择一级标签')
@@ -240,6 +258,7 @@ async function handleRegister() {
       tg_id: regForm.tg_id.trim(),
       nickname: regForm.nickname.trim(),
       employee_id: regForm.employee_id.trim(),
+      email: regForm.email.trim(),
       invite_code: regForm.invite_code.trim(),
       department_id: regForm.department_id,
       group_id: regForm.group_id || 0,
@@ -250,7 +269,7 @@ async function handleRegister() {
     // Reset + flip back to login so the user sees the right tab when
     // they come back after approval.
     Object.assign(regForm, {
-      tg_name: '', tg_id: '', nickname: '', employee_id: '',
+      tg_name: '', tg_id: '', nickname: '', employee_id: '', email: '',
       invite_code: '', department_id: null, group_id: null,
       password: '', confirm: '',
     })
