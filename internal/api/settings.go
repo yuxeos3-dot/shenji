@@ -45,6 +45,17 @@ var perUserOnlyKeys = map[string]bool{
 	"ai_model":             true,
 }
 
+// allowedSettingKeys is the whitelist of keys that can be written via
+// the admin SaveSettings endpoint. Any key not in this list is silently
+// rejected to prevent arbitrary data injection into the settings table.
+var allowedSettingKeys = map[string]bool{
+	"site_title":            true,
+	"auto_audit_enabled":    true,
+	"auto_audit_cron":       true,
+	"max_concurrent_audit":  true,
+	"ip_whitelist":          true,
+}
+
 func maskValue(key, value string) string {
 	if !sensitiveKeys[key] || value == "" {
 		return value
@@ -133,6 +144,11 @@ func SaveSettings(c *gin.Context) {
 		// user_telegram / user_bing / users.frw_apikey and must not be
 		// writable via the admin settings page.
 		if perUserOnlyKeys[key] {
+			continue
+		}
+		// Reject unknown keys not in the allowlist.
+		if !allowedSettingKeys[key] {
+			log.Printf("[settings] rejected unknown key %q", key)
 			continue
 		}
 		// Skip masked values for sensitive keys (user didn't change them).
