@@ -284,6 +284,13 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	var ownerUserID int64
 	db.DB.QueryRow("SELECT COALESCE(created_by,0) FROM sites WHERE id = ?", siteID).Scan(&ownerUserID)
 
+	// Resolve the site owner's personal AI config for the audit.
+	aiURL, aiKey, aiModel := ai.ResolveUserAI(ownerUserID)
+	if aiKey == "" {
+		log.Printf("[audit] site %d owner %d has no AI config, skipping scheduled audit", siteID, ownerUserID)
+		return
+	}
+
 	result, err := db.DB.Exec(
 		"INSERT INTO audit_tasks (site_id, triggered_by, status, progress) VALUES (?, 0, 'running', 10)", siteID,
 	)
@@ -392,7 +399,7 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	for i, batch := range ai.TechnicalBatches {
 		log.Printf("[audit %d] scheduler 批次 %d/%d：%s", taskID, i+1, batchTotal, batch.Name)
 		bp := ai.BuildTechPromptBatch(batch, config.Domain, sitePages, pages, gscData, gaData, yandexData)
-		chs, raw, model, bErr := ai.CallAIChapters(bp)
+		chs, raw, model, bErr := ai.CallAIChaptersWithConfig(aiURL, aiKey, aiModel, bp)
 		lastModel = model
 		if raw != "" {
 			lastRaw = raw
@@ -428,7 +435,7 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	// Step 4b: strategy chapter (independent call, failure not fatal)
 	var strategyChapter *ai.V6Chapter
 	stratPrompt := ai.BuildStrategyPrompt(config.Domain, sitePages, pages, gscData, gaData, yandexData)
-	if strategyCh, _, sErr := ai.CallAIStrategy(stratPrompt); sErr == nil && strategyCh != nil {
+	if strategyCh, _, sErr := ai.CallAIStrategyWithConfig(aiURL, aiKey, aiModel, stratPrompt); sErr == nil && strategyCh != nil {
 		strategyChapter = strategyCh
 		log.Printf("[audit %d] scheduler 策略章节已生成（%d 条）", taskID, len(strategyCh.Issues))
 	} else {

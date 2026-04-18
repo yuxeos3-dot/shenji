@@ -312,7 +312,7 @@ func GenerateMonthlyReport(c *gin.Context) {
 		fmt.Fprintf(&concat, "## 第 %s ~ %s 周\n%s\n\n---\n\n", p.WeekStart, p.WeekEnd, p.Content)
 	}
 
-	summary, err := summarizeMonthWithAI(req.Year, req.Month, concat.String())
+	summary, err := summarizeMonthWithAI(uid, req.Year, req.Month, concat.String())
 	if err != nil || strings.TrimSpace(summary) == "" {
 		log.Printf("[monthly] AI summary failed (falling back): %v", err)
 		summary = "> ⚠️ AI 润色未能运行，以下是本月周汇报的原始拼接，请手动整理后提交。\n\n" + concat.String()
@@ -337,10 +337,8 @@ func GenerateMonthlyReport(c *gin.Context) {
 
 // summarizeMonthWithAI calls the configured AI endpoint with a
 // month-oriented prompt. Same plumbing as weekly; different instruction.
-func summarizeMonthWithAI(year, month int, concatenated string) (string, error) {
-	apiURL := db.GetSetting("ai_api_url")
-	apiKey := db.GetSetting("ai_api_key")
-	model := db.GetSetting("ai_model")
+func summarizeMonthWithAI(userID int64, year, month int, concatenated string) (string, error) {
+	apiURL, apiKey, model := ResolveAI(userID)
 	if apiURL == "" {
 		apiURL = "https://ai.router.team/v1"
 	}
@@ -348,10 +346,10 @@ func summarizeMonthWithAI(year, month int, concatenated string) (string, error) 
 		model = "claude-sonnet-4-6"
 	}
 	if apiKey == "" {
-		return "", fmt.Errorf("AI API key 未配置")
+		return "", fmt.Errorf("AI 未配置：请先在「个人 AI 设置」中配置 API Key")
 	}
 
-	prompt := fmt.Sprintf(`你是一名职场月报总结专家。下面是一名员工 %d 年 %d 月本月已提交的全部周汇报，按周拼接而成。
+	prompt := fmt.Sprintf(`你是一��职场月报总结专家。下面是一名员工 %d 年 %d 月本月已提交的全部周汇报，按周拼接而成。
 
 你的任务：
 1. 提炼本月核心工作主线（按业务模块聚合，不按周列）
@@ -558,7 +556,7 @@ func PolishMonthlyReport(c *gin.Context) {
 		return
 	}
 
-	polished, err := summarizeMonthWithAI(r.Year, r.Month, r.Content)
+	polished, err := summarizeMonthWithAI(uid, r.Year, r.Month, r.Content)
 	if err != nil || strings.TrimSpace(polished) == "" {
 		log.Printf("[monthly] polish failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "AI 润色失败：" + fmt.Sprint(err)})

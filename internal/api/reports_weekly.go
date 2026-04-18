@@ -326,7 +326,7 @@ func GenerateWeeklyReport(c *gin.Context) {
 		fmt.Fprintf(&concat, "## %s\n%s\n\n---\n\n", p.Date, p.Content)
 	}
 
-	summary, err := summarizeWeekWithAI(req.WeekStart, req.WeekEnd, concat.String())
+	summary, err := summarizeWeekWithAI(uid, req.WeekStart, req.WeekEnd, concat.String())
 	if err != nil || strings.TrimSpace(summary) == "" {
 		// Fallback: keep the raw concatenation so the user at least has
 		// something to edit. The UI shows a banner that AI polishing
@@ -355,10 +355,8 @@ func GenerateWeeklyReport(c *gin.Context) {
 // summarizeWeekWithAI calls the configured AI endpoint with a prompt
 // that asks for a structured weekly summary. Mirrors polishWithAI's
 // HTTP plumbing but uses a different instruction.
-func summarizeWeekWithAI(start, end, concatenated string) (string, error) {
-	apiURL := db.GetSetting("ai_api_url")
-	apiKey := db.GetSetting("ai_api_key")
-	model := db.GetSetting("ai_model")
+func summarizeWeekWithAI(userID int64, start, end, concatenated string) (string, error) {
+	apiURL, apiKey, model := ResolveAI(userID)
 	if apiURL == "" {
 		apiURL = "https://ai.router.team/v1"
 	}
@@ -366,7 +364,7 @@ func summarizeWeekWithAI(start, end, concatenated string) (string, error) {
 		model = "claude-sonnet-4-6"
 	}
 	if apiKey == "" {
-		return "", fmt.Errorf("AI API key 未配置")
+		return "", fmt.Errorf("AI 未配置：请先在「个人 AI ���置」中配置 API Key")
 	}
 
 	prompt := fmt.Sprintf(`你是一名职场周报总结专家。下面是一名员工本周（%s ~ %s）每天写的日汇报原文，按日期拼接而成。
@@ -591,7 +589,7 @@ func PolishWeeklyReport(c *gin.Context) {
 
 	// Use the current content as the "concatenated input" — re-polishing
 	// a polished draft is fine, the AI prompt tolerates either.
-	polished, err := summarizeWeekWithAI(r.WeekStart, r.WeekEnd, r.Content)
+	polished, err := summarizeWeekWithAI(uid, r.WeekStart, r.WeekEnd, r.Content)
 	if err != nil || strings.TrimSpace(polished) == "" {
 		log.Printf("[weekly] polish failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "AI 润色失败：" + fmt.Sprint(err)})

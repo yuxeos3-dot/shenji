@@ -1561,3 +1561,131 @@ func TestAIConnection() error {
 
 	return nil
 }
+
+
+// ─── User-config variants for scheduler / handler use ──────────────────────
+
+// CallAIChaptersWithConfig is like CallAIChapters but uses explicitly provided
+// API credentials instead of reading from global settings. Used by the
+// scheduler which resolves the site owner's personal AI config.
+func CallAIChaptersWithConfig(apiURL, apiKey, model, prompt string) ([]V6Chapter, string, string, error) {
+	if apiURL == "" {
+		apiURL = "https://ai.router.team/v1"
+	}
+	if model == "" {
+		model = "claude-sonnet-4-6"
+	}
+	maxTok := 16000
+	if v := db.GetSetting("ai_max_tokens"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 128000 {
+			maxTok = n
+		}
+	}
+
+	reqBody := map[string]interface{}{
+		"model":       model,
+		"messages":    []map[string]string{{"role": "user", "content": prompt}},
+		"max_tokens":  maxTok,
+		"temperature": 0.2,
+	}
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, "", model, fmt.Errorf("AI chapters 请求体序列化失败: %w", err)
+	}
+
+	client := httpx.Outbound(300 * time.Second)
+	result, err := postAIWithRetry(client, apiURL, apiKey, jsonBody, "ai-chapters")
+	if err != nil {
+		return nil, "", model, err
+	}
+	if result.status != 200 {
+		snippet := string(result.body)
+		if len(snippet) > 2000 {
+			snippet = snippet[:2000]
+		}
+		return nil, "", model, fmt.Errorf("AI 错误 HTTP %d: %s", result.status, snippet)
+	}
+	var apiResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(result.body, &apiResp); err != nil {
+		return nil, "", model, err
+	}
+	if len(apiResp.Choices) == 0 {
+		return nil, "", model, fmt.Errorf("AI 无返回")
+	}
+	raw := apiResp.Choices[0].Message.Content
+	jsonContent := extractJSON(raw)
+	jsonContent = repairJSON(jsonContent)
+
+	var wrapper struct {
+		Chapters []V6Chapter `json:"chapters"`
+	}
+	if err := json.Unmarshal([]byte(jsonContent), &wrapper); err == nil && len(wrapper.Chapters) > 0 {
+		for len(wrapper.Chapters) > 0 && len(wrapper.Chapters[len(wrapper.Chapters)-1].Issues) == 0 {
+			wrapper.Chapters = wrapper.Chapters[:len(wrapper.Chapters)-1]
+		}
+		return wrapper.Chapters, raw, model, nil
+	}
+	return nil, raw, model, fmt.Errorf("AI chapters JSON 解析失败")
+}
+
+// CallAIStrategyWithConfig is like CallAIStrategy but uses explicitly provided
+// API credentials.
+func CallAIStrategyWithConfig(apiURL, apiKey, model, prompt string) (*V6Chapter, string, error) {
+	if apiURL == "" {
+		apiURL = "https://ai.router.team/v1"
+	}
+	if model == "" {
+		model = "claude-sonnet-4-6"
+	}
+
+	reqBody := map[string]interface{}{
+		"model":       model,
+		"messages":    []map[string]string{{"role": "user", "content": prompt}},
+		"max_tokens":  16000,
+		"temperature": 0.3,
+	}
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, model, fmt.Errorf("策略 AI 请求体序列化失败: %w", err)
+	}
+
+	client := httpx.Outbound(240 * time.Second)
+	result, err := postAIWithRetry(client, apiURL, apiKey, jsonBody, "ai-strategy")
+	if err != nil {
+		return nil, model, fmt.Errorf("策略 AI 请求失败: %w", err)
+	}
+	if result.status != 200 {
+		return nil, model, fmt.Errorf("策略 AI 错误 HTTP %d", result.status)
+	}
+	var apiResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(result.body, &apiResp); err != nil {
+		return nil, model, err
+	}
+	if len(apiResp.Choices) == 0 {
+		return nil, model, fmt.Errorf("策略 AI 无返回")
+	}
+	jsonContent := extractJSON(apiResp.Choices[0].Message.Content)
+	jsonContent = repairJSON(jsonContent)
+
+	var chapter V6Chapter
+	if err := json.Unmarshal([]byte(jsonContent), &chapter); err == nil && len(chapter.Issues) > 0 {
+		if chapter.Title == "" {
+			chapter.Title = "深度白帽 SEO 优化建议"
+		}
+		return &chapter, model, nil
+	}
+	return nil, model, fmt.Errorf("策略 AI 返回格式异常")
+}

@@ -230,7 +230,8 @@ func PolishReport(c *gin.Context) {
 	}
 
 	// ── 2. 调用 AI 润色（允许失败兜底：AI 失败则用结构化模板拼装） ────────────
-	polished, err := polishWithAI(req)
+	userID := c.GetInt64("user_id")
+	polished, err := polishWithAI(userID, req)
 	if err != nil || strings.TrimSpace(polished) == "" {
 		polished = assembleFallback(req)
 	}
@@ -241,10 +242,8 @@ func PolishReport(c *gin.Context) {
 	}})
 }
 
-func polishWithAI(req PolishRequest) (string, error) {
-	apiURL := db.GetSetting("ai_api_url")
-	apiKey := db.GetSetting("ai_api_key")
-	model := db.GetSetting("ai_model")
+func polishWithAI(userID int64, req PolishRequest) (string, error) {
+	apiURL, apiKey, model := ResolveAI(userID)
 	if apiURL == "" {
 		apiURL = "https://ai.router.team/v1"
 	}
@@ -252,7 +251,7 @@ func polishWithAI(req PolishRequest) (string, error) {
 		model = "claude-sonnet-4-6"
 	}
 	if apiKey == "" {
-		return "", fmt.Errorf("AI API key 未配置")
+		return "", fmt.Errorf("AI 未配置：请先在「个人 AI 设置」中配置 API Key")
 	}
 
 	agentsText := ""

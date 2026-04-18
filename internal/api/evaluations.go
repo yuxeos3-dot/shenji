@@ -288,7 +288,8 @@ func PolishEvaluation(c *gin.Context) {
 		return
 	}
 
-	polished, err := polishEvaluationWithAI(req.ReportType, req.Content)
+	uid := c.GetInt64("user_id")
+	polished, err := polishEvaluationWithAI(uid, req.ReportType, req.Content)
 	if err != nil || strings.TrimSpace(polished) == "" {
 		log.Printf("[eval] polish failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -305,10 +306,8 @@ func PolishEvaluation(c *gin.Context) {
 // We specifically tell the model NOT to change the evaluator's stance
 // or inject new opinions — that would undermine the admin's accountability
 // for their own feedback.
-func polishEvaluationWithAI(reportType, draft string) (string, error) {
-	apiURL := db.GetSetting("ai_api_url")
-	apiKey := db.GetSetting("ai_api_key")
-	model := db.GetSetting("ai_model")
+func polishEvaluationWithAI(userID int64, reportType, draft string) (string, error) {
+	apiURL, apiKey, model := ResolveAI(userID)
 	if apiURL == "" {
 		apiURL = "https://ai.router.team/v1"
 	}
@@ -316,7 +315,7 @@ func polishEvaluationWithAI(reportType, draft string) (string, error) {
 		model = "claude-sonnet-4-6"
 	}
 	if apiKey == "" {
-		return "", fmt.Errorf("AI API key 未配置")
+		return "", fmt.Errorf("AI 未配置：请先在「个人 AI 设置」中配置 API Key")
 	}
 
 	typeLabel := "汇报"
