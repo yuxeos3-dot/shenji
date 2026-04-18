@@ -95,6 +95,9 @@ func ga4Fetch(token, propertyID string, body map[string]interface{}) (json.RawMe
 
 func SyncGAData(c *gin.Context) {
 	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
 	var domain string
 	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
 	if err != nil || domain == "" {
@@ -271,6 +274,9 @@ func SyncGAData(c *gin.Context) {
 }
 
 func GetGAData(c *gin.Context) {
+	if !canAccessSite(c, c.Param("id")) {
+		return
+	}
 	siteID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	rows, extra := CachedGA(siteID)
 	if extra == nil {

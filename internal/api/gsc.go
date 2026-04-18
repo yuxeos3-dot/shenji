@@ -315,6 +315,9 @@ func gscFetch(token, apiURL, method string, body interface{}) (json.RawMessage, 
 // devices (device), countries (country), and previous period for comparison.
 func SyncGSCData(c *gin.Context) {
 	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
 
 	var domain string
 	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
@@ -456,6 +459,9 @@ func extractRows(raw json.RawMessage) string {
 }
 
 func GetGSCData(c *gin.Context) {
+	if !canAccessSite(c, c.Param("id")) {
+		return
+	}
 	siteID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	days, _ := strconv.Atoi(c.DefaultQuery("days", "30"))
 	if days < 1 {
@@ -504,6 +510,9 @@ func StoreSiteKeywords(c *gin.Context) {
 	if siteID == 0 {
 		// No matching site, just store without site_id=0
 		c.JSON(http.StatusOK, gin.H{"code": 0, "data": "no matching site"})
+		return
+	}
+	if !canAccessSite(c, strconv.FormatInt(siteID, 10)) {
 		return
 	}
 

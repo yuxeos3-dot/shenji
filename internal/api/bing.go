@@ -64,6 +64,9 @@ func bingFetch(apiKey, endpoint string, params map[string]string) (json.RawMessa
 
 func SyncBingData(c *gin.Context) {
 	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
 
 	var domain string
 	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
@@ -214,6 +217,9 @@ func SyncBingData(c *gin.Context) {
 }
 
 func GetBingData(c *gin.Context) {
+	if !canAccessSite(c, c.Param("id")) {
+		return
+	}
 	siteID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": CachedBing(siteID)})
 }

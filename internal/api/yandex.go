@@ -279,6 +279,9 @@ func getYandexUserIDCached(token string) (string, error) {
 // Uses search-queries/popular for top keywords
 func SyncYandexData(c *gin.Context) {
 	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
 
 	var domain string
 	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
@@ -467,6 +470,9 @@ func matchYandexToGSC(yandexHost, gscURL string) bool {
 }
 
 func GetYandexData(c *gin.Context) {
+	if !canAccessSite(c, c.Param("id")) {
+		return
+	}
 	siteID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": CachedYandex(siteID)})
 }
