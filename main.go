@@ -137,7 +137,7 @@ func main() {
 	{
 		// Auth
 		v1.POST("/auth/logout", api.Logout)
-		v1.POST("/auth/change-password", api.ChangePassword)
+		v1.POST("/auth/change-password", middleware.UserRateLimit(10), api.ChangePassword)
 		v1.GET("/auth/me", api.GetMe)
 		v1.GET("/auth/csrf", api.GetCSRFToken)
 		// Online presence shows every user's email + IP — route it through
