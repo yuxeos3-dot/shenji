@@ -180,8 +180,8 @@ const groups = [
     // under the generic 系统管理 bucket.
     key: 'user-mgmt', icon: '👥', label: '用户管理', adminOnly: true,
     items: [
-      { path: '/users',         icon: '👤', label: '用户管理' },
-      { path: '/users-monitor', icon: '📊', label: '用户数据' },
+      { path: '/users',         icon: '🪪', label: '用户设置' },
+      { path: '/users-monitor', icon: '📈', label: '用户数据' },
     ],
   },
   {
@@ -198,7 +198,7 @@ const groups = [
     // component itself. Cache management remains admin-only.
     key: 'system', icon: '⚙️', label: '系统管理',
     items: [
-      { path: '/settings',         icon: '⚙️', label: '系统设置' },
+      { path: '/settings',         icon: '🛠️', label: '系统设置' },
       { path: '/cache-management', icon: '💾', label: '缓存管理',   adminOnly: true },
     ],
   },
@@ -419,47 +419,78 @@ async function changePassword() {
 .sidebar ul li a.active .nav-icon { opacity: 1; }
 .sidebar ul li a.active:hover { transform: none; }
 
-/* Group headers: click to collapse/expand */
+/* Group headers — the visual anchor of the sidebar.
+   Deliberately much bigger than sub-items so the hierarchy reads at a
+   glance (this was the user complaint: main and sub looked the same).
+   15.5px / 800 weight / uppercase-adjacent spacing, plus a prominent
+   chevron that rotates 90° when open. */
 .sidebar .nav-group-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 13px 12px 8px;
-  margin-top: 10px;
-  font-size: 14px;
+  padding: 14px 10px 10px 10px;
+  margin-top: 16px;
+  margin-bottom: 4px;
+  font-size: 15.5px;
   font-weight: 800;
-  letter-spacing: .02em;
+  letter-spacing: .03em;
   color: var(--ink);
   cursor: pointer;
   user-select: none;
-  border-radius: 6px;
+  border-radius: 8px;
   transition: color .15s, background .15s;
 }
+.sidebar .nav-list > :first-child + .nav-group-header,
+.sidebar .nav-group-header:first-child { margin-top: 6px; }
 .sidebar .nav-group-header:hover {
   color: var(--sun-deep);
   background: var(--sun-light);
 }
 .sidebar .nav-group-header .grp-title {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 10px;
 }
 .sidebar .nav-group-header .grp-icon {
-  font-size: 16px; opacity: .95;
+  font-size: 20px;
+  opacity: 1;
+  width: 24px;
+  text-align: center;
+  flex-shrink: 0;
 }
+/* Bigger, more obvious chevron — the user asked for this explicitly.
+   Orange to distinguish from ink-soft meta text, rotates on expand. */
 .sidebar .nav-group-header .grp-chev {
-  font-size: 12px;
-  color: var(--ink-soft);
-  transition: transform .18s;
+  font-size: 18px;
+  color: var(--sun);
+  font-weight: 700;
+  transition: transform .2s ease;
   display: inline-block;
+  width: 18px;
+  text-align: center;
 }
 .sidebar .nav-group-header .grp-chev.open {
   transform: rotate(90deg);
+  color: var(--sun-deep);
 }
-/* Sub-list: no extra padding beyond the parent list's. Items sit
-   flush with top-level items so indent depth feels consistent. */
+/* Sub-list sits indented under its parent with a subtle connector bar
+   on the left so the parent/child relationship reads visually.
+   More vertical breathing room between items. */
 .sidebar ul.nav-sub {
   list-style: none;
-  padding: 0;
-  margin: 0;
+  padding: 2px 0 10px 20px;
+  margin: 0 0 4px 10px;
+  border-left: 2px solid var(--border-light);
+  position: relative;
+}
+.sidebar ul.nav-sub li a {
+  /* Sub items are slightly smaller + lighter weight than the group
+     header so the hierarchy is obvious at a glance. */
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 10px;
+  color: var(--ink-mid);
+}
+.sidebar ul.nav-sub li a .nav-icon {
+  font-size: 14px;
 }
 
 .sidebar-footer {
