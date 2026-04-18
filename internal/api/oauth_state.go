@@ -4,25 +4,25 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"net/http"
-	"sync"
 	"time"
+
+	"seo-system/internal/db"
 
 	"github.com/gin-gonic/gin"
 )
 
-// oauthStates stores short-lived CSRF tokens keyed by state string.
-// A state is bound to the originating user id and an expiry, and is single-use.
-type oauthStateEntry struct {
-	UserID    int64
-	ExpiresAt time.Time
-}
-
-var (
-	oauthStatesMu sync.Mutex
-	oauthStates   = map[string]oauthStateEntry{}
-)
-
 const oauthStateTTL = 10 * time.Minute
+
+// Start a background cleanup goroutine for expired OAuth states.
+func init() {
+	go func() {
+		t := time.NewTicker(5 * time.Minute)
+		defer t.Stop()
+		for range t.C {
+			db.DB.Exec("DELETE FROM oauth_states WHERE expires_at < NOW()")
+		}
+	}()
+}
 
 // newOAuthState generates a random state, stores it for the current user,
 // and returns it. Callers must include it in the OAuth authorize URL.
@@ -33,16 +33,13 @@ func newOAuthState(userID int64) (string, error) {
 	}
 	state := base64.RawURLEncoding.EncodeToString(buf)
 
-	oauthStatesMu.Lock()
-	defer oauthStatesMu.Unlock()
-	// Opportunistic GC: drop expired entries.
-	now := time.Now()
-	for k, v := range oauthStates {
-		if now.After(v.ExpiresAt) {
-			delete(oauthStates, k)
-		}
+	_, err := db.DB.Exec(
+		"INSERT INTO oauth_states (state, user_id, expires_at) VALUES ($1, $2, $3)",
+		state, userID, time.Now().Add(oauthStateTTL),
+	)
+	if err != nil {
+		return "", err
 	}
-	oauthStates[state] = oauthStateEntry{UserID: userID, ExpiresAt: now.Add(oauthStateTTL)}
 	return state, nil
 }
 
@@ -52,23 +49,20 @@ func consumeOAuthState(state string) (userID int64, ok bool) {
 	if state == "" {
 		return 0, false
 	}
-	oauthStatesMu.Lock()
-	defer oauthStatesMu.Unlock()
-	entry, exists := oauthStates[state]
-	if !exists {
+	// SELECT + DELETE atomically: read the row and delete it in one statement.
+	err := db.DB.QueryRow(
+		"DELETE FROM oauth_states WHERE state = $1 AND expires_at > NOW() RETURNING user_id",
+		state,
+	).Scan(&userID)
+	if err != nil {
+		// Also try to clean up expired entry if it existed.
+		db.DB.Exec("DELETE FROM oauth_states WHERE state = $1", state)
 		return 0, false
 	}
-	// Always remove the entry — whether it's valid or expired, a state
-	// is single-use. Check expiry AFTER reading so we return the correct
-	// validity to the caller.
-	delete(oauthStates, state)
-	if time.Now().After(entry.ExpiresAt) {
+	if userID <= 0 {
 		return 0, false
 	}
-	if entry.UserID <= 0 {
-		return 0, false
-	}
-	return entry.UserID, true
+	return userID, true
 }
 
 // requireValidState aborts the request with 400 if the state query parameter
@@ -83,15 +77,13 @@ func requireValidState(c *gin.Context) bool {
 
 // OAuthStateStats returns the number of pending OAuth states.
 func OAuthStateStats() int {
-	oauthStatesMu.Lock()
-	defer oauthStatesMu.Unlock()
-	return len(oauthStates)
+	var count int
+	db.DB.QueryRow("SELECT COUNT(*) FROM oauth_states WHERE expires_at > NOW()").Scan(&count)
+	return count
 }
 
 // ClearOAuthStates drops every in-flight state, effectively canceling any
 // OAuth authorize redirects currently waiting on a callback.
 func ClearOAuthStates() {
-	oauthStatesMu.Lock()
-	defer oauthStatesMu.Unlock()
-	oauthStates = map[string]oauthStateEntry{}
+	db.DB.Exec("DELETE FROM oauth_states")
 }
