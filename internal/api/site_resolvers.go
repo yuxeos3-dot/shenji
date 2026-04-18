@@ -94,6 +94,26 @@ func resolveCacheSet(key, value string) {
 	resolveCache[key] = resolveCacheEntry{at: time.Now(), value: value}
 }
 
+// init starts a background goroutine that sweeps expired resolveCache
+// entries every 10 minutes, preventing unbounded memory growth in
+// long-running processes.
+func init() {
+	go func() {
+		t := time.NewTicker(10 * time.Minute)
+		defer t.Stop()
+		for range t.C {
+			resolveCacheMu.Lock()
+			now := time.Now()
+			for k, e := range resolveCache {
+				if now.Sub(e.at) > resolveCacheTTL {
+					delete(resolveCache, k)
+				}
+			}
+			resolveCacheMu.Unlock()
+		}
+	}()
+}
+
 // ─── GSC resolver ────────────────────────────────────────────────────────
 
 // resolveGSCProperty takes a raw domain (e.g. "hl365.com") and returns
