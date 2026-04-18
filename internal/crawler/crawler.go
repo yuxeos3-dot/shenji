@@ -365,3 +365,15 @@ func FetchPage(spec URLSpec, timeout time.Duration) PageResult {
 
 	return result
 }
+
+// SharedTransport returns the SSRF-safe HTTP transport for reuse by
+// other packages that need outbound HTTP with private-IP blocking.
+func SharedTransport() *http.Transport {
+	return sharedTransport
+}
+
+// ValidateURL rejects obviously bad URLs before any network work happens.
+// Exported so other packages can pre-validate user-supplied URLs.
+func ValidateURL(raw string) error {
+	return validateURL(raw)
+}
