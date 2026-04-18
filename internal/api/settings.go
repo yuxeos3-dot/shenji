@@ -206,21 +206,14 @@ func GetClientIP(c *gin.Context) {
 }
 
 func TestAI(c *gin.Context) {
-	// Redirect to the caller's personal AI config test (global AI settings
-	// no longer exist after personal migration).
-	userID := c.GetInt64("user_id")
-	apiURL, apiKey, model := ResolveAI(userID)
-	if apiKey == "" {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "error": "AI 未配置：请在「个人 AI 设置」中添加 API Key"})
-		return
-	}
-	_, _, err := CallAIWithUserConfig(userID, "Hi", 5)
+	// #67: Use the calling admin's personal AI config instead of the
+	// global setting, consistent with per-user AI model migration.
+	adminID := c.GetInt64("user_id")
+	_, _, err := CallAIWithUserConfig(adminID, "Hi", 5)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	_ = apiURL
-	_ = model
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "AI接口连接成功（使用个人配置）"})
 }
 
