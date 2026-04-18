@@ -345,11 +345,7 @@ func saveOverviewAsSync(gscSiteURL, sd, ed string, overviewRaw json.RawMessage) 
 	}
 	// Match to local site by gsc_site_url or by domain fragment.
 	var siteID int64
-	db.DB.QueryRow(`
-		SELECT id FROM sites
-		WHERE gsc_site_url = ?
-		   OR domain LIKE '%' || REPLACE(REPLACE(REPLACE(?, 'sc-domain:', ''), 'https://', ''), 'http://', '') || '%'
-		LIMIT 1`, gscSiteURL, gscSiteURL).Scan(&siteID)
+	db.DB.QueryRow("SELECT id FROM sites WHERE gsc_site_url = ? LIMIT 1", gscSiteURL).Scan(&siteID)
 	if siteID == 0 {
 		return
 	}

@@ -504,8 +504,8 @@ func StoreSiteKeywords(c *gin.Context) {
 		cleanURL = strings.TrimPrefix(cleanURL, "http://")
 		cleanURL = strings.TrimRight(cleanURL, "/")
 		db.DB.QueryRow(
-			"SELECT id FROM sites WHERE REPLACE(REPLACE(REPLACE(gsc_site_url,'sc-domain:',''),'https://',''),'http://','') LIKE ? LIMIT 1",
-			"%"+cleanURL+"%",
+			"SELECT id FROM sites WHERE REPLACE(REPLACE(REPLACE(gsc_site_url,'sc-domain:',''),'https://',''),'http://','') = ? LIMIT 1",
+			cleanURL,
 		).Scan(&siteID)
 	}
 	if siteID == 0 {

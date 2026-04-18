@@ -314,7 +314,7 @@ func saveYandexOverviewAsSync(hostID, date string, historyRaw json.RawMessage) {
 		if cleanHost == "" {
 			return
 		}
-		db.DB.QueryRow("SELECT id FROM sites WHERE domain LIKE '%' || ? || '%' LIMIT 1", cleanHost).Scan(&siteID)
+		db.DB.QueryRow("SELECT id FROM sites WHERE REPLACE(REPLACE(domain, 'https://', ''), 'http://', '') = ? LIMIT 1", cleanHost).Scan(&siteID)
 		if siteID == 0 {
 			return
 		}

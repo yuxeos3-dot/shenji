@@ -116,8 +116,8 @@ func IngestSpiderLog(c *gin.Context) {
 		dom = strings.TrimPrefix(dom, "http://")
 		dom = strings.TrimRight(dom, "/")
 		db.DB.QueryRow(
-			"SELECT id FROM sites WHERE LOWER(domain) = ? OR LOWER(domain) LIKE ? LIMIT 1",
-			dom, "%"+dom+"%",
+			"SELECT id FROM sites WHERE LOWER(domain) = ? LIMIT 1",
+			dom,
 		).Scan(&siteID)
 	}
 	if siteID == 0 {
