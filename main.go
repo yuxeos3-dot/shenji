@@ -91,9 +91,7 @@ func main() {
 	// /api/ so reverse proxies that only forward /api/* still hit it.
 	r.GET("/api/healthz", api.Healthz)
 
-	// Prometheus-style metrics endpoint (no-auth by default; wrap with reverse
-	// proxy ACL if the host is public).
-	r.GET("/api/metrics", api.Metrics)
+	// Metrics endpoint moved to admin-only group (see below).
 
 	// Auth routes (no auth required)
 	r.POST("/api/auth/login", middleware.LoginRateLimit(), api.Login)
@@ -183,6 +181,8 @@ func main() {
 		admin.Use(middleware.AdminRequired())
 		{
 			admin.GET("/global-data", api.GetGlobalDataOverview)
+			// Detailed metrics require admin auth (security audit #15).
+			admin.GET("/metrics", api.Metrics)
 		}
 
 		// Organization structure — admin only. Matches the /users pattern

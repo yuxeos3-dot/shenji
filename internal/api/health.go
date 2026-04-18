@@ -23,8 +23,6 @@ func Healthz(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":     "ok",
 		"uptime_sec": int64(time.Since(startTime).Seconds()),
-		"go_version": runtime.Version(),
-		"goroutines": runtime.NumGoroutine(),
 	})
 }
 
