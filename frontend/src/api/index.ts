@@ -66,6 +66,12 @@ instance.interceptors.response.use(
       localStorage.removeItem('token')
       router.push('/login')
     }
+    // #43: CSRF token mismatch — session likely expired or cookie cleared.
+    // Redirect to login so the user gets a fresh session + CSRF pair.
+    if (error.response?.status === 403 && error.response?.data?.error?.includes?.('CSRF')) {
+      localStorage.removeItem('token')
+      router.push('/login')
+    }
     if (!(error.config as any)?._silent) {
       ElMessage.error(error.response?.data?.error || '网络错误')
     }
