@@ -24,7 +24,7 @@ type UserAIConfig struct {
 // Returns (apiURL, apiKey, model). All empty if none configured.
 func ResolveUserAI(userID int64) (string, string, string) {
 	var raw string
-	db.DB.QueryRow("SELECT COALESCE(ai_configs,'') FROM users WHERE id=?", userID).Scan(&raw)
+	db.DB.QueryRow("SELECT COALESCE(ai_configs,'') FROM users WHERE id=$1", userID).Scan(&raw)
 	var cfg UserAIConfig
 	if raw != "" {
 		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
