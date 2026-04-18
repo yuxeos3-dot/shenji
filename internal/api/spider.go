@@ -20,6 +20,13 @@ import (
 // of well-known crawlers evolves slowly and a shared list keeps analytics
 // consistent across deploys. Matching is case-insensitive substring on the
 // User-Agent header. Order matters only for the "Unknown" fallback.
+//
+// LIMITATION: Substring matching can produce false positives when a needle
+// appears in an unrelated UA string (e.g. a browser extension containing
+// "bot" in its name). Switching to regex or exact-token matching would be
+// more precise but risks breaking existing categorization for edge-case UAs
+// that currently match correctly. Keep substring matching for now; revisit
+// if false-positive reports arise.
 
 type spiderMatcher struct {
 	Name    string
