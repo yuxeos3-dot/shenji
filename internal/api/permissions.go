@@ -13,33 +13,33 @@ import (
 )
 
 // ─── Permission tree (Magento-style ACL) ─────────────────────────────────────
-// Each permission has a code, label, and optional children. Admin has ALL
-// permissions implicitly. For member users, only checked permissions apply.
+// Each permission has a code, label, optional children, and an optional
+// AdminOnly flag. Admin has ALL permissions implicitly; for members, only
+// checked non-admin-only permissions apply.
 //
-// #40 Enforcement note — permission tree vs route-level guards:
+// AdminOnly = true marks a node as administratively reserved — the
+// corresponding routes use AdminRequired() middleware and the frontend
+// hides the checkbox from the member permission picker. These categories
+// cannot be granted to a non-admin user no matter what the request body
+// claims.
 //
-// The following tree sections are enforced by AdminRequired() middleware at
-// the route group level in main.go, NOT by RequirePermission(). Their tree
-// entries exist so the frontend can render them in the admin permission UI,
-// but the actual gate is the admin-only middleware:
+// Currently admin-only (enforced via AdminRequired at the route layer):
+//   users.*        → /v1/users/*
+//   org.*          → /v1/org/*
+//   globaldata.*   → /v1/admin/global-data, /v1/admin/metrics
+//   reports.evaluate → POST/DELETE /v1/evaluations
 //
-//   users.*       → routes under /v1/users use AdminRequired()
-//   org.*         → routes under /v1/org   use AdminRequired()
-//   settings.*    → routes under /v1/settings use AdminRequired()
-//
-// Additionally these specific routes use AdminRequired() directly:
-//   reports.evaluate → POST/DELETE /v1/evaluations use AdminRequired()
-//   (audit-logs)     → /v1/audit-logs uses AdminRequired() (no tree entry)
-//   (cache)          → /v1/cache uses AdminRequired() (no tree entry)
-//
-// All other tree entries are checked via RequirePermission() on their
-// respective routes. If a new permission is added to the tree, a matching
-// RequirePermission() call must be added to the route definition.
+// Everything else is grantable via RequirePermission() — members with the
+// right code can hit the route, admins always can. If a new permission is
+// added to the tree, the corresponding route must route through
+// RequirePermission() (unless it's a new admin-only category, in which
+// case AdminRequired() is fine).
 
 type PermNode struct {
-	Code     string     `json:"code"`
-	Label    string     `json:"label"`
-	Children []PermNode `json:"children,omitempty"`
+	Code      string     `json:"code"`
+	Label     string     `json:"label"`
+	Children  []PermNode `json:"children,omitempty"`
+	AdminOnly bool       `json:"admin_only,omitempty"`
 }
 
 var PermissionTree = []PermNode{
@@ -135,30 +135,43 @@ var PermissionTree = []PermNode{
 		{Code: "reports.monthly.view", Label: "查看月报"},
 		{Code: "reports.monthly.write", Label: "写 / 生成 / 提交月报"},
 		{Code: "reports.monthly.polish", Label: "月报 AI 润色"},
-		// Evaluation (admin-only, kept in tree for visibility).
-		// NOTE: enforced by AdminRequired() on evaluation routes, not RequirePermission().
-		{Code: "reports.evaluate", Label: "评价下级汇报（仅管理员）"},
+		// Evaluate subordinates — admin-only sub, enforced via AdminRequired
+		// on POST/DELETE /v1/evaluations. Tree entry is AdminOnly so the
+		// member perm picker hides this single row while still showing its
+		// parent (reports.*) category as normally grantable.
+		{Code: "reports.evaluate", Label: "评价下级汇报", AdminOnly: true},
 	}},
-	// NOTE: users.* enforced by AdminRequired() in main.go, not RequirePermission().
-	// Kept in tree for frontend visibility / admin-panel rendering.
-	{Code: "users", Label: "用户管理（仅管理员）", Children: []PermNode{
-		{Code: "users.view", Label: "查看用户列表"},
-		{Code: "users.create", Label: "创建用户"},
-		{Code: "users.edit", Label: "编辑用户"},
-		{Code: "users.delete", Label: "删除用户"},
-		{Code: "users.permissions", Label: "设置用户权限"},
-	}},
-	// NOTE: org.* enforced by AdminRequired() in main.go, not RequirePermission().
-	{Code: "org", Label: "组织结构（仅管理员）", Children: []PermNode{
-		{Code: "org.view", Label: "查看部门 / 组"},
-		{Code: "org.manage", Label: "管理部门 / 组"},
-	}},
-	// NOTE: settings.* enforced by AdminRequired() in main.go, not RequirePermission().
-	{Code: "settings", Label: "系统设置（仅管理员）", Children: []PermNode{
+	{Code: "settings", Label: "系统设置", Children: []PermNode{
 		{Code: "settings.view", Label: "查看系统设置"},
 		{Code: "settings.edit", Label: "修改系统设置"},
 		{Code: "settings.test_ai", Label: "测试 AI 接口"},
 		{Code: "settings.test_tg", Label: "测试 Telegram"},
+	}},
+	{Code: "audit_log", Label: "审计日志", Children: []PermNode{
+		{Code: "audit_log.view", Label: "查看审计日志"},
+	}},
+	{Code: "cache", Label: "缓存管理", Children: []PermNode{
+		{Code: "cache.manage", Label: "查看 / 清理缓存"},
+	}},
+	// ─── Admin-only categories ─────────────────────────────────────────────
+	// These four branches are reserved for admins. Enforcement is via
+	// AdminRequired() middleware at the route layer; the AdminOnly flag on
+	// each node tells the frontend to hide the checkbox from the "member
+	// permission picker" so admins don't see them offered by mistake.
+	{Code: "users", Label: "用户管理（仅管理员）", AdminOnly: true, Children: []PermNode{
+		{Code: "users.view", Label: "查看用户列表", AdminOnly: true},
+		{Code: "users.create", Label: "创建用户", AdminOnly: true},
+		{Code: "users.edit", Label: "编辑用户", AdminOnly: true},
+		{Code: "users.delete", Label: "删除用户", AdminOnly: true},
+		{Code: "users.permissions", Label: "设置用户权限", AdminOnly: true},
+	}},
+	{Code: "org", Label: "组织结构（仅管理员）", AdminOnly: true, Children: []PermNode{
+		{Code: "org.view", Label: "查看部门 / 组", AdminOnly: true},
+		{Code: "org.manage", Label: "管理部门 / 组", AdminOnly: true},
+	}},
+	{Code: "globaldata", Label: "全局数据（仅管理员）", AdminOnly: true, Children: []PermNode{
+		{Code: "globaldata.view", Label: "查看全局数据总览", AdminOnly: true},
+		{Code: "globaldata.metrics", Label: "查看运营指标", AdminOnly: true},
 	}},
 }
 
@@ -420,6 +433,26 @@ func knownPermCodes() map[string]struct{} {
 	return codes
 }
 
+// adminOnlyCodes returns the subset of known codes flagged AdminOnly.
+// A node is treated as admin-only if itself or any ancestor has the flag,
+// so we don't have to set it on every child individually — though we do
+// for defensive clarity in the declaration.
+func adminOnlyCodes() map[string]struct{} {
+	codes := map[string]struct{}{}
+	var walk func(ns []PermNode, inherited bool)
+	walk = func(ns []PermNode, inherited bool) {
+		for _, n := range ns {
+			isAdmin := inherited || n.AdminOnly
+			if isAdmin {
+				codes[n.Code] = struct{}{}
+			}
+			walk(n.Children, isAdmin)
+		}
+	}
+	walk(PermissionTree, false)
+	return codes
+}
+
 // SaveUserPermissions saves the checked permissions for a user. Every submitted
 // permission must appear in PermissionTree, otherwise we reject the request to
 // prevent privilege escalation via arbitrary codes.
@@ -448,17 +481,29 @@ func SaveUserPermissions(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "data": "权限已保存"})
 }
 
-// cleanPermissionList validates that every code is in the permission tree
-// and de-duplicates. Returns the cleaned slice or an error naming the
-// first unknown code. Exposed here so both SaveUserPermissions and the
-// initial-perms flow on CreateUser go through the same guardrail.
+// cleanPermissionList validates that every code is in the permission tree,
+// filters out any admin-only codes (members can never hold them no matter
+// what the request body says), and de-duplicates. Returns the cleaned
+// slice or an error naming the first unknown code. Exposed here so both
+// SaveUserPermissions and the initial-perms flow on CreateUser go through
+// the same guardrail.
+//
+// Silently dropping admin-only codes (rather than 400-ing) is deliberate:
+// the UI hides those checkboxes and serializes an empty/partial list, so
+// a legitimate admin form should never send them. If one slips in via a
+// replay or crafted POST, we just drop it and save the legitimate codes.
 func cleanPermissionList(codes []string) ([]string, error) {
 	known := knownPermCodes()
+	adminOnly := adminOnlyCodes()
 	seen := map[string]bool{}
 	out := make([]string, 0, len(codes))
 	for _, p := range codes {
 		if _, ok := known[p]; !ok {
 			return nil, fmt.Errorf("未知权限: %s", p)
+		}
+		if _, ok := adminOnly[p]; ok {
+			// Silently skip admin-only codes — members can't hold them.
+			continue
 		}
 		if seen[p] {
 			continue

@@ -207,7 +207,8 @@ func main() {
 		}
 
 		// Admin-only global overview: every site across every user +
-		// latest 4-platform snapshot in one payload.
+		// latest 4-platform snapshot in one payload. Belongs to the
+		// globaldata.* AdminOnly branch of the permission tree.
 		admin := v1.Group("/admin")
 		admin.Use(middleware.AdminRequired())
 		{
@@ -362,6 +363,10 @@ func main() {
 		// reports.evaluate in the permission tree is informational —
 		// a non-admin cannot currently evaluate no matter the flag.
 		v1.GET("/evaluations", api.RequirePermission("reports.daily.view"), api.ListEvaluations)
+		// Evaluating a subordinate's report stays admin-only per product
+		// spec — the AdminOnly sub-permission "reports.evaluate" is the
+		// UI marker; AdminRequired() is the actual enforcement (can't be
+		// delegated via permission because the tree flags it admin-only).
 		v1.POST("/evaluations", middleware.AdminRequired(), api.CreateEvaluation)
 		v1.POST("/evaluations/polish", middleware.AdminRequired(), api.PolishEvaluation)
 		v1.DELETE("/evaluations/:id", middleware.AdminRequired(), api.DeleteEvaluation)
@@ -385,19 +390,23 @@ func main() {
 		v1.DELETE("/push/schedules/:id", api.RequirePermission("push.schedule"), api.DeletePushSchedule)
 		v1.PUT("/push/schedules/:id/toggle", api.RequirePermission("push.schedule"), api.TogglePushSchedule)
 
-		// Settings (admin only)
+		// Settings — now shared via permissions rather than locked to
+		// admins. Each verb requires its matching settings.* code so an
+		// admin can grant "view" without "edit".
 		settings := v1.Group("/settings")
-		settings.Use(middleware.AdminRequired())
 		{
-			settings.GET("", api.GetSettings)
-			settings.PUT("", api.SaveSettings)
-			settings.POST("/test-ai", api.TestAI)
-			settings.POST("/test-telegram", api.TestTelegram)
+			settings.GET("", api.RequirePermission("settings.view"), api.GetSettings)
+			settings.PUT("", api.RequirePermission("settings.edit"), api.SaveSettings)
+			settings.POST("/test-ai", api.RequirePermission("settings.test_ai"), api.TestAI)
+			settings.POST("/test-telegram", api.RequirePermission("settings.test_tg"), api.TestTelegram)
+			// Self-service: any logged-in user can ask which IP the server sees them from.
 			settings.GET("/my-ip", api.GetClientIP)
 		}
 
-		// Audit Logs (admin only)
-		v1.GET("/audit-logs", middleware.AdminRequired(), api.ListAuditLogs)
+		// Audit Logs — grantable via audit_log.view so non-admins can be
+		// given read access to the audit trail (useful for compliance
+		// auditors who aren't full admins).
+		v1.GET("/audit-logs", api.RequirePermission("audit_log.view"), api.ListAuditLogs)
 
 		// Spider analytics (read-only for now; ingest is a public route above).
 		// All endpoints are scoped by site; /sites returns a lightweight summary
@@ -454,12 +463,12 @@ func main() {
 			coord.POST("/tasks/:id/reject", api.RequirePermission("coord.reject"), api.RejectCoordTask)
 		}
 
-		// Cache management (admin only)
+		// Cache management — grantable via cache.manage so ops folks
+		// without a full admin role can still flush a stale entry.
 		cache := v1.Group("/cache")
-		cache.Use(middleware.AdminRequired())
 		{
-			cache.GET("", api.ListCaches)
-			cache.DELETE("/:key", api.ClearCache)
+			cache.GET("", api.RequirePermission("cache.manage"), api.ListCaches)
+			cache.DELETE("/:key", api.RequirePermission("cache.manage"), api.ClearCache)
 		}
 
 		// GEO Content Production

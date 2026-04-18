@@ -134,7 +134,11 @@
             </span>
           </div>
           <div class="inline-perm-groups">
-            <div v-for="g in permTree" :key="g.code" class="inline-perm-group">
+            <!-- Only iterate grantable (non-admin-only) groups. Admin-only
+                 categories (users / org / globaldata + reports.evaluate
+                 sub) are reserved for the admin role and never appear as
+                 checkable options for members. -->
+            <div v-for="g in grantablePermTree" :key="g.code" class="inline-perm-group">
               <div class="ipg-head">
                 <el-checkbox
                   :model-value="isInlineGroupChecked(g)"
@@ -145,7 +149,7 @@
               </div>
               <div class="ipg-children">
                 <el-checkbox
-                  v-for="child in g.children"
+                  v-for="child in (g.children || []).filter(c => !c.admin_only)"
                   :key="child.code"
                   :model-value="initialPerms.includes(child.code)"
                   @change="toggleInlinePerm(child.code, $event)"
@@ -198,7 +202,10 @@
     <el-dialog v-model="showPerms" :title="'🔐 权限设置 — ' + (permUser?.name||'')" width="650px" top="5vh">
       <div class="perm-hint">勾选该用户可以访问的功能。管理员拥有所有权限，无需单独设置。</div>
       <div class="perm-tree">
-        <div v-for="group in permTree" :key="group.code" class="perm-group">
+        <!-- Skip admin-only branches here too — they can't be granted to
+             members no matter what you tick. Backend silently filters
+             them on save, but hiding them removes the confusion. -->
+        <div v-for="group in grantablePermTree" :key="group.code" class="perm-group">
           <div class="perm-group-head">
             <el-checkbox
               :model-value="isGroupChecked(group)"
@@ -209,7 +216,7 @@
           </div>
           <div class="perm-children">
             <el-checkbox
-              v-for="child in group.children"
+              v-for="child in (group.children || []).filter(c => !c.admin_only)"
               :key="child.code"
               :model-value="checkedPerms.includes(child.code)"
               @change="togglePerm(child.code, $event)"
@@ -326,9 +333,23 @@ function toggleInlinePerm(code, val) {
   if (val) initialPerms.value = [...initialPerms.value, code]
   else initialPerms.value = initialPerms.value.filter(c => c !== code)
 }
+// grantablePermTree hides every node marked admin_only (both branches and
+// leaves) — these are reserved for the admin role and aren't even an
+// option in the member permission picker. Matches cleanPermissionList's
+// server-side filter so the UI can't promise something the backend drops.
+const grantablePermTree = computed(() =>
+  (permTree.value || [])
+    .filter(g => !g.admin_only)
+    .map(g => ({ ...g, children: (g.children || []).filter(c => !c.admin_only) }))
+)
+
+// All grantable leaf codes — used by the create dialog to default-check
+// every non-admin-only permission, and by 全选 to re-select everything.
 function allPermCodes() {
   const out = []
-  for (const g of permTree.value) for (const c of g.children) out.push(c.code)
+  for (const g of grantablePermTree.value) {
+    for (const c of g.children) out.push(c.code)
+  }
   return out
 }
 
@@ -367,16 +388,18 @@ async function openAdd() {
   editId.value = null
   form.value = { name:'', email:'', password:'', role:'member', telegram_id:'', department_id:null, group_id:null }
   clearFieldErrors()
-  initialPerms.value = []
-  // Load the permission tree lazily the first time the dialog is opened
-  // for creation. We don't block the dialog on it — the checkboxes just
-  // render empty until the fetch completes.
+  // Product rule: creating a new member defaults to "can do everything
+  // except admin-only stuff". The admin then unchecks what they want to
+  // restrict. Load the tree synchronously so the checkboxes are already
+  // populated by the time the dialog opens — otherwise they'd render
+  // empty for a split second and miss the default-check.
   if (!permTree.value.length) {
     try {
       const res = await api.getPermissionTree()
       permTree.value = res.data || []
     } catch (e) { console.error('加载权限树失败', e) }
   }
+  initialPerms.value = allPermCodes()
   showDialog.value = true
 }
 function openEdit(u) {
@@ -608,9 +631,10 @@ function togglePerm(code, val) {
   else { checkedPerms.value = checkedPerms.value.filter(c => c !== code) }
 }
 function checkAll() {
-  const all = []
-  permTree.value.forEach(g => g.children.forEach(c => all.push(c.code)))
-  checkedPerms.value = all
+  // "Select all" = every grantable code. Admin-only leaves are skipped —
+  // a member can't actually hold them, so ticking every box would lie
+  // to the admin about what will be saved.
+  checkedPerms.value = allPermCodes()
 }
 async function savePerms() {
   savingPerms.value = true
