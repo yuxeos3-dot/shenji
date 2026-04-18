@@ -210,6 +210,12 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 
+	// #42: Validate that role is either "admin" or "member" (or empty = no change).
+	if req.Role != "" && req.Role != "admin" && req.Role != "member" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "角色只能是 admin 或 member"})
+		return
+	}
+
 	// If this call would demote the last admin, refuse. This protects the
 	// system from "locking everyone out" when the sole admin edits their
 	// own record and accidentally picks role=member.
