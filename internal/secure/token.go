@@ -12,7 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"log"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -105,13 +105,13 @@ func Decrypt(stored string) (string, error) {
 	return string(plaintext), nil
 }
 
-// MustEncrypt logs and returns empty string on failure — for write paths
-// where a cipher error shouldn't crash the whole request.
+// MustEncrypt panics on failure — callers that cannot tolerate a missing
+// ciphertext (e.g. writing credentials to DB) must never silently store
+// an empty string.
 func MustEncrypt(plain string) string {
 	enc, err := Encrypt(plain)
 	if err != nil {
-		log.Printf("[secure] encrypt failed: %v", err)
-		return ""
+		panic(fmt.Sprintf("secure.MustEncrypt: %v (check JWT_SECRET)", err))
 	}
 	return enc
 }
