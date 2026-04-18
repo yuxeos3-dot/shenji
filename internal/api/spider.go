@@ -162,6 +162,9 @@ func SpiderOverview(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "site_id 必填"})
 		return
 	}
+	if !canAccessSite(c, siteID) {
+		return
+	}
 
 	now := time.Now().UTC()
 	day1 := now.Add(-24 * time.Hour)
@@ -259,6 +262,8 @@ func SpiderOverview(c *gin.Context) {
 // tooltip / overview table so operators can see at a glance which sites are
 // being crawled without drilling into each one.
 func SpiderSiteSummary(c *gin.Context) {
+	role, _ := c.Get("role")
+	userID := c.GetInt64("user_id")
 	day7 := time.Now().UTC().Add(-7 * 24 * time.Hour)
 
 	// Scalar subqueries keep the main query simple — the GROUP-BY + CASE
@@ -270,8 +275,9 @@ func SpiderSiteSummary(c *gin.Context) {
 		        (SELECT COUNT(DISTINCT spider)      FROM spider_logs WHERE site_id = s.id AND visited_at >= ?) AS spiders_7d,
 		        (SELECT MAX(visited_at)             FROM spider_logs WHERE site_id = s.id) AS last_visit
 		 FROM sites s
+		 WHERE (? = 'admin' OR s.created_by = ?)
 		 ORDER BY hits_7d DESC, s.id`,
-		day7, day7,
+		day7, day7, role, userID,
 	)
 	if err != nil {
 		log.Printf("[spider] SpiderSiteSummary query failed: %v", err)
@@ -312,6 +318,9 @@ func SpiderDailyTrend(c *gin.Context) {
 	siteID := c.Query("site_id")
 	if siteID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "site_id 必填"})
+		return
+	}
+	if !canAccessSite(c, siteID) {
 		return
 	}
 	days, _ := strconv.Atoi(c.DefaultQuery("days", "14"))
@@ -365,6 +374,9 @@ func SpiderLogs(c *gin.Context) {
 	where := "1=1"
 	args := []interface{}{}
 	if siteID != "" {
+		if !canAccessSite(c, siteID) {
+			return
+		}
 		where += " AND sl.site_id = ?"
 		args = append(args, siteID)
 	}
