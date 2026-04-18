@@ -135,6 +135,18 @@ func IngestSpiderLog(c *gin.Context) {
 	visitedAt := time.Now().UTC()
 	if req.Timestamp != "" {
 		if t, err := time.Parse(time.RFC3339, req.Timestamp); err == nil {
+			// Reject timestamps that are too far in the future (clock skew /
+			// fabrication) or too far in the past (stale replay). 5 min future
+			// tolerance covers reasonable clock drift; 30 days back covers
+			// delayed log shipping.
+			if t.After(time.Now().UTC().Add(5 * time.Minute)) {
+				c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "timestamp 不能超过当前时间 5 分钟"})
+				return
+			}
+			if t.Before(time.Now().UTC().AddDate(0, 0, -30)) {
+				c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "timestamp 不能早于 30 天前"})
+				return
+			}
 			visitedAt = t
 		}
 	}
