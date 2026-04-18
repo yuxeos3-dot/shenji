@@ -37,9 +37,13 @@ import (
 type RegisterRequest struct {
 	TGName       string `json:"tg_name" binding:"required"`
 	TGID         string `json:"tg_id"` // optional, e.g. "@username"
-	Nickname     string `json:"nickname" binding:"required"`     // 花名
-	EmployeeID   string `json:"employee_id" binding:"required"`  // 工号
-	InviteCode   string `json:"invite_code" binding:"required"`
+	Nickname     string `json:"nickname" binding:"required"`    // 花名
+	EmployeeID   string `json:"employee_id" binding:"required"` // 工号
+	// InviteCode is optional — every registration still goes through
+	// admin review, so a code is more a "VIP fast-track" hint than a
+	// true gate. When present, it's validated + consumed; when empty,
+	// we just skip the check and mark the row pending as usual.
+	InviteCode   string `json:"invite_code"`
 	DepartmentID int64  `json:"department_id" binding:"required"`
 	GroupID      int64  `json:"group_id"`
 	Password     string `json:"password" binding:"required,min=8"`
@@ -71,19 +75,22 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	// Verify the invite code exists in the whitelist BEFORE doing any
-	// expensive work. Codes are case-insensitive on comparison.
-	codes := loadInviteCodes()
+	// If an invite code is supplied, it must be valid — admins added
+	// them to the whitelist for a reason and we want them consumed.
+	// A blank code is fine; admin review is still the real gate.
 	matched := ""
-	for _, code := range codes {
-		if strings.EqualFold(code, req.InviteCode) {
-			matched = code
-			break
+	if req.InviteCode != "" {
+		codes := loadInviteCodes()
+		for _, code := range codes {
+			if strings.EqualFold(code, req.InviteCode) {
+				matched = code
+				break
+			}
 		}
-	}
-	if matched == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "邀请码无效或已被使用"})
-		return
+		if matched == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "邀请码无效或已被使用"})
+			return
+		}
 	}
 
 	// Validate department + group pair exists. Reuse the same helper
@@ -144,8 +151,11 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	// Consume the invite code so a leaked code can only be used once.
-	consumeInviteCode(matched)
+	// Consume the invite code only if one was actually supplied &
+	// matched. Blank submissions leave the CSV untouched.
+	if matched != "" {
+		consumeInviteCode(matched)
+	}
 
 	if err := tx.Commit(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "注册失败"})

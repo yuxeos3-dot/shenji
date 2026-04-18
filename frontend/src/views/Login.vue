@@ -73,8 +73,8 @@
           </div>
 
           <div class="form-group">
-            <label>邀请码 <span class="req">*</span></label>
-            <input v-model="regForm.invite_code" placeholder="如 HF-A8F3K2" />
+            <label>邀请码（选填）</label>
+            <input v-model="regForm.invite_code" placeholder="没有可留空，管理员会统一审核" />
           </div>
 
           <div class="form-row">
@@ -205,11 +205,12 @@ async function handleLogin() {
 async function handleRegister() {
   // Client-side sanity checks. Backend re-validates everything; we just
   // catch the obvious so the user doesn't waste a round-trip.
+  // invite_code is intentionally NOT here — admin review is the real
+  // gate, so users without a code can still apply.
   const required = [
     ['tg_name', 'TG名称'],
     ['nickname', '花名'],
     ['employee_id', '工号'],
-    ['invite_code', '邀请码'],
     ['password', '密码'],
     ['confirm', '确认密码'],
   ]

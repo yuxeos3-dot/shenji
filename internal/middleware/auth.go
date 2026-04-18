@@ -172,8 +172,12 @@ func AuthRequired() gin.HandlerFunc {
 		c.Set("email", claims.Email)
 		c.Set("role", claims.Role)
 
-		// Track online presence
-		RecordOnline(claims.UserID, claims.Email, claims.Role, c.ClientIP())
+		// Track online presence — keyed by (user, JWT jti) so each
+		// distinct login session counts once regardless of how many
+		// requests it makes or how Cloudflare load-balances them
+		// across edges. IP extracted via realClientIP so CF edge
+		// addresses don't end up displayed as the user's "login IP".
+		RecordOnline(claims.UserID, claims.Email, claims.Role, realClientIP(c), claims.ID)
 
 		c.Next()
 	}
@@ -309,21 +313,50 @@ func InvalidateIPWhitelistCache() {
 	ipCacheMu.Unlock()
 }
 
-// Online user tracking — records each authenticated request's user + IP.
+// realClientIP resolves the true browser-side IP when the request has
+// passed through a CDN (Cloudflare) or trusted reverse proxy. Gin's
+// c.ClientIP() uses X-Forwarded-For + trusted proxy list, but behind
+// Cloudflare X-F-F can contain the edge POP address, not the end user.
+// Cloudflare always sets CF-Connecting-IP to the real client; other
+// CDNs use X-Real-IP. Fall back to c.ClientIP() as a last resort.
+//
+// Without this, the "online users" panel accumulates a handful of
+// Cloudflare edge IPs per login (one per POP the browser keepalives to)
+// and the user appears to have "5 个会话" when they've only logged in once.
+func realClientIP(c *gin.Context) string {
+	if ip := strings.TrimSpace(c.GetHeader("CF-Connecting-IP")); ip != "" {
+		return ip
+	}
+	if ip := strings.TrimSpace(c.GetHeader("X-Real-IP")); ip != "" {
+		return ip
+	}
+	return c.ClientIP()
+}
+
+// Online user tracking — records each authenticated session's user + IP.
+// One entry per distinct JWT jti, so page refreshes / CF edge rotation
+// don't create phantom sessions. LastSeen and IP are overwritten on
+// every request; a session genuinely logged in from two networks
+// flip-flops its displayed IP, which matches real behaviour.
 type OnlineEntry struct {
 	UserID   int64
 	Email    string
 	Role     string
 	IP       string
+	SessID   string // JWT jti — opaque to the caller, used only as a dedup key
 	LastSeen time.Time
 }
 
-var onlineUsers sync.Map // key: "userID:IP" → *OnlineEntry
+// onlineUsers keyed by "userID:jti". Pre-jti rows (empty jti — only
+// possible for tokens issued before this change) collapse to
+// "userID:" and are overwritten on the session's next request.
+var onlineUsers sync.Map
 
-func RecordOnline(userID int64, email, role, ip string) {
-	key := fmt.Sprintf("%d:%s", userID, ip)
+func RecordOnline(userID int64, email, role, ip, sessID string) {
+	key := fmt.Sprintf("%d:%s", userID, sessID)
 	onlineUsers.Store(key, &OnlineEntry{
-		UserID: userID, Email: email, Role: role, IP: ip, LastSeen: time.Now(),
+		UserID: userID, Email: email, Role: role, IP: ip,
+		SessID: sessID, LastSeen: time.Now(),
 	})
 }
 
