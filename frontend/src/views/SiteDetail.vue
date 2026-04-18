@@ -97,6 +97,15 @@ const { data: auditsData, refetch: refetchAudits } = useQuery({
     return res.data
   },
   enabled: computed(() => !!siteId.value),
+  // Poll every 2s while any audit is in flight; stop polling once all
+  // are terminal (done/error) so we don't hammer the backend forever.
+  // The function form re-evaluates after every fetch using the latest data.
+  refetchInterval: (query) => {
+    const list = query?.state?.data || []
+    const running = list.some(a => a.status === 'running' || a.status === 'pending')
+    return running ? 2000 : false
+  },
+  refetchIntervalInBackground: false,
 })
 
 // Determine if any audit is running to enable fast polling

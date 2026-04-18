@@ -238,6 +238,12 @@ func main() {
 		v1.GET("/sites/:id", api.RequirePermission("sites.view"), api.GetSite)
 		v1.PUT("/sites/:id", api.RequirePermission("sites.edit"), api.UpdateSite)
 		v1.DELETE("/sites/:id", api.RequirePermission("sites.delete"), api.DeleteSite)
+		// Bundle export / import — round-tripped JSON of the caller's
+		// own sites + their site_pages. Lives under /site-bundle/* (not
+		// /sites/*) so it doesn't collide with the /sites/:id parameter
+		// route, which gin's tree-based router rejects at registration.
+		v1.GET("/site-bundle/export", api.RequirePermission("sites.view"), api.ExportSites)
+		v1.POST("/site-bundle/import", api.RequirePermission("sites.create"), api.ImportSites)
 
 		// Audit (rate-limited: 5/min per user)
 		v1.POST("/sites/:id/audit", api.RequirePermission("sites.audit"), middleware.UserRateLimit(5), api.TriggerAudit)

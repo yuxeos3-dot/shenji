@@ -6,9 +6,17 @@
         <h1 class="page-title">站点管理</h1>
         <span class="page-subtitle">{{ userStore.isAdmin() ? '管理所有用户站点，触发深度巡检任务' : '管理我的监控站点，触发深度巡检任务' }}</span>
       </div>
-      <el-button class="btn-sunrise" @click="openAddDialog">
-        <span class="btn-icon">+</span> 添加站点
-      </el-button>
+      <div class="header-actions">
+        <el-button class="btn-secondary" @click="openImportDialog">
+          <span class="btn-icon">📥</span> 导入
+        </el-button>
+        <el-button class="btn-secondary" @click="openExportDialog" :loading="exporting">
+          <span class="btn-icon">📤</span> 导出
+        </el-button>
+        <el-button class="btn-sunrise" @click="openAddDialog">
+          <span class="btn-icon">+</span> 添加站点
+        </el-button>
+      </div>
     </div>
 
     <!-- 系统能力介绍卡片 -->
@@ -145,6 +153,36 @@
         </div>
       </template>
     </el-dialog>
+
+    <!-- 导出弹窗 -->
+    <el-dialog v-model="showExportDialog" title="📤 导出站点配置" width="640px" class="sunrise-dialog">
+      <div class="io-hint">
+        共 {{ exportSiteCount }} 个站点已打包成下面这段 JSON。复制后可以在另一台机器/另一个账号点「导入」恢复，包含每个站点的页面配置。<br><br>
+        <strong>不会被导出</strong>：审计历史、抓取的源码、推送计划、OAuth/Bing/Telegram 等凭证（这些每用户独立加密）。
+      </div>
+      <el-input v-model="exportText" type="textarea" :rows="14" readonly class="io-textarea" />
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button class="btn-cancel" @click="showExportDialog = false">关 闭</el-button>
+          <el-button class="btn-sunrise" @click="copyExportText">📋 复制到剪贴板</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 导入弹窗 -->
+    <el-dialog v-model="showImportDialog" title="📥 导入站点配置" width="640px" class="sunrise-dialog">
+      <div class="io-hint">
+        粘贴上面「导出」生成的 JSON。<br>
+        <strong>同域名站点会被跳过（不覆盖）</strong>，已存在的页面也会跳过——导入是<strong>幂等</strong>的，重复点不会出现重复数据。
+      </div>
+      <el-input v-model="importText" type="textarea" :rows="12" placeholder='{"version":1,"sites":[...]}' class="io-textarea" />
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button class="btn-cancel" @click="showImportDialog = false">取 消</el-button>
+          <el-button class="btn-sunrise" @click="doImport" :loading="importing">确认导入</el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -162,6 +200,15 @@ const showDialog = ref(false)
 const editId = ref(null)
 const capExpanded = ref(false)
 const form = ref({ domain: '', name: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' })
+
+// Bundle export / import state
+const showExportDialog = ref(false)
+const showImportDialog = ref(false)
+const exportText = ref('')
+const exportSiteCount = ref(0)
+const exporting = ref(false)
+const importText = ref('')
+const importing = ref(false)
 
 const activeSites = computed(() => sites.value.filter(s => s.status === 'active').length)
 const auditedSites = computed(() => sites.value.filter(s => s.last_audit_status === 'done').length)
@@ -216,6 +263,74 @@ async function deleteSite(row) {
     await api.deleteSite(row.id); ElMessage.success('站点已删除'); loadSites()
   } catch (e) { if (e !== 'cancel') console.error('删除站点失败', e) }
 }
+async function openExportDialog() {
+  exporting.value = true
+  try {
+    const res = await api.exportSites()
+    exportText.value = res.data.bundle
+    exportSiteCount.value = res.data.site_count
+    showExportDialog.value = true
+    if (exportSiteCount.value === 0) {
+      ElMessage.warning('你还没有任何站点可以导出')
+    }
+  } catch (e) {
+    console.error('导出失败', e)
+    ElMessage.error('导出失败')
+  } finally {
+    exporting.value = false
+  }
+}
+
+async function copyExportText() {
+  try {
+    // navigator.clipboard requires HTTPS or localhost; fall back to a
+    // throwaway textarea for plain HTTP deployments.
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(exportText.value)
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = exportText.value
+      ta.style.position = 'fixed'; ta.style.opacity = '0'
+      document.body.appendChild(ta); ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    ElMessage.success('已复制到剪贴板')
+  } catch (e) {
+    console.error('复制失败', e)
+    ElMessage.error('复制失败，请手动选中文本复制')
+  }
+}
+
+function openImportDialog() {
+  importText.value = ''
+  showImportDialog.value = true
+}
+
+async function doImport() {
+  const txt = (importText.value || '').trim()
+  if (!txt) { ElMessage.warning('请粘贴要导入的 JSON 内容'); return }
+  importing.value = true
+  try {
+    const res = await api.importSites(txt)
+    const d = res.data
+    const failed = (d.failures || []).length
+    let msg = `站点：新增 ${d.sites_created} / 跳过 ${d.sites_skipped}，页面：新增 ${d.pages_created}`
+    if (failed > 0) msg += `，失败 ${failed} 项`
+    if (failed > 0) {
+      ElMessage.warning(msg + '：' + (d.failures[0] || ''))
+    } else {
+      ElMessage.success(msg)
+    }
+    showImportDialog.value = false
+    loadSites()
+  } catch (e) {
+    console.error('导入失败', e)
+  } finally {
+    importing.value = false
+  }
+}
+
 onMounted(loadSites)
 </script>
 
@@ -223,6 +338,12 @@ onMounted(loadSites)
 .sites-page { padding: 0; }
 .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
 .header-left { display:flex; flex-direction:column; gap:4px; }
+.header-actions { display:flex; gap:10px; align-items:center; }
+.btn-secondary { background:#fff; border:1.5px solid var(--peach); color:var(--ink-mid); font-weight:700; padding:9px 16px; border-radius:var(--r-sm); transition:all .15s; }
+.btn-secondary:hover { border-color:var(--sun); color:var(--sun-deep); background:var(--surface-2); }
+.io-hint { font-size:13px; color:var(--ink-soft); line-height:1.7; padding:10px 14px; background:var(--surface-2); border-radius:var(--r-sm); margin-bottom:14px; }
+.io-hint strong { color:var(--ink); }
+.io-textarea :deep(.el-textarea__inner) { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; line-height:1.5; }
 .page-title { margin:0; font-size:24px; font-weight:800; color:var(--ink); letter-spacing:-0.02em; }
 .page-subtitle { font-size:13px; color:var(--ink-soft); font-weight:500; }
 

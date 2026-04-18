@@ -115,6 +115,8 @@ const api = {
   getSite: (id: Id) => instance.get(`/v1/sites/${id}`),
   updateSite: (id: Id, data: Record<string, any>) => instance.put(`/v1/sites/${id}`, data),
   deleteSite: (id: Id) => instance.delete(`/v1/sites/${id}`),
+  exportSites: () => instance.get('/v1/site-bundle/export'),
+  importSites: (data: string) => instance.post('/v1/site-bundle/import', { data }),
 
   // Audit
   triggerAudit: (siteId: Id) => instance.post(`/v1/sites/${siteId}/audit`),
