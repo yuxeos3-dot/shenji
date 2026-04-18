@@ -19,7 +19,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
+
+	"seo-system/internal/httpx"
 )
 
 const (
@@ -121,7 +125,7 @@ func New(apikey, token, userID string) *Client {
 		APIKey: apikey,
 		Token:  token,
 		UserID: userID,
-		HTTP:   &http.Client{Timeout: ReqTimeout},
+		HTTP:   httpx.Outbound(ReqTimeout),
 	}
 }
 
@@ -285,8 +289,31 @@ func (c *Client) Query(taskID string) (*QueryResult, error) {
 // Download fetches the final output URL (image/video) into memory.
 // Caller is responsible for writing it to disk. We limit to 200 MB to
 // avoid eating RAM on a misbehaving response.
-func Download(url string) ([]byte, string, error) {
-	resp, err := http.Get(url)
+// allowedFRWHosts is the whitelist of domains we permit downloads from.
+var allowedFRWHosts = []string{
+	"aiaiartist.com",
+	"frw-dreamaiai-api2.aiaiartist.com",
+}
+
+func isAllowedFRWHost(host string) bool {
+	host = strings.ToLower(host)
+	for _, h := range allowedFRWHosts {
+		if host == h || strings.HasSuffix(host, "."+h) {
+			return true
+		}
+	}
+	return false
+}
+
+func Download(rawURL string) ([]byte, string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, "", fmt.Errorf("URL 解析失败: %w", err)
+	}
+	if !isAllowedFRWHost(u.Hostname()) {
+		return nil, "", fmt.Errorf("下载域名不在白名单内: %s", u.Hostname())
+	}
+	resp, err := httpx.Outbound(60 * time.Second).Get(rawURL)
 	if err != nil {
 		return nil, "", err
 	}
