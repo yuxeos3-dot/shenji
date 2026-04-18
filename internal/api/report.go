@@ -29,6 +29,9 @@ func DownloadAuditReport(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "审计任务尚未完成"})
 		return
 	}
+	if !canAccessSite(c, fmt.Sprintf("%d", siteID)) {
+		return
+	}
 
 	var domain string
 	db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
