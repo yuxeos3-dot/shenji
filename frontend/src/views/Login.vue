@@ -157,7 +157,7 @@ const siteConfig = useSiteConfigStore()
 // route rather than make the user log in again.
 watch(() => userStore.authed, (now) => {
   if (now) {
-    const dest = (route.query.redirect as string) || '/dashboard'
+    const dest = route.query.redirect || '/dashboard'
     router.replace(dest)
   }
 })
@@ -301,7 +301,7 @@ onMounted(() => {
   // (rare but possible on a cached cookie), the watch won't fire for
   // the initial value. Check once on mount too.
   if (userStore.authed) {
-    const dest = (route.query.redirect as string) || '/dashboard'
+    const dest = route.query.redirect || '/dashboard'
     router.replace(dest)
   }
 })
