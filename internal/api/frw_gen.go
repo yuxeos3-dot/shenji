@@ -442,7 +442,11 @@ func DeleteFRWGeneration(c *gin.Context) {
 	var lp string
 	db.DB.QueryRow(`SELECT COALESCE(local_path,'') FROM ai_generations WHERE id=? AND user_id=?`, id, userID).Scan(&lp)
 	if lp != "" && strings.HasPrefix(lp, "/data/frw/") {
-		os.Remove(strings.TrimPrefix(lp, "/"))
+		cleanPath := strings.TrimPrefix(lp, "/")
+		absPath, err := filepath.Abs(cleanPath)
+		if err == nil && strings.HasPrefix(absPath, filepath.Join("data", "frw")) {
+			os.Remove(absPath)
+		}
 	}
 	res, err := db.DB.Exec(`DELETE FROM ai_generations WHERE id=? AND user_id=?`, id, userID)
 	if err != nil {
