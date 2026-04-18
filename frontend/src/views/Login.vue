@@ -7,11 +7,11 @@
       <div class="login-card">
         <div class="form-group">
           <label>邮箱</label>
-          <input v-model="form.email" type="email" placeholder="请输入邮箱" @keyup.enter="handleLogin" />
+          <input v-model="form.email" type="email" placeholder="请输入邮箱" autocomplete="username" @keyup.enter="handleLogin" />
         </div>
         <div class="form-group">
           <label>密码</label>
-          <input v-model="form.password" type="password" placeholder="请输入密码" @keyup.enter="handleLogin" />
+          <input v-model="form.password" type="password" placeholder="请输入密码" autocomplete="current-password" @keyup.enter="handleLogin" />
         </div>
         <button class="login-btn" @click="handleLogin" :disabled="loading">
           <span v-if="loading">登录中...</span>
