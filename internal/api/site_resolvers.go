@@ -203,7 +203,7 @@ func resolveGAProperty(token, domain string, userID int64) (string, error) {
 		for _, a := range resp.AccountSummaries {
 			for _, p := range a.PropertySummaries {
 				name := strings.ToLower(p.DisplayName)
-				if strings.Contains(name, dom) {
+				if name == dom || strings.HasSuffix(name, "."+dom) {
 					bestProp = p.Property
 					break
 				}

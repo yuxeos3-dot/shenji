@@ -481,7 +481,7 @@ func matchYandexToGSC(yandexHost, gscURL string) bool {
 	gd = strings.TrimRight(gd, "/")
 	gd = strings.ToLower(gd)
 
-	return yd == gd || strings.HasSuffix(yd, "."+gd) || strings.HasSuffix(gd, "."+yd) || strings.Contains(yd, gd) || strings.Contains(gd, yd)
+	return yd == gd || strings.HasSuffix(yd, "."+gd) || strings.HasSuffix(gd, "."+yd)
 }
 
 func GetYandexData(c *gin.Context) {
