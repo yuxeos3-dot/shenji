@@ -1,0 +1,66 @@
+/* Mobile-first responsive breakpoints */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed !important;
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    height: 100vh;
+    top: 0;
+  }
+  .sidebar.open {
+    transform: translateX(0);
+  }
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 999;
+  }
+  .content {
+    margin-left: 0 !important;
+    padding: 12px !important;
+  }
+  .page-header {
+    padding: 8px 12px !important;
+  }
+  .page-header h1 {
+    font-size: 16px !important;
+  }
+  .stats-grid,
+  .stat-cards {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+  }
+  .el-dialog {
+    width: 95vw !important;
+    max-width: 95vw !important;
+    margin: 8px auto !important;
+  }
+  .el-table {
+    font-size: 12px !important;
+  }
+  .table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 480px) {
+  .stats-grid,
+  .stat-cards {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Touch-friendly sizing */
+@media (pointer: coarse) {
+  .el-button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .el-input__inner {
+    min-height: 44px;
+  }
+}

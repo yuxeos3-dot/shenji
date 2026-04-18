@@ -1,6 +1,6 @@
 <template>
   <div class="app-layout">
-    <nav class="sidebar">
+    <nav class="sidebar" :class="{ open: sidebarOpen }">
       <div class="logo">
         <div class="logo-main">☀ {{ siteConfig.title }}</div>
         <div class="logo-sub">管理后台 · <span class="logo-ver">{{ appVersion }}</span></div>
@@ -43,8 +43,10 @@
         <a href="#" @click.prevent="handleLogout">🚪 退出登录</a>
       </div>
     </nav>
+    <div v-if="isMobile && sidebarOpen" class="sidebar-backdrop" @click="sidebarOpen = false" />
     <div class="content">
       <header class="page-header">
+        <button v-if="isMobile" class="hamburger-btn" @click="sidebarOpen = !sidebarOpen">☰</button>
         <h1 id="page-title">{{ pageTitle }}</h1>
         <div class="header-right">
           <span class="user-chip">{{ userStore.user?.name || '' }}</span>
@@ -78,7 +80,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { useSiteConfigStore, APP_VERSION } from '../stores/siteConfig'
@@ -90,6 +92,21 @@ const router = useRouter()
 const userStore = useUserStore()
 const siteConfig = useSiteConfigStore()
 const appVersion = APP_VERSION
+const isMobile = ref(window.innerWidth <= 768)
+const sidebarOpen = ref(!isMobile.value)
+
+onMounted(() => {
+  window.addEventListener('resize', () => {
+    isMobile.value = window.innerWidth <= 768
+    if (!isMobile.value) sidebarOpen.value = true
+  })
+})
+
+// Close sidebar on mobile route change
+watch(() => route.path, () => {
+  if (isMobile.value) sidebarOpen.value = false
+})
+
 const showPasswordDialog = ref(false)
 const pwdForm = ref({ old_password: '', new_password: '' })
 
@@ -505,5 +522,29 @@ async function changePassword() {
   font-weight: 700;
   color: var(--ink-mid);
   font-size: 13px;
+}
+
+.hamburger-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 18px;
+  color: var(--ink-mid);
+  transition: all 0.18s;
+  flex-shrink: 0;
+}
+.hamburger-btn:hover {
+  background: var(--sun-light);
+  color: var(--sun-deep);
+  border-color: var(--sun);
+}
+.sidebar-backdrop {
+  display: none;
 }
 </style>

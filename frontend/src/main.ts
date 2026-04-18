@@ -6,6 +6,7 @@ import 'element-plus/dist/index.css'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
+import './styles/responsive.css'
 import router from './router'
 import { useSiteConfigStore } from './stores/siteConfig'
 
