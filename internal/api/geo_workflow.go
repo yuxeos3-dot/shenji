@@ -196,6 +196,9 @@ func GeoStartKeywordWorkflow(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点未指定"})
 		return
 	}
+	if !canAccessSite(c, fmt.Sprintf("%d", req.SiteID)) {
+		return
+	}
 	if req.ContentType == "" {
 		req.ContentType = "geo"
 	}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -30,15 +31,27 @@ func GeoStats(c *gin.Context) {
 	contentType := c.DefaultQuery("content_type", "geo")
 	var totalArticles, drafts, published, reviewed int
 	if siteID != "" {
+		if !canAccessSite(c, siteID) {
+			return
+		}
 		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE site_id=? AND content_type=?", siteID, contentType).Scan(&totalArticles)
 		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE site_id=? AND status='draft' AND content_type=?", siteID, contentType).Scan(&drafts)
 		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE site_id=? AND status='published' AND content_type=?", siteID, contentType).Scan(&published)
 		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE site_id=? AND review_status='pending' AND content_type=?", siteID, contentType).Scan(&reviewed)
 	} else {
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE content_type=?", contentType).Scan(&totalArticles)
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE status='draft' AND content_type=?", contentType).Scan(&drafts)
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE status='published' AND content_type=?", contentType).Scan(&published)
-		db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE review_status='pending' AND content_type=?", contentType).Scan(&reviewed)
+		role, _ := c.Get("role")
+		if role == "admin" {
+			db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE content_type=?", contentType).Scan(&totalArticles)
+			db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE status='draft' AND content_type=?", contentType).Scan(&drafts)
+			db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE status='published' AND content_type=?", contentType).Scan(&published)
+			db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE review_status='pending' AND content_type=?", contentType).Scan(&reviewed)
+		} else {
+			userID := c.GetInt64("user_id")
+			db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE content_type=? AND site_id IN (SELECT id FROM sites WHERE created_by=?)", contentType, userID).Scan(&totalArticles)
+			db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE status='draft' AND content_type=? AND site_id IN (SELECT id FROM sites WHERE created_by=?)", contentType, userID).Scan(&drafts)
+			db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE status='published' AND content_type=? AND site_id IN (SELECT id FROM sites WHERE created_by=?)", contentType, userID).Scan(&published)
+			db.DB.QueryRow("SELECT COUNT(*) FROM geo_articles WHERE review_status='pending' AND content_type=? AND site_id IN (SELECT id FROM sites WHERE created_by=?)", contentType, userID).Scan(&reviewed)
+		}
 	}
 	c.JSON(200, gin.H{"code": 0, "data": gin.H{
 		"total_articles": totalArticles, "drafts": drafts, "published": published,
@@ -105,12 +118,16 @@ func GeoDeleteTitleLib(c *gin.Context) {
 	contentType := c.DefaultQuery("content_type", "geo")
 	// Only delete if content_type matches, prevents cross-type deletion
 	var ct string
-	if err := db.DB.QueryRow("SELECT content_type FROM geo_title_libs WHERE id=?", id).Scan(&ct); err != nil {
+	var libSiteID int64
+	if err := db.DB.QueryRow("SELECT content_type, COALESCE(site_id,0) FROM geo_title_libs WHERE id=?", id).Scan(&ct, &libSiteID); err != nil {
 		c.JSON(404, gin.H{"code": -1, "error": "关键词库不存在"})
 		return
 	}
 	if ct != contentType {
 		c.JSON(403, gin.H{"code": -1, "error": "无权删除"})
+		return
+	}
+	if libSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", libSiteID)) {
 		return
 	}
 	db.DB.Exec("DELETE FROM geo_titles WHERE lib_id = ?", id)
@@ -120,6 +137,11 @@ func GeoDeleteTitleLib(c *gin.Context) {
 
 func GeoListTitles(c *gin.Context) {
 	libID := c.Param("id")
+	var listLibSiteID int64
+	db.DB.QueryRow("SELECT COALESCE(site_id,0) FROM geo_title_libs WHERE id=?", libID).Scan(&listLibSiteID)
+	if listLibSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", listLibSiteID)) {
+		return
+	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "100"))
 	if page < 1 {
@@ -155,6 +177,11 @@ func GeoListTitles(c *gin.Context) {
 
 func GeoAddTitles(c *gin.Context) {
 	libID := c.Param("id")
+	var addLibSiteID int64
+	db.DB.QueryRow("SELECT COALESCE(site_id,0) FROM geo_title_libs WHERE id=?", libID).Scan(&addLibSiteID)
+	if addLibSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", addLibSiteID)) {
+		return
+	}
 	var req struct {
 		Titles []struct {
 			Title   string `json:"title"`
@@ -181,6 +208,11 @@ func GeoAddTitles(c *gin.Context) {
 
 func GeoImportTitles(c *gin.Context) {
 	libID := c.Param("id")
+	var impLibSiteID int64
+	db.DB.QueryRow("SELECT COALESCE(site_id,0) FROM geo_title_libs WHERE id=?", libID).Scan(&impLibSiteID)
+	if impLibSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", impLibSiteID)) {
+		return
+	}
 	var req struct {
 		Text string `json:"text" binding:"required"`
 	}
@@ -217,6 +249,13 @@ func GeoDeleteTitle(c *gin.Context) {
 	id := c.Param("id")
 	var libID int64
 	db.DB.QueryRow("SELECT lib_id FROM geo_titles WHERE id = ?", id).Scan(&libID)
+	if libID > 0 {
+		var titleLibSiteID int64
+		db.DB.QueryRow("SELECT COALESCE(site_id,0) FROM geo_title_libs WHERE id=?", libID).Scan(&titleLibSiteID)
+		if titleLibSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", titleLibSiteID)) {
+			return
+		}
+	}
 	db.DB.Exec("DELETE FROM geo_titles WHERE id = ?", id)
 	if libID > 0 {
 		db.DB.Exec("UPDATE geo_title_libs SET title_count = (SELECT COUNT(*) FROM geo_titles WHERE lib_id = ?) WHERE id = ?", libID, libID)
@@ -233,6 +272,9 @@ func GeoImportFromGSC(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"code": -1, "error": "site_id 必填"})
+		return
+	}
+	if !canAccessSite(c, fmt.Sprintf("%d", req.SiteID)) {
 		return
 	}
 
@@ -320,8 +362,18 @@ func GeoListArticles(c *gin.Context) {
 	args = append(args, contentType)
 
 	if v := c.Query("site_id"); v != "" {
+		if !canAccessSite(c, v) {
+			return
+		}
 		where += " AND a.site_id = ?"
 		args = append(args, v)
+	} else {
+		role, _ := c.Get("role")
+		if role != "admin" {
+			userID := c.GetInt64("user_id")
+			where += " AND a.site_id IN (SELECT id FROM sites WHERE created_by = ?)"
+			args = append(args, userID)
+		}
 	}
 	if v := c.Query("task_id"); v != "" {
 		where += " AND a.task_id = ?"
@@ -376,6 +428,14 @@ func GeoListArticles(c *gin.Context) {
 
 func GeoGetArticle(c *gin.Context) {
 	id := c.Param("id")
+	var articleSiteID int64
+	if err := db.DB.QueryRow("SELECT site_id FROM geo_articles WHERE id=?", id).Scan(&articleSiteID); err != nil {
+		c.JSON(404, gin.H{"code": -1, "error": "文章不存在"})
+		return
+	}
+	if articleSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", articleSiteID)) {
+		return
+	}
 	var aID, taskID, titleID, wordCount int64
 	var title, content, excerpt, kw, metaTitle, md, category, status, reviewStatus, reviewerNote, aiModel, slug, createdAt string
 	var pubAt *string
@@ -402,6 +462,14 @@ func GeoGetArticle(c *gin.Context) {
 
 func GeoUpdateArticle(c *gin.Context) {
 	id := c.Param("id")
+	var updSiteID int64
+	if err := db.DB.QueryRow("SELECT site_id FROM geo_articles WHERE id=?", id).Scan(&updSiteID); err != nil {
+		c.JSON(404, gin.H{"code": -1, "error": "文章不存在"})
+		return
+	}
+	if updSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", updSiteID)) {
+		return
+	}
 	var req struct {
 		Title           string `json:"title"`
 		Content         string `json:"content"`
@@ -430,12 +498,16 @@ func GeoDeleteArticle(c *gin.Context) {
 	id := c.Param("id")
 	contentType := c.DefaultQuery("content_type", "geo")
 	var ct string
-	if err := db.DB.QueryRow("SELECT content_type FROM geo_articles WHERE id=?", id).Scan(&ct); err != nil {
+	var delArtSiteID int64
+	if err := db.DB.QueryRow("SELECT content_type, COALESCE(site_id,0) FROM geo_articles WHERE id=?", id).Scan(&ct, &delArtSiteID); err != nil {
 		c.JSON(404, gin.H{"code": -1, "error": "文章不存在"})
 		return
 	}
 	if ct != contentType {
 		c.JSON(403, gin.H{"code": -1, "error": "无权删除"})
+		return
+	}
+	if delArtSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", delArtSiteID)) {
 		return
 	}
 	db.DB.Exec("DELETE FROM geo_articles WHERE id = ?", id)
@@ -444,6 +516,14 @@ func GeoDeleteArticle(c *gin.Context) {
 
 func GeoReviewArticle(c *gin.Context) {
 	id := c.Param("id")
+	var revSiteID int64
+	if err := db.DB.QueryRow("SELECT site_id FROM geo_articles WHERE id=?", id).Scan(&revSiteID); err != nil {
+		c.JSON(404, gin.H{"code": -1, "error": "文章不存在"})
+		return
+	}
+	if revSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", revSiteID)) {
+		return
+	}
 	var req struct {
 		Status string `json:"status" binding:"required"` // approved / rejected
 		Note   string `json:"note"`
@@ -458,6 +538,15 @@ func GeoReviewArticle(c *gin.Context) {
 }
 
 func GeoPublishArticle(c *gin.Context) {
-	db.DB.Exec("UPDATE geo_articles SET status='published', published_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?", c.Param("id"))
+	id := c.Param("id")
+	var pubSiteID int64
+	if err := db.DB.QueryRow("SELECT site_id FROM geo_articles WHERE id=?", id).Scan(&pubSiteID); err != nil {
+		c.JSON(404, gin.H{"code": -1, "error": "文章不存在"})
+		return
+	}
+	if pubSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", pubSiteID)) {
+		return
+	}
+	db.DB.Exec("UPDATE geo_articles SET status='published', published_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?", id)
 	c.JSON(200, gin.H{"code": 0, "data": "已发布"})
 }
