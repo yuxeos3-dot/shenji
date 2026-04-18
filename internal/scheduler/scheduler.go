@@ -40,7 +40,7 @@ func Start() {
 	c.AddFunc("0 * * * *", runPerSiteIntervalCheck)
 
 	// Zombie task cleanup: every 5 minutes, mark any audit_task that's been
-	// running > 10 minutes as errored. Handles AI timeouts / crashes that
+	// running > 30 minutes as timed out. Handles AI timeouts / crashes that
 	// would otherwise leave progress stuck at 65%.
 	c.AddFunc("*/5 * * * *", reapZombieTasks)
 
@@ -48,13 +48,13 @@ func Start() {
 	log.Println("调度器已启动")
 }
 
-// reapZombieTasks marks audit tasks running too long as errored.
+// reapZombieTasks marks audit tasks running too long as timed out.
 func reapZombieTasks() {
-	cutoff := time.Now().Add(-10 * time.Minute).Format("2006-01-02 15:04:05")
+	cutoff := time.Now().Add(-30 * time.Minute).Format("2006-01-02 15:04:05")
 	res, err := db.DB.Exec(
 		`UPDATE audit_tasks
-		 SET status='error',
-		     error_msg='任务超时（超过10分钟未完成，自动标记失败）',
+		 SET status='timeout',
+		     error_msg='任务超时（超过30分钟未完成，自动标记超时）',
 		     finished_at=CURRENT_TIMESTAMP
 		 WHERE status='running' AND created_at < ?`, cutoff,
 	)
