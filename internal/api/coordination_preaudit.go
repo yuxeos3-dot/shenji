@@ -126,9 +126,8 @@ func CreateCoordTestPage(c *gin.Context) {
 	}
 	req.Name = strings.TrimSpace(req.Name)
 	req.URL = strings.TrimSpace(req.URL)
-	u, perr := url.Parse(req.URL)
-	if perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "URL 无效，必须为完整的 http(s):// 地址"})
+	if err := crawler.ValidateURL(req.URL); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "URL 无效: " + err.Error()})
 		return
 	}
 
