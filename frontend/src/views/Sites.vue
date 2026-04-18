@@ -290,11 +290,19 @@ const activeSites = computed(() => sites.value.filter(s => s.status === 'active'
 const sitesByOwner = computed(() => {
   const byId = new Map()
   for (const s of sites.value) {
+    // created_by=0 happens for legacy rows from before the column had
+    // a value, or when a creator was deleted and the FK was set to 0.
+    // Group all such sites under a single "（无归属）" header so the
+    // admin can spot them easily rather than have them silently merge
+    // into whichever user happens to have id=0.
     const key = s.created_by || 0
     if (!byId.has(key)) {
       byId.set(key, {
         ownerId: key,
-        ownerName: s.owner_name || '',
+        ownerName: key === 0
+          ? '（无归属 / 已注销用户）'
+          : (s.owner_name || `用户 #${key}`),
+        orphaned: key === 0,
         sites: [],
       })
     }

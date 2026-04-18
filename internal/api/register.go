@@ -16,6 +16,7 @@ package api
 // pending row can sit safely in the table without being a back door.
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -255,11 +256,19 @@ func notifyAdminsNewRegistration(nickname, employeeID, tgName string) {
 	}
 	defer rows.Close()
 	msg := fmt.Sprintf("新注册申请待审核：\n姓名：%s\n工号：%s\nTG：%s", nickname, employeeID, tgName)
+	notified := 0
 	for rows.Next() {
 		var aid int64
 		if err := rows.Scan(&aid); err == nil && aid > 0 {
 			telegram.NotifyUser(aid, "📋 新注册待审核", msg)
+			notified++
 		}
+	}
+	// Make the "nobody reviewed it" case visible. If users table has
+	// zero admins (first-run edge case) the notification silently
+	// evaporates; this leaves a breadcrumb for ops.
+	if notified == 0 {
+		log.Printf("[register] new pending (%s / %s) — no admins in users table to notify", nickname, employeeID)
 	}
 }
 
@@ -382,10 +391,15 @@ func ApprovePendingUser(c *gin.Context) {
 		return
 	}
 
-	js, _ := jsonMarshalSafe(cleaned)
+	// encoding/json is the canonical way — prior commit hand-rolled a
+	// string builder because we already validated each code shape via
+	// cleanPermissionList. That's still safe, but stdlib is clearer
+	// and removes the temptation to trust the validation a future
+	// caller might forget.
+	jsBytes, _ := json.Marshal(cleaned)
 	_, err = db.DB.Exec(
 		"UPDATE users SET register_status='approved', permissions=$1 WHERE id=$2",
-		js, id,
+		string(jsBytes), id,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "审核失败"})
@@ -437,34 +451,6 @@ func ValidateRegisterPassword(pw string) error {
 		return fmt.Errorf("密码需同时包含字母和数字")
 	}
 	return nil
-}
-
-// jsonMarshalSafe is a tiny wrapper that returns a string and never fails
-// for the input shape we feed it (a string slice). Centralised so callers
-// don't all have to do the err-discard dance.
-func jsonMarshalSafe(v interface{}) (string, error) {
-	return marshalToString(v)
-}
-
-// marshalToString uses encoding/json via the helpers package indirection
-// to avoid an extra import here. We keep it local to this file.
-func marshalToString(v interface{}) (string, error) {
-	if v == nil {
-		return "[]", nil
-	}
-	if s, ok := v.([]string); ok {
-		if len(s) == 0 {
-			return "[]", nil
-		}
-		// Hand-roll: every code is a known permission code so quoting
-		// is safe (no special chars allowed in code names).
-		parts := make([]string, len(s))
-		for i, x := range s {
-			parts[i] = `"` + x + `"`
-		}
-		return "[" + strings.Join(parts, ",") + "]", nil
-	}
-	return "[]", nil
 }
 
 // WriteAuditLogAnonymous is a thin wrapper around WriteAuditLog that
