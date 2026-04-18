@@ -663,6 +663,21 @@ func Init() {
 			expires_at TIMESTAMPTZ NOT NULL,
 			created_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		// ─── Self-registration support (2026-04) ─────────────────────────
+		// Users self-register via the public POST /api/auth/register form
+		// and land in register_status='pending'; an admin reviews from the
+		// 用户管理 → 待审核 list and either approves (granting permissions)
+		// or rejects (deletes the row). Existing rows default to 'approved'
+		// so the migration is non-disruptive.
+		"DO $$ BEGIN ALTER TABLE users ADD COLUMN tg_name TEXT DEFAULT ''; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE users ADD COLUMN nickname TEXT DEFAULT ''; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE users ADD COLUMN employee_id TEXT DEFAULT ''; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE users ADD COLUMN invite_code TEXT DEFAULT ''; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE users ADD COLUMN register_status TEXT DEFAULT 'approved'; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		// employee_id is the field-level unique identifier for staff —
+		// case-insensitive so HF001 and hf001 collide.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_employee_id_ci ON users(LOWER(employee_id)) WHERE employee_id <> ''`,
+		`CREATE INDEX IF NOT EXISTS idx_users_register_status ON users(register_status)`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {
@@ -727,6 +742,10 @@ func seedDefaultSettings() {
 		"max_concurrent_audit":      "3",
 		"ip_whitelist":              "",
 		"spider_ingest_api_key":     "",
+		// Comma-separated whitelist of single-use invite codes for the
+		// public /api/auth/register form. Admin manages via system
+		// settings. Codes are consumed (removed) on successful use.
+		"invite_codes_csv":          "",
 	}
 
 	for k, v := range defaults {

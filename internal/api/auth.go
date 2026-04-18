@@ -46,16 +46,32 @@ func Login(c *gin.Context) {
 	}
 
 	var id int64
-	var name, email, password, role string
+	var name, email, password, role, registerStatus string
+	// Allow login by email OR employee_id (case-insensitive). Self-
+	// registered users get a synthesized email like hf001@register.local
+	// but typically log in with their employee id ("HF001").
 	err := db.DB.QueryRow(
-		"SELECT id, name, email, password, role FROM users WHERE email = $1", req.Email,
-	).Scan(&id, &name, &email, &password, &role)
+		`SELECT id, name, email, password, role, COALESCE(register_status,'approved')
+		 FROM users
+		 WHERE LOWER(email) = $1 OR LOWER(employee_id) = $1`, req.Email,
+	).Scan(&id, &name, &email, &password, &role, &registerStatus)
 	if err != nil {
 		IncLoginFailure()
 		if RecordLoginFailure(req.Email) {
 			IncLoginLockout()
 		}
 		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": "邮箱或密码错误"})
+		return
+	}
+
+	// Self-registered users sit pending until an admin approves —
+	// reject login during that window with a clear message rather than
+	// the generic "邮箱或密码错误" they'd retry forever against.
+	if registerStatus != "approved" {
+		c.JSON(http.StatusForbidden, gin.H{
+			"code":  -1,
+			"error": "您的注册申请正在等待管理员审核，审核通过后即可登录",
+		})
 		return
 	}
 

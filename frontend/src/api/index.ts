@@ -84,6 +84,18 @@ type Id = string | number
 const api = {
   // Auth
   login: (data: { email: string; password: string }) => instance.post('/auth/login', data),
+  // Self-registration. Public — invite code in the body is the only auth.
+  // Backend lands the row in register_status='pending' and returns code:0
+  // with a "等待审核" message, OR code:-1 with a friendly error.
+  register: (data: Record<string, any>) => instance.post('/auth/register', data),
+  publicListDepartments: () => instance.get('/auth/departments-public'),
+  publicListGroups: (departmentID: number | string) =>
+    instance.get('/auth/groups-public', { params: { department_id: departmentID } }),
+  // Pending registration review (admin only — under /v1/users).
+  listPendingUsers: () => instance.get('/v1/users/pending'),
+  approvePendingUser: (id: Id, data: Record<string, any>) =>
+    instance.post(`/v1/users/${id}/approve`, data),
+  rejectPendingUser: (id: Id) => instance.post(`/v1/users/${id}/reject`),
   logout: () => instance.post('/v1/auth/logout'),
   changePassword: (data: { old_password: string; new_password: string }) => instance.post('/v1/auth/change-password', data),
   getMe: () => instance.get('/v1/auth/me'),

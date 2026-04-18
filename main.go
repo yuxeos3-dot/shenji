@@ -126,6 +126,14 @@ func main() {
 
 	// Auth routes (no auth required)
 	r.POST("/api/auth/login", middleware.LoginRateLimit(), api.Login)
+	// Self-registration is public (no auth) but still rate-limited so a
+	// leaked invite code can't be brute-force-spammed. New rows land in
+	// register_status='pending' and need admin approval before login works.
+	r.POST("/api/auth/register", middleware.LoginRateLimit(), api.Register)
+	// Cascade lookups for the registration form. Public — names aren't
+	// sensitive and we need them before a session exists.
+	r.GET("/api/auth/departments-public", api.PublicListDepartments)
+	r.GET("/api/auth/groups-public", api.PublicListGroups)
 
 	// Public branding endpoint — exposes a tiny allow-list of settings
 	// (site_title) so the login page can render the configured system name
@@ -198,6 +206,12 @@ func main() {
 			users.GET("/:id/permissions", api.GetUserPermissions)
 			users.PUT("/:id/permissions", api.SaveUserPermissions)
 			users.GET("/permission-tree", api.GetPermissionTree)
+			// Self-registration review queue. /pending lists rows where
+			// register_status='pending'; approve grants permissions and
+			// flips status; reject deletes the row.
+			users.GET("/pending", api.ListPendingUsers)
+			users.POST("/:id/approve", api.ApprovePendingUser)
+			users.POST("/:id/reject", api.RejectPendingUser)
 			// Admin monitoring: see which platforms a user has configured
 			// without exposing the plaintext secrets themselves. Overview
 			// aggregates site / coord / platform counts for the 用户监控

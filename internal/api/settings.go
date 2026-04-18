@@ -57,6 +57,8 @@ var allowedSettingKeys = map[string]bool{
 	"auto_audit_cron":       true,
 	"max_concurrent_audit":  true,
 	"ip_whitelist":          true,
+	// CSV whitelist consumed by POST /api/auth/register (see register.go).
+	"invite_codes_csv":      true,
 }
 
 func maskValue(key, value string) string {

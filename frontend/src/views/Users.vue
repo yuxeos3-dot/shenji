@@ -41,9 +41,98 @@
     </div>
 
     <div class="page-top">
-      <div></div>
+      <div>
+        <button
+          v-if="pendingUsers.length > 0"
+          class="btn btn-pending"
+          @click="showPending = true"
+        >
+          📋 待审核注册（{{ pendingUsers.length }}）
+        </button>
+      </div>
       <button class="btn btn-primary" @click="openAdd">👤 添加用户</button>
     </div>
+
+    <!-- ── Pending registrations dialog ─────────────────────────── -->
+    <el-dialog v-model="showPending" title="📋 注册申请审核" width="900px" top="5vh">
+      <div v-if="!pendingUsers.length" class="empty-cell" style="padding:40px;text-align:center">
+        没有待审核的注册申请
+      </div>
+      <table v-else class="table">
+        <thead>
+          <tr>
+            <th>申请时间</th>
+            <th>花名 / 工号</th>
+            <th>TG</th>
+            <th>部门 / 组</th>
+            <th>邀请码</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="p in pendingUsers" :key="p.id">
+            <td style="font-size:12px;color:var(--ink-soft)">{{ p.created_at }}</td>
+            <td>
+              <div style="font-weight:700">{{ p.nickname }}</div>
+              <div style="font-size:12px;color:var(--ink-soft)">{{ p.employee_id }}</div>
+            </td>
+            <td style="font-size:12px">
+              <div>{{ p.tg_name }}</div>
+              <div v-if="p.tg_id" style="color:var(--ink-soft)">{{ p.tg_id }}</div>
+            </td>
+            <td style="font-size:12px">
+              {{ p.department_name || '—' }}
+              <span v-if="p.group_name" style="color:var(--ink-soft)">· {{ p.group_name }}</span>
+            </td>
+            <td style="font-size:12px;font-family:monospace;color:var(--ink-soft)">{{ p.invite_code }}</td>
+            <td>
+              <div class="action-btns">
+                <button class="btn btn-xs btn-primary" @click="openApprove(p)">通过</button>
+                <button class="btn btn-xs btn-danger-xs" @click="rejectPending(p)">拒绝</button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </el-dialog>
+
+    <!-- ── Approve dialog (with permission picker) ──────────────── -->
+    <el-dialog v-model="showApprove" :title="'✅ 审核通过 — ' + (approveUser?.nickname || '')" width="650px" top="5vh">
+      <div class="perm-hint">
+        通过后，该用户可立即登录，并拥有下列勾选的权限。<strong>默认全部勾选</strong>，不想给的取消勾选即可。
+      </div>
+      <div class="perm-tree">
+        <div v-for="group in grantablePermTree" :key="group.code" class="perm-group">
+          <div class="perm-group-head">
+            <el-checkbox
+              :model-value="approvePerms.length > 0 && (group.children || []).every(c => approvePerms.includes(c.code))"
+              :indeterminate="(() => {
+                const n = (group.children || []).filter(c => approvePerms.includes(c.code)).length
+                return n > 0 && n < (group.children || []).length
+              })()"
+              @change="toggleApproveGroup(group, $event)">
+              <span class="perm-group-label">{{ group.label }}</span>
+            </el-checkbox>
+          </div>
+          <div class="perm-children">
+            <el-checkbox
+              v-for="child in (group.children || []).filter(c => !c.admin_only)"
+              :key="child.code"
+              :model-value="approvePerms.includes(child.code)"
+              @change="toggleApprovePerm(child.code, $event)"
+              class="perm-item">
+              {{ child.label }}
+            </el-checkbox>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showApprove = false">取消</el-button>
+        <el-button @click="approvePerms = allPermCodes()">全选</el-button>
+        <el-button @click="approvePerms = []">清空</el-button>
+        <el-button type="primary" @click="confirmApprove" :loading="approving">通过审核</el-button>
+      </template>
+    </el-dialog>
 
     <div class="panel">
       <table class="table">
@@ -368,19 +457,85 @@ async function loadAll() {
   if (loading.value) return
   loading.value = true
   try {
-    const [uRes, dRes, gRes] = await Promise.all([
+    const [uRes, dRes, gRes, pRes] = await Promise.all([
       api.listUsers(),
       api.listDepartments(),
       api.listGroups(),
+      api.listPendingUsers().catch(() => ({ data: [] })),
     ])
     users.value = uRes.data
     departments.value = dRes.data || []
     groups.value = gRes.data || []
+    pendingUsers.value = pRes.data || []
   } catch (e) {
     console.error('加载失败', e)
     ElMessage.error('加载数据失败')
   } finally {
     loading.value = false
+  }
+}
+
+// ── Pending registration approval ─────────────────────────────────
+const pendingUsers = ref([])
+const showPending = ref(false)
+const showApprove = ref(false)
+const approveUser = ref(null)
+const approvePerms = ref([])
+const approving = ref(false)
+
+async function openApprove(p) {
+  approveUser.value = p
+  // Default-grant: same product rule as new-user-create — all
+  // grantable perms ticked, admin unchecks what they don't want.
+  if (!permTree.value.length) {
+    try { permTree.value = (await api.getPermissionTree()).data || [] } catch {}
+  }
+  approvePerms.value = allPermCodes()
+  showApprove.value = true
+}
+
+function toggleApproveGroup(g, val) {
+  const codes = (g.children || []).map(c => c.code)
+  if (val) {
+    approvePerms.value = [...new Set([...approvePerms.value, ...codes])]
+  } else {
+    approvePerms.value = approvePerms.value.filter(c => !codes.includes(c))
+  }
+}
+function toggleApprovePerm(code, val) {
+  if (val) approvePerms.value = [...approvePerms.value, code]
+  else approvePerms.value = approvePerms.value.filter(c => c !== code)
+}
+
+async function confirmApprove() {
+  if (!approveUser.value) return
+  approving.value = true
+  try {
+    await api.approvePendingUser(approveUser.value.id, { permissions: approvePerms.value })
+    ElMessage.success('已通过审核，用户可以登录了')
+    showApprove.value = false
+    showPending.value = false
+    await loadAll()
+  } catch (e) {
+    if (!e?.response) console.error('审核失败', e)
+  } finally {
+    approving.value = false
+  }
+}
+
+async function rejectPending(p) {
+  try {
+    await ElMessageBox.confirm(
+      `确认拒绝 ${p.nickname}（${p.employee_id}）的注册申请？该记录会被删除，邀请码不会恢复。`,
+      '拒绝注册', { type: 'warning' }
+    )
+  } catch { return }
+  try {
+    await api.rejectPendingUser(p.id)
+    ElMessage.success('已拒绝')
+    await loadAll()
+  } catch (e) {
+    if (!e?.response) console.error('拒绝失败', e)
   }
 }
 
@@ -656,6 +811,8 @@ onMounted(loadAll)
 .btn:hover { background:var(--sun-light); border-color:var(--peach); color:var(--sun-deep); transform:translateY(-1px); }
 .btn-primary { background:linear-gradient(135deg,var(--sun),var(--coral)); color:#fff; border-color:transparent; box-shadow:var(--s-amber); }
 .btn-primary:hover { background:linear-gradient(135deg,var(--sun-deep),var(--sun)); color:#fff; }
+.btn-pending { background:linear-gradient(135deg,#10B981,#059669); color:#fff; border-color:transparent; font-weight:700; padding:8px 16px; box-shadow:0 4px 12px rgba(16,185,129,.25); }
+.btn-pending:hover { filter:brightness(1.08); color:#fff; }
 .btn-xs { padding:4px 12px; font-size:12px; border-radius:6px; }
 .btn-xs:hover { background:var(--sun-glow); border-color:var(--sun); color:var(--sun-deep); }
 .btn-danger-xs { color:var(--err); }
