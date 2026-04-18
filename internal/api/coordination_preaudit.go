@@ -354,40 +354,87 @@ func PreAuditCoordTask(c *gin.Context) {
 	}})
 }
 
-// stripHTMLNoise yanks <script> / <style> blocks so the AI reads only
-// the visible content. We don't try to parse the DOM rigorously —
-// a simple case-insensitive block scrub gets us 95% of the value at
-// zero dependency cost.
+// stripHTMLNoise yanks <script> / <style> / <noscript> blocks so the
+// AI reads only the visible content. Single-pass approach: lowercase
+// once, find all removable regions, then build the result in one
+// allocation instead of the previous O(n^2) repeated string splicing.
 func stripHTMLNoise(html string) string {
-	out := html
-	lowered := strings.ToLower(out)
-	for _, tag := range []string{"script", "style", "noscript"} {
+	lowered := strings.ToLower(html)
+	tags := []string{"script", "style", "noscript"}
+
+	// Collect all [start, end) byte ranges to remove.
+	type span struct{ start, end int }
+	var removes []span
+
+	for _, tag := range tags {
 		openT := "<" + tag
 		closeT := "</" + tag + ">"
-		for {
-			i := strings.Index(lowered, openT)
+		searchFrom := 0
+		for searchFrom < len(lowered) {
+			i := strings.Index(lowered[searchFrom:], openT)
 			if i < 0 {
 				break
 			}
-			// find matching '>' to account for attrs on the open tag
+			i += searchFrom
+			// Find the closing '>' of the open tag (accounts for attributes).
 			gt := strings.Index(lowered[i:], ">")
 			if gt < 0 {
+				// Unclosed tag — remove from opener to EOF.
+				removes = append(removes, span{i, len(html)})
 				break
 			}
 			openEnd := i + gt + 1
 			j := strings.Index(lowered[openEnd:], closeT)
 			if j < 0 {
-				// Unclosed — drop everything from the opener to EOF to be safe.
-				out = out[:i]
-				lowered = strings.ToLower(out)
+				// No closing tag — remove from opener to EOF.
+				removes = append(removes, span{i, len(html)})
 				break
 			}
-			close := openEnd + j + len(closeT)
-			out = out[:i] + out[close:]
-			lowered = strings.ToLower(out)
+			end := openEnd + j + len(closeT)
+			removes = append(removes, span{i, end})
+			searchFrom = end
 		}
 	}
-	return strings.TrimSpace(out)
+
+	if len(removes) == 0 {
+		return strings.TrimSpace(html)
+	}
+
+	// Sort spans by start position so we can merge overlaps and build
+	// the output in a single forward pass.
+	for i := 1; i < len(removes); i++ {
+		for j := i; j > 0 && removes[j].start < removes[j-1].start; j-- {
+			removes[j], removes[j-1] = removes[j-1], removes[j]
+		}
+	}
+
+	// Merge overlapping spans.
+	merged := removes[:1]
+	for _, s := range removes[1:] {
+		last := &merged[len(merged)-1]
+		if s.start <= last.end {
+			if s.end > last.end {
+				last.end = s.end
+			}
+		} else {
+			merged = append(merged, s)
+		}
+	}
+
+	// Build result keeping only the non-removed regions.
+	var buf strings.Builder
+	buf.Grow(len(html))
+	pos := 0
+	for _, s := range merged {
+		if s.start > pos {
+			buf.WriteString(html[pos:s.start])
+		}
+		pos = s.end
+	}
+	if pos < len(html) {
+		buf.WriteString(html[pos:])
+	}
+	return strings.TrimSpace(buf.String())
 }
 
 // buildPreAuditPrompt constructs the verdict-oriented AI prompt.
