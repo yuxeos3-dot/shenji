@@ -40,6 +40,13 @@ import (
 // "https:hl365.com:443"     -> "hl365.com"    (Yandex's weird host_id format)
 // "91dasj.com"              -> "91dasj.com"
 func canonicalHost(s string) string {
+	// TODO(#97): Add IDN-to-ASCII (Punycode) conversion here so that
+	// internationalized domain names (e.g. "例え.jp") are correctly
+	// matched against their ASCII form ("xn--r8jz45g.jp"). The
+	// golang.org/x/net/idna package is already an indirect dependency
+	// in go.mod — import idna and call idna.Lookup.ToASCII(h) after
+	// lowercasing. Deferred because it requires testing with real IDN
+	// domains and the current user base is ASCII-only.
 	h := strings.TrimSpace(s)
 	h = strings.TrimPrefix(h, "sc-domain:")
 	// Yandex's host_id looks like "https:example.com:443". The colon
