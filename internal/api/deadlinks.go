@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"seo-system/internal/crawler"
+	"seo-system/internal/httpx"
 	"seo-system/internal/db"
 
 	"github.com/gin-gonic/gin"
@@ -440,14 +441,12 @@ func runDeadLinkCheck(siteID, domain string, job *DeadLinkJob) {
 	urlCh := make(chan string, workers*2)
 	resultCh := make(chan checkResult, workers*4)
 
-	client := &http.Client{
-		Timeout: 15 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return http.ErrUseLastResponse
-			}
-			return nil
-		},
+	client := httpx.Outbound(15 * time.Second)
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return http.ErrUseLastResponse
+		}
+		return nil
 	}
 
 	var wg sync.WaitGroup
