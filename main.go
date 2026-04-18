@@ -429,6 +429,10 @@ func main() {
 			// need elevated privileges to answer.
 			coord.POST("/tasks/:id/ask", api.RequirePermission("coord.comment"), api.AskCoordTask)
 			coord.POST("/tasks/:id/answer", api.RequirePermission("coord.comment"), api.AnswerCoordTask)
+			// Creator "📣 发送给开发" — ad-hoc push to the assignee without
+			// changing task state. Uses coord.comment since it's just a
+			// timeline note plus a Telegram ping.
+			coord.POST("/tasks/:id/ping-dev", api.RequirePermission("coord.comment"), api.PingDevCoordTask)
 			// Attachment upload is tied to the task id (so we know what
 			// it belongs to). Viewing a single file is addressed by
 			// attachment id — same coord.view gate.

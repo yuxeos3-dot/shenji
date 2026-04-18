@@ -327,6 +327,7 @@ const api = {
   // Developer ↔ creator Q&A: ask pauses dev, answer resumes it.
   coordAskTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/ask`, data),
   coordAnswerTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/answer`, data),
+  coordPingDev: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/ping-dev`, data),
   // Attachments. Upload uses multipart; we override the Content-Type
   // so axios lets the browser set the multipart boundary correctly.
   coordUploadAttachment: (id: Id, formData: FormData) =>

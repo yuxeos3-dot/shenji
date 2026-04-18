@@ -93,6 +93,15 @@
                 {{ task.status === 'pending' ? '🛠 分配给开发（开始）' : '🔁 重新分配' }}
               </button>
             </template>
+            <!-- 📣 Ad-hoc ping to the developer. Only meaningful once the
+                 task has an assignee; hidden before first assignment and
+                 during under_review (verify/reject is the right action
+                 then). Timeline keeps留痕, Telegram pings the dev. -->
+            <button
+              v-if="canCreatorAct && task.assignee_id > 0 && (task.status === 'in_progress' || task.status === 'awaiting_answer')"
+              class="btn btn-ping"
+              @click="doPingDev"
+            >📣 发送给开发</button>
             <button
               v-if="canAssigneeAct && task.status === 'in_progress'"
               class="btn btn-ask"
@@ -953,6 +962,28 @@ async function doAsk() {
   } finally { sending.value = false }
 }
 
+// Creator's "📣 发送给开发" — ad-hoc push without changing task state.
+// Use case: remembered an extra requirement after the task was already
+// assigned. Writes a timeline note AND pings the dev's Telegram, so the
+// information can't go missing between channels.
+async function doPingDev() {
+  try {
+    const { value } = await ElMessageBox.prompt('要发给开发的内容（同时会发 Telegram 推送）', '📣 发送给开发', {
+      confirmButtonText: '发送',
+      cancelButtonText: '取消',
+      inputType: 'textarea',
+      inputPlaceholder: '例如：另外请把详情页的 H2 标签层级也修一下，忘了在任务里写',
+      inputValidator: v => !!(v && v.trim()) || '请填写要发送的内容',
+    })
+    sending.value = true
+    await api.coordPingDev(task.value.id, { note: value })
+    ElMessage.success('已发送给开发')
+    await load()
+  } catch (e) {
+    if (e === 'cancel' || e === 'close') return
+  } finally { sending.value = false }
+}
+
 // Creator answers a developer's question. Uses the always-visible
 // `answerDraft` in the header (not a prompt box, since the answer is
 // often long and the user wants to reference the question above it).
@@ -1184,6 +1215,8 @@ onMounted(async () => {
 
 .btn-ask { background:linear-gradient(135deg,#F59E0B,#EA580C); color:#fff; border-color:transparent; }
 .btn-ask:hover:not(:disabled) { filter:brightness(1.08); color:#fff; }
+.btn-ping { background:linear-gradient(135deg,#06B6D4,#0891B2); color:#fff; border-color:transparent; }
+.btn-ping:hover:not(:disabled) { filter:brightness(1.1); color:#fff; }
 .btn-edit { background:#FFFDF8; color:var(--sun-deep); border-color:var(--peach); }
 .btn-edit:hover:not(:disabled) { background:var(--sun-light); }
 

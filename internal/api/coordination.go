@@ -830,6 +830,46 @@ func AnswerCoordTask(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status": coordStatusInProgress}})
 }
 
+// PingDevCoordTask is the creator's "📣 发送给开发" button — push an
+// ad-hoc note to the developer without changing the task state.
+// Typical use: the creator remembers a follow-up requirement a few
+// minutes after handing the task over ("also please fix the H2 on the
+// article pages"). Rather than clutter the timeline through comments
+// (which don't ping anyone) this goes straight to the dev's Telegram.
+//
+// Only available once the task has an assignee — pinging a pending
+// unassigned task has no recipient. Status stays wherever it was.
+func PingDevCoordTask(c *gin.Context) {
+	id := parseInt64Param(c, "id")
+	var body transitionBody
+	if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.Note) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "请填写要发送给开发的内容"})
+		return
+	}
+
+	t, ok := assertEditable(c, id)
+	if !ok {
+		return
+	}
+	if !requireCreatorOrAdmin(c, t, "发送消息给开发") {
+		return
+	}
+	if t.AssigneeID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "任务还没有指派开发，请先分配"})
+		return
+	}
+
+	uid, uname := currentUser(c)
+	// Record on the timeline so the note sticks even if Telegram is off.
+	// Reuse the 'comment' event type with a distinguishing prefix so the
+	// existing timeline renderer shows it without schema changes.
+	notePrefixed := "📣 发送给开发：" + body.Note
+	recordEvent(id, "comment", t.Status, t.Status, uid, uname, notePrefixed)
+	WriteAuditLog(c, "coord_ping_dev", "coordination_task", fmt.Sprintf("%d", id), "")
+	notifyCoord(t.AssigneeID, "📣 任务有新补充", t, fmt.Sprintf("%s：%s", uname, body.Note))
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "已发送"})
+}
+
 // AddCoordComment appends a free-form note to the timeline without
 // changing state. Disabled once the task is done.
 func AddCoordComment(c *gin.Context) {
