@@ -3,6 +3,7 @@ package scheduler
 import (
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +45,10 @@ func Start() {
 	// would otherwise leave progress stuck at 65%.
 	c.AddFunc("*/5 * * * *", reapZombieTasks)
 
+	// Daily cleanup: clear HTML from audit_pages older than the 10 most
+	// recent audits per site, to save disk space.
+	c.AddFunc("30 3 * * *", cleanupOldAuditHTML)
+
 	c.Start()
 	log.Println("调度器已启动")
 }
@@ -64,6 +69,65 @@ func reapZombieTasks() {
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
 		log.Printf("zombie task cleanup: reaped %d stuck tasks", n)
+	}
+}
+
+// cleanupOldAuditHTML clears the html column from audit_pages belonging to
+// audit tasks that are NOT among the 10 most recent per site. This frees
+// significant disk space while keeping recent audits fully browsable.
+func cleanupOldAuditHTML() {
+	// For each site, find audit task IDs beyond the 10 most recent.
+	rows, err := db.DB.Query(`
+		SELECT DISTINCT ap.id
+		FROM audit_pages ap
+		JOIN audit_tasks at ON ap.task_id = at.id
+		WHERE ap.html != ''
+		  AND at.id NOT IN (
+			SELECT id FROM (
+				SELECT id, site_id,
+				       ROW_NUMBER() OVER (PARTITION BY site_id ORDER BY id DESC) as rn
+				FROM audit_tasks
+			) ranked
+			WHERE rn <= 10
+		)
+	`)
+	if err != nil {
+		log.Printf("[html-cleanup] query failed: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+
+	if len(ids) == 0 {
+		return
+	}
+
+	// Batch clear in chunks of 500
+	for i := 0; i < len(ids); i += 500 {
+		end := i + 500
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[i:end]
+		placeholders := make([]string, len(chunk))
+		args := make([]interface{}, len(chunk))
+		for j, id := range chunk {
+			placeholders[j] = "?"
+			args[j] = id
+		}
+		query := "UPDATE audit_pages SET html = '' WHERE id IN (" + strings.Join(placeholders, ",") + ")"
+		if res, err := db.DB.Exec(query, args...); err != nil {
+			log.Printf("[html-cleanup] batch update failed: %v", err)
+		} else if n, _ := res.RowsAffected(); n > 0 {
+			log.Printf("[html-cleanup] cleared HTML from %d audit_pages rows", n)
+		}
 	}
 }
 
