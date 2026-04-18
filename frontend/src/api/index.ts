@@ -353,6 +353,24 @@ const api = {
   getFRWGeneration: (id: Id) => instance.get(`/v1/frw/generations/${id}`),
   publishFRWGeneration: (id: Id) => instance.post(`/v1/frw/generations/${id}/publish`, {}),
   deleteFRWGeneration: (id: Id) => instance.delete(`/v1/frw/generations/${id}`),
+
+  // Push Management
+  listPushLogs: (siteId: Id, params?: Record<string, any>) =>
+    instance.get(`/v1/sites/${siteId}/push/logs`, { params }),
+  submitSitemap: (siteId: Id, data: { sitemap_url: string; platforms: string[] }) =>
+    instance.post(`/v1/sites/${siteId}/push/sitemap`, data),
+  submitSitemapAll: (data: { sitemap_url_suffix: string; platforms: string[] }) =>
+    instance.post('/v1/push/sitemap-all', data),
+  submitURLs: (siteId: Id, data: { platform: string; urls: string[] }) =>
+    instance.post(`/v1/sites/${siteId}/push/urls`, data),
+  listPushSchedules: (siteId: Id) =>
+    instance.get(`/v1/sites/${siteId}/push/schedules`),
+  savePushSchedule: (siteId: Id, data: Record<string, any>) =>
+    instance.post(`/v1/sites/${siteId}/push/schedules`, data),
+  deletePushSchedule: (id: Id) =>
+    instance.delete(`/v1/push/schedules/${id}`),
+  togglePushSchedule: (id: Id) =>
+    instance.put(`/v1/push/schedules/${id}/toggle`),
 }
 
 export default api

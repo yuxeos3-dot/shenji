@@ -38,6 +38,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'global-data', name: 'GlobalData', component: () => import('../views/GlobalData.vue') },
       { path: 'cache-management', name: 'CacheManagement', component: () => import('../views/CacheManagement.vue') },
       { path: 'spider-management', name: 'SpiderManagement', component: () => import('../views/SpiderManagement.vue') },
+      { path: 'push-management', name: 'PushManagement', component: () => import('../views/PushManagement.vue') },
       { path: 'coordination', name: 'Coordination', component: () => import('../views/Coordination.vue') },
       { path: 'coordination/:id', name: 'CoordinationDetail', component: () => import('../views/CoordinationDetail.vue') },
     ]

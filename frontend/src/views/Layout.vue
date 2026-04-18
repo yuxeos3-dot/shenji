@@ -137,6 +137,7 @@ const groups = [
       { path: '/data-management',   icon: '📡', label: '数据管理' },
       { path: '/spider-management', icon: '🕷️', label: '蜘蛛管理' },
       { path: '/dead-links',        icon: '💀', label: '死链管理' },
+      { path: '/push-management',  icon: '📤', label: '推送管理' },
     ],
   },
   {
@@ -263,6 +264,7 @@ const pageTitles = {
   '/spider-management': '蜘蛛管理',
   '/geo-management': 'GEO管理',
   '/dead-links': '死链管理',
+  '/push-management': '推送管理',
   '/content-rewrite': '二创管理',
   '/external-links': '外链管理',
   '/coordination': '协同管理',
