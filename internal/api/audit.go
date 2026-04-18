@@ -334,9 +334,14 @@ func DeleteAudit(c *gin.Context) {
 	}
 
 	var status string
-	if err := tx.QueryRow("SELECT status FROM audit_tasks WHERE id = ?", taskID).Scan(&status); err != nil {
+	var deleteSiteID int64
+	if err := tx.QueryRow("SELECT site_id, status FROM audit_tasks WHERE id = ?", taskID).Scan(&deleteSiteID, &status); err != nil {
 		_ = tx.Rollback()
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "任务不存在"})
+		return
+	}
+	if !canAccessSite(c, fmt.Sprintf("%d", deleteSiteID)) {
+		_ = tx.Rollback()
 		return
 	}
 	if status == "running" {
@@ -366,6 +371,9 @@ func DeleteAudit(c *gin.Context) {
 
 func ListAudits(c *gin.Context) {
 	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
 	page, perPage := parsePageQuery(c, 50, 500)
 	offset := (page - 1) * perPage
 
@@ -431,6 +439,9 @@ func GetAudit(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "任务不存在"})
 		return
 	}
+	if !canAccessSite(c, fmt.Sprintf("%d", siteID)) {
+		return
+	}
 
 	task := gin.H{
 		"id":           id,
@@ -476,6 +487,14 @@ func GetAudit(c *gin.Context) {
 
 func GetAuditPages(c *gin.Context) {
 	taskID := c.Param("task_id")
+	var auditSiteID int64
+	if err := db.DB.QueryRow("SELECT site_id FROM audit_tasks WHERE id = ?", taskID).Scan(&auditSiteID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "任务不存在"})
+		return
+	}
+	if !canAccessSite(c, fmt.Sprintf("%d", auditSiteID)) {
+		return
+	}
 	rows, err := db.DB.Query(
 		"SELECT id, page_type, url, status_code, ttfb_ms, html, html_size, error_msg, fetched_at FROM audit_pages WHERE task_id = ?",
 		taskID,
@@ -515,6 +534,14 @@ func GetAuditPages(c *gin.Context) {
 func GetAuditPageByType(c *gin.Context) {
 	taskID := c.Param("task_id")
 	pageType := c.Param("type")
+	var auditSiteID int64
+	if err := db.DB.QueryRow("SELECT site_id FROM audit_tasks WHERE id = ?", taskID).Scan(&auditSiteID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "任务不存在"})
+		return
+	}
+	if !canAccessSite(c, fmt.Sprintf("%d", auditSiteID)) {
+		return
+	}
 
 	var id int64
 	var pt, url, html, errorMsg, fetchedAt string
