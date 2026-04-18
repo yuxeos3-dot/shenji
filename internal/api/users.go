@@ -38,6 +38,8 @@ type UpdateUserRequest struct {
 	GroupID      *int64 `json:"group_id"`
 }
 
+// ListUsers returns user data for the admin panel. SELECT explicitly names
+// columns to avoid leaking password, frw_apikey, frw_config, or permissions.
 func ListUsers(c *gin.Context) {
 	rows, err := db.DB.Query(`
 		SELECT u.id, u.name, u.email, u.role, u.telegram_id, u.created_at, u.last_login,
