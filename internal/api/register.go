@@ -55,7 +55,25 @@ type RegisterRequest struct {
 func Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "请填写所有必填字段"})
+		// Point the user at the specific field that failed instead of
+		// a generic "请填写所有必填字段" — they've typically filled every
+		// visible box and the real cause is a cached frontend bundle
+		// missing a newer required input (e.g. the email field). Name
+		// the field so browser cache / deploy skew is obvious.
+		fields := translateBindErrors(err, map[string]fieldRule{
+			"TGName":     {label: "TG名称", required: "请填写 TG 名称"},
+			"Nickname":   {label: "花名", required: "请填写花名"},
+			"EmployeeID": {label: "工号", required: "请填写工号"},
+			"Email":      {label: "邮箱", required: "请填写邮箱", email: "邮箱格式不正确"},
+			"DepartmentID": {label: "一级标签", required: "请选择一级标签"},
+			"Password":   {label: "密码", required: "请填写密码", min: "密码至少 8 位"},
+			"Confirm":    {label: "确认密码", required: "请填写确认密码"},
+		})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":   -1,
+			"error":  firstFieldError(fields, "请填写所有必填字段"),
+			"fields": fields,
+		})
 		return
 	}
 
