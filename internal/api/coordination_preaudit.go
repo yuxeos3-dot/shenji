@@ -255,6 +255,12 @@ func PreAuditCoordTask(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "仅「待验收」状态可以运行 AI 预审核"})
 		return
 	}
+	// Pre-audit is a review aid — the developer running it on their own
+	// submission would bias the verdict. Restrict to creator/admin, same
+	// as the final verify / reject actions.
+	if !requireCreatorOrAdmin(c, t, "运行 AI 预审核") {
+		return
+	}
 
 	// Pull all attached test pages that have been fetched at least
 	// once. Skip unfetched pages with a warning rather than hard-fail
@@ -560,6 +566,10 @@ func RejectCoordTask(c *gin.Context) {
 		uid, uname, body.Note)
 	WriteAuditLog(c, "coord_reject", "coordination_task",
 		fmt.Sprintf("%d", id), body.Note)
+	// Ping the developer with the rejection reason so they know what
+	// still needs fixing — status flips back to in_progress on their side.
+	t.Status = coordStatusInProgress
+	notifyCoord(t.AssigneeID, "🔁 任务被打回", t, fmt.Sprintf("%s 打回原因：%s", uname, body.Note))
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
 		"status": coordStatusInProgress,
 	}})

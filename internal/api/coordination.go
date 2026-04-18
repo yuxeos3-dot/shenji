@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"seo-system/internal/db"
+	"seo-system/internal/telegram"
 
 	"github.com/gin-gonic/gin"
 )
@@ -205,6 +206,54 @@ func parseInt64Param(c *gin.Context, name string) int64 {
 		return 0
 	}
 	return v
+}
+
+// ─── Authorization helpers for per-role actions ────────────────────────────
+
+// isAdmin reports whether the current caller has the admin role.
+func isAdmin(c *gin.Context) bool {
+	role, _ := c.Get("role")
+	return role == "admin"
+}
+
+// requireCreatorOrAdmin blocks actions that only the task creator (or an
+// admin) may perform: assign, edit, verify, reject. Writes a 403 and
+// returns false when the caller is neither.
+func requireCreatorOrAdmin(c *gin.Context, t *coordTask, action string) bool {
+	uid := c.GetInt64("user_id")
+	if t.CreatedBy == uid || isAdmin(c) {
+		return true
+	}
+	c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "仅任务创建人或管理员可" + action})
+	return false
+}
+
+// requireAssigneeOrAdmin blocks actions that only the assigned developer
+// (or an admin) may perform: submit, ask. Writes a 403 otherwise.
+func requireAssigneeOrAdmin(c *gin.Context, t *coordTask, action string) bool {
+	uid := c.GetInt64("user_id")
+	if t.AssigneeID == uid || isAdmin(c) {
+		return true
+	}
+	c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "仅任务开发者或管理员可" + action})
+	return false
+}
+
+// notifyCoord delivers a Telegram push to the given user if they've
+// configured the integration. Silent on failure — a notification failure
+// must never break the state transition that triggered it.
+func notifyCoord(userID int64, title string, t *coordTask, extra string) {
+	if userID <= 0 || t == nil {
+		return
+	}
+	body := fmt.Sprintf("任务 #%d · %s", t.ID, t.IssueTitle)
+	if t.SiteName != "" {
+		body += "\n站点：" + t.SiteName
+	}
+	if extra != "" {
+		body += "\n" + extra
+	}
+	telegram.NotifyUser(userID, title, body)
 }
 
 // ─── Handlers ───────────────────────────────────────────────────────────────
@@ -517,6 +566,11 @@ func AssignCoordTask(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// Assignment is a creator-side decision — the developer shouldn't be
+	// re-routing their own task to someone else.
+	if !requireCreatorOrAdmin(c, t, "分配任务") {
+		return
+	}
 
 	// Look up the name for the timeline
 	var assignName string
@@ -564,6 +618,12 @@ func AssignCoordTask(c *gin.Context) {
 	}
 	recordEvent(id, "assign", t.Status, newStatus, uid, uname, note)
 	WriteAuditLog(c, "coord_assign", "coordination_task", fmt.Sprintf("%d", id), assignName)
+	// Ping the new assignee — this is the "task handed to you" moment.
+	// Refresh the in-memory copy so the notification carries the latest
+	// assignee_id / status (caller may have changed them above).
+	t.AssigneeID = body.AssigneeID
+	t.Status = newStatus
+	notifyCoord(body.AssigneeID, "🛠 新协同任务", t, fmt.Sprintf("由 %s 分配", uname))
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status": newStatus}})
 }
 
@@ -584,6 +644,11 @@ func SubmitCoordTask(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "只有「开发中」或「待回复」的任务才能标记为修改完毕"})
 		return
 	}
+	// Only the developer on the hook (or admin) can declare the work done.
+	// The creator waiting on the other side must not be able to self-submit.
+	if !requireAssigneeOrAdmin(c, t, "提交修改完毕") {
+		return
+	}
 
 	uid, uname := currentUser(c)
 	now := time.Now().UTC()
@@ -599,6 +664,9 @@ func SubmitCoordTask(c *gin.Context) {
 	}
 	recordEvent(id, "submit", t.Status, coordStatusUnderReview, uid, uname, body.Note)
 	WriteAuditLog(c, "coord_submit", "coordination_task", fmt.Sprintf("%d", id), "")
+	// Flip the ball back to the creator for verification.
+	t.Status = coordStatusUnderReview
+	notifyCoord(t.CreatedBy, "✅ 开发完毕待验收", t, fmt.Sprintf("%s 提交了修改，等待验收", uname))
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status": coordStatusUnderReview}})
 }
 
@@ -615,6 +683,11 @@ func VerifyCoordTask(c *gin.Context) {
 	}
 	if t.Status != coordStatusUnderReview {
 		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "只有「待验收」的任务才能标记为审计完成"})
+		return
+	}
+	// Verification is the creator's call (or admin's). The developer
+	// approving their own fix would trivialize the review step.
+	if !requireCreatorOrAdmin(c, t, "验收任务") {
 		return
 	}
 
@@ -649,6 +722,9 @@ func VerifyCoordTask(c *gin.Context) {
 	}
 	recordEvent(id, "verify", coordStatusUnderReview, coordStatusDone, uid, uname, body.Note)
 	WriteAuditLog(c, "coord_verify", "coordination_task", fmt.Sprintf("%d", id), "")
+	// Final beat: let the developer know their fix was accepted.
+	t.Status = coordStatusDone
+	notifyCoord(t.AssigneeID, "🎯 任务已验收通过", t, fmt.Sprintf("%s 已确认修复", uname))
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status": coordStatusDone}})
 }
 
@@ -695,6 +771,9 @@ func AskCoordTask(c *gin.Context) {
 	}
 	recordEvent(id, "ask", coordStatusInProgress, coordStatusAwaitingAnswer, uid, uname, body.Note)
 	WriteAuditLog(c, "coord_ask", "coordination_task", fmt.Sprintf("%d", id), "")
+	// Developer is blocked waiting on the creator — ping them with the question.
+	t.Status = coordStatusAwaitingAnswer
+	notifyCoord(t.CreatedBy, "❓ 开发提问", t, fmt.Sprintf("%s 提问：%s", uname, body.Note))
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status": coordStatusAwaitingAnswer}})
 }
 
@@ -741,6 +820,9 @@ func AnswerCoordTask(c *gin.Context) {
 	}
 	recordEvent(id, "answer", coordStatusAwaitingAnswer, coordStatusInProgress, uid, uname, body.Note)
 	WriteAuditLog(c, "coord_answer", "coordination_task", fmt.Sprintf("%d", id), "")
+	// Hand the ball back to the developer so they can keep going.
+	t.Status = coordStatusInProgress
+	notifyCoord(t.AssigneeID, "💬 任务已回复", t, fmt.Sprintf("%s 回复：%s", uname, body.Note))
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status": coordStatusInProgress}})
 }
 
@@ -784,6 +866,12 @@ func UpdateCoordTask(c *gin.Context) {
 
 	t, ok := assertEditable(c, id)
 	if !ok {
+		return
+	}
+	// Only the creator (or admin) can polish the issue description —
+	// the assignee isn't yet picked for a pending task, but we still
+	// gate this explicitly in case a future state allowed edits.
+	if !requireCreatorOrAdmin(c, t, "编辑问题描述") {
 		return
 	}
 	// Per spec: issue title / note / snapshot can only be polished by

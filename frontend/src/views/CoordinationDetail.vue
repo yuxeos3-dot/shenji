@@ -85,43 +85,51 @@
             <button class="btn btn-edit" @click="cancelEditNote">取消</button>
           </template>
           <template v-else>
-            <template v-if="task.status === 'pending' || task.status === 'in_progress'">
+            <!-- Creator / Admin actions: assignment, verify, reject, edit, delete.
+                 Developer sees none of these on their tasks so they can't
+                 accidentally re-route or close their own work. -->
+            <template v-if="canCreatorAct && (task.status === 'pending' || task.status === 'in_progress')">
               <button class="btn btn-primary" @click="showAssignDialog = true">
                 {{ task.status === 'pending' ? '🛠 分配给开发（开始）' : '🔁 重新分配' }}
               </button>
             </template>
-            <!-- Developer: ask a question. Only shown while actively developing;
-                 pauses the task until the creator answers. -->
             <button
-              v-if="task.status === 'in_progress'"
+              v-if="canAssigneeAct && task.status === 'in_progress'"
               class="btn btn-ask"
               @click="doAsk"
             >❓ 提问（转给发起人）</button>
             <button
-              v-if="task.status === 'in_progress' || task.status === 'awaiting_answer'"
+              v-if="canAssigneeAct && (task.status === 'in_progress' || task.status === 'awaiting_answer')"
               class="btn btn-submit"
               @click="doSubmit"
             >✅ 开发完毕</button>
             <button
-              v-if="task.status === 'under_review'"
+              v-if="canCreatorAct && task.status === 'under_review'"
               class="btn btn-verify"
               @click="doVerify"
             >🎯 验收通过 · 关闭任务</button>
             <button
-              v-if="task.status === 'under_review'"
+              v-if="canCreatorAct && task.status === 'under_review'"
               class="btn btn-danger-soft"
               @click="doReject"
             >🔁 打回修改</button>
             <button
-              v-if="task.status === 'pending'"
+              v-if="canCreatorAct && task.status === 'pending'"
               class="btn btn-edit"
               @click="startEditNote"
             >✏ 编辑问题</button>
             <button
-              v-if="task.status === 'pending'"
+              v-if="canCreatorAct && task.status === 'pending'"
               class="btn btn-danger-soft"
               @click="doDelete"
             >🗑 删除任务</button>
+            <!-- Read-only banner for users who can see the task but have no
+                 action to take in the current state. Keeps them from
+                 wondering why buttons are missing. -->
+            <span
+              v-if="!canCreatorAct && !canAssigneeAct"
+              class="view-only-hint"
+            >👁 你是旁观者，无操作权限</span>
           </template>
         </div>
         <div v-else class="locked-banner">
@@ -129,9 +137,10 @@
         </div>
 
         <!-- When waiting for the creator to answer, surface the question
-             and a prominent reply input. This is the single most
-             important action for the creator, so it goes in the header. -->
-        <div v-if="task.status === 'awaiting_answer' && latestAsk" class="pending-answer-box">
+             and a prominent reply input. Only the creator (or admin)
+             can reply — the developer already has a read-only timeline
+             entry of their own question. -->
+        <div v-if="task.status === 'awaiting_answer' && latestAsk && canCreatorAct" class="pending-answer-box">
           <div class="pa-title">💬 开发 {{ latestAsk.actor_name }} 提了一个问题，需要你的回复：</div>
           <div class="pa-question">{{ latestAsk.note }}</div>
           <textarea
@@ -476,6 +485,9 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import { useUserStore } from '../stores/user'
+
+const userStore = useUserStore()
 
 const route = useRoute()
 const router = useRouter()
@@ -486,6 +498,16 @@ const attachments = ref([])
 const developers = ref([])
 const loading = ref(false)
 const sending = ref(false)
+
+// Role-based button visibility. Admin always sees every button (escape
+// hatch when a colleague is out). Otherwise the ball is with exactly
+// one role at a time: creator OR assignee. These refresh automatically
+// after every loadTask() because they depend on task.value.
+const isAdminUser = computed(() => userStore.isAdmin())
+const isCreator = computed(() => !!task.value && userStore.user?.id === task.value.created_by)
+const isAssignee = computed(() => !!task.value && userStore.user?.id === task.value.assignee_id)
+const canCreatorAct = computed(() => isAdminUser.value || isCreator.value)
+const canAssigneeAct = computed(() => isAdminUser.value || isAssignee.value)
 
 const editingNote = ref(false)
 const noteDraft = ref('')
