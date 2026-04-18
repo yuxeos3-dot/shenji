@@ -547,6 +547,15 @@ func GeoPublishArticle(c *gin.Context) {
 	if pubSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", pubSiteID)) {
 		return
 	}
+
+	// #48: Only approved articles can be published.
+	var reviewStatus string
+	db.DB.QueryRow("SELECT COALESCE(review_status,'') FROM geo_articles WHERE id=?", id).Scan(&reviewStatus)
+	if reviewStatus != "approved" {
+		c.JSON(400, gin.H{"code": -1, "error": "文章未通过审核，无法发布"})
+		return
+	}
+
 	db.DB.Exec("UPDATE geo_articles SET status='published', published_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?", id)
 	c.JSON(200, gin.H{"code": 0, "data": "已发布"})
 }
