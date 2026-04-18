@@ -470,7 +470,7 @@ func main() {
 			// Generation endpoints. Permission check happens per-request
 			// because a single user may have only image or only video.
 			frwG.GET("/generations", api.RequirePermission("ai_gen.view"), api.ListFRWGenerations)
-			frwG.POST("/generations", api.RequirePermission("ai_gen.submit"), api.SubmitFRWGeneration)
+			frwG.POST("/generations", api.RequirePermission("ai_gen.submit"), middleware.UserRateLimit(10), api.SubmitFRWGeneration)
 			frwG.GET("/generations/:id", api.RequirePermission("ai_gen.view"), api.GetFRWGeneration)
 			frwG.POST("/generations/:id/publish", api.RequirePermission("ai_gen.publish"), api.PublishFRWGeneration)
 			frwG.DELETE("/generations/:id", api.RequirePermission("ai_gen.submit"), api.DeleteFRWGeneration)
