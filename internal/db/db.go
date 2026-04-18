@@ -823,6 +823,39 @@ func Init() {
 		// case-insensitive unique index to prevent duplicates.
 		"UPDATE users SET email = LOWER(email)",
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_ci ON users(email COLLATE NOCASE)`,
+
+		// JWT revocation: per-user timestamp; any JWT issued before this
+		// epoch is rejected. Updated on logout and password change.
+		`ALTER TABLE users ADD COLUMN token_invalidated_after INTEGER DEFAULT 0`,
+
+		// Change sites UNIQUE constraint from UNIQUE(domain) to UNIQUE(domain, created_by)
+		// so different users can manage the same domain independently.
+		`CREATE TABLE IF NOT EXISTS sites_new (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			domain          TEXT NOT NULL,
+			name            TEXT NOT NULL,
+			gsc_site_url    TEXT DEFAULT '',
+			ga_property_id  TEXT DEFAULT '',
+			yandex_host_id  TEXT DEFAULT '',
+			bing_site_url   TEXT DEFAULT '',
+			url_category    TEXT DEFAULT '',
+			url_detail      TEXT DEFAULT '',
+			url_news_list   TEXT DEFAULT '',
+			url_news_detail TEXT DEFAULT '',
+			url_search      TEXT DEFAULT '',
+			url_static      TEXT DEFAULT '',
+			status          TEXT DEFAULT 'active',
+			audit_schedule_enabled TEXT DEFAULT 'false',
+			audit_interval_hours   INTEGER DEFAULT 0,
+			audit_daily_hour       INTEGER DEFAULT -1,
+			url_pages_json  TEXT DEFAULT '[]',
+			created_by      INTEGER REFERENCES users(id),
+			created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(domain, created_by)
+		)`,
+		`INSERT OR IGNORE INTO sites_new SELECT id, domain, name, gsc_site_url, ga_property_id, yandex_host_id, bing_site_url, url_category, url_detail, url_news_list, url_news_detail, url_search, url_static, status, audit_schedule_enabled, audit_interval_hours, audit_daily_hour, url_pages_json, created_by, created_at FROM sites`,
+		`DROP TABLE IF EXISTS sites`,
+		`ALTER TABLE sites_new RENAME TO sites`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {
