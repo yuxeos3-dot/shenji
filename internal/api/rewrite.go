@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"strconv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,6 +38,12 @@ func RewriteContent(c *gin.Context) {
 	}
 
 	// Input validation — prevent excessively large payloads from reaching the AI
+	if req.SiteID > 0 {
+		if !canAccessSite(c, strconv.FormatInt(req.SiteID, 10)) {
+			return
+		}
+	}
+
 	if len(req.Keywords) > 1000 {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "关键词过长（最多1000字符）"})
 		return
