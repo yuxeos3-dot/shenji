@@ -76,7 +76,7 @@ func parseDateRange(c *gin.Context, defaultDays int) (start, end string, err err
 func GSCListSites(c *gin.Context) {
 	token, err := getGoogleAccessToken(c.GetInt64("user_id"))
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
 	raw, err := gscFetch(token, gscAPI+"/sites", "GET", nil)
@@ -139,7 +139,7 @@ func GSCOverview(c *gin.Context) {
 	}
 	token, err := getGoogleAccessToken(c.GetInt64("user_id"))
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
 
@@ -251,7 +251,7 @@ func GSCSiteDetail(c *gin.Context) {
 	}
 	token, err := getGoogleAccessToken(c.GetInt64("user_id"))
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
 

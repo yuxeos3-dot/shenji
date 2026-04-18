@@ -52,7 +52,7 @@ func parseFloatSafe(s string) float64 {
 func GAListProperties(c *gin.Context) {
 	token, err := getGAAccessToken(c.GetInt64("user_id"))
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
 	raw, err := gaAdminGET(token, "https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200")
@@ -136,7 +136,7 @@ func GAOverview(c *gin.Context) {
 	}
 	token, err := getGAAccessToken(c.GetInt64("user_id"))
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
 
@@ -262,7 +262,7 @@ func GAPropertyDetail(c *gin.Context) {
 	}
 	token, err := getGAAccessToken(c.GetInt64("user_id"))
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": -1, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
 
