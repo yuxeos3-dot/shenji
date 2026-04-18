@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"seo-system/internal/db"
+	"seo-system/internal/httpx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -143,7 +144,7 @@ func exchangeGoogleToken(userID int64, service, code string) (*OAuthToken, error
 		return nil, fmt.Errorf("请先在「个人中心 → %s」填写 Client ID / Secret / Redirect URI", strings.ToUpper(service))
 	}
 
-	resp, err := http.PostForm("https://oauth2.googleapis.com/token", map[string][]string{
+	resp, err := httpx.Outbound(30*time.Second).PostForm("https://oauth2.googleapis.com/token", url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"client_id":     {clientID},
@@ -242,7 +243,7 @@ func loadAndRefreshOAuth(userID int64, service string) (string, error) {
 		return "", fmt.Errorf("%s OAuth 应用凭据缺失，请在「个人中心」填写 Client ID / Secret", service)
 	}
 
-	resp, err := http.PostForm("https://oauth2.googleapis.com/token", map[string][]string{
+	resp, err := httpx.Outbound(30*time.Second).PostForm("https://oauth2.googleapis.com/token", url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
 		"client_id":     {clientID},
@@ -295,7 +296,7 @@ func gscFetch(token, apiURL, method string, body interface{}) (json.RawMessage, 
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := httpx.Outbound(30 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

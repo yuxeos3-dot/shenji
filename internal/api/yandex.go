@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"seo-system/internal/db"
+	"seo-system/internal/httpx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -57,7 +58,7 @@ func YandexCallback(c *gin.Context) {
 		return
 	}
 
-	resp, err := http.PostForm("https://oauth.yandex.ru/token", map[string][]string{
+	resp, err := httpx.Outbound(30*time.Second).PostForm("https://oauth.yandex.ru/token", url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"client_id":     {clientID},
@@ -104,7 +105,7 @@ func refreshYandexToken(userID int64, refreshToken string) (string, error) {
 	if err != nil || clientID == "" || clientSecret == "" {
 		return "", fmt.Errorf("Yandex OAuth 应用凭据缺失，请在「个人中心 → Yandex」填写")
 	}
-	resp, err := http.PostForm("https://oauth.yandex.ru/token", map[string][]string{
+	resp, err := httpx.Outbound(30*time.Second).PostForm("https://oauth.yandex.ru/token", url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
 		"client_id":     {clientID},
@@ -146,7 +147,7 @@ func yandexFetch(token, path string) (json.RawMessage, error) {
 	req.Header.Set("Authorization", "OAuth "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := httpx.Outbound(15 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -168,7 +169,7 @@ func getYandexUserID(token string) (string, error) {
 	req, _ := http.NewRequest("GET", "https://login.yandex.ru/info?format=json", nil)
 	req.Header.Set("Authorization", "OAuth "+token)
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := httpx.Outbound(15 * time.Second)
 	resp, err := client.Do(req)
 	if err == nil && resp.StatusCode == 200 {
 		defer resp.Body.Close()
@@ -230,14 +231,16 @@ func getYandexAccessToken(userID int64) (string, error) {
 const yandexUserIDCacheTTL = 6 * time.Hour
 
 // ClearYandexUserIDCache forces the next Yandex sync to re-fetch the user id.
-func ClearYandexUserIDCache() {
-	db.DB.Exec("DELETE FROM settings WHERE key = 'yandex_user_id'")
+func ClearYandexUserIDCache(userID int64) {
+	key := fmt.Sprintf("yandex_user_id:%d", userID)
+	db.DB.Exec("DELETE FROM settings WHERE key = ?", key)
 }
 
 // YandexUserIDCacheStats returns 1 if a cached user id row exists.
-func YandexUserIDCacheStats() int {
+func YandexUserIDCacheStats(userID int64) int {
+	key := fmt.Sprintf("yandex_user_id:%d", userID)
 	var v string
-	db.DB.QueryRow("SELECT value FROM settings WHERE key = 'yandex_user_id'").Scan(&v)
+	db.DB.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
 	if v != "" {
 		return 1
 	}
@@ -247,13 +250,14 @@ func YandexUserIDCacheStats() int {
 // getYandexUserIDCached gets userID from DB cache first, fetches and saves if missing.
 // The cache is keyed to the current access token so rotating accounts invalidates it,
 // and expires after yandexUserIDCacheTTL regardless.
-func getYandexUserIDCached(token string) (string, error) {
+func getYandexUserIDCached(appUserID int64, token string) (string, error) {
 	tokenFingerprint := ""
 	if len(token) >= 8 {
 		tokenFingerprint = token[:8]
 	}
+	cacheKey := fmt.Sprintf("yandex_user_id:%d", appUserID)
 	var cached string
-	db.DB.QueryRow("SELECT value FROM settings WHERE key = 'yandex_user_id'").Scan(&cached)
+	db.DB.QueryRow("SELECT value FROM settings WHERE key = ?", cacheKey).Scan(&cached)
 	if cached != "" {
 		parts := strings.SplitN(cached, "|", 3)
 		// Legacy entries without fingerprint/ts → treat as stale.
@@ -270,7 +274,7 @@ func getYandexUserIDCached(token string) (string, error) {
 		return "", err
 	}
 	payload := fmt.Sprintf("%s|%d|%s", tokenFingerprint, time.Now().Unix(), userID)
-	db.DB.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES ('yandex_user_id', ?)", payload)
+	db.DB.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", cacheKey, payload)
 	return userID, nil
 }
 
@@ -296,7 +300,7 @@ func SyncYandexData(c *gin.Context) {
 		return
 	}
 
-	userID, err := getYandexUserIDCached(token)
+	userID, err := getYandexUserIDCached(c.GetInt64("user_id"), token)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": err.Error()})
 		return
