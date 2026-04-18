@@ -179,6 +179,19 @@ func CreateUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"id": id}})
 }
 
+// isValidUserRole reports whether the given role string is a legal value
+// for users.role. Empty means "no change" on update and is accepted;
+// CreateUser substitutes its default before calling anything that would
+// care. Any other value is rejected so we never store something like
+// "admin2" that bypasses the admin-count guard rails.
+func isValidUserRole(role string) bool {
+	switch role {
+	case "", "admin", "member":
+		return true
+	}
+	return false
+}
+
 // validateDeptGroupPair ensures the provided (department, group) pair is
 // consistent. Both 0 = unassigned is fine; group without department is
 // not; group under the wrong department is not.
@@ -218,9 +231,15 @@ func UpdateUser(c *gin.Context) {
 	}
 
 	// #42: Validate that role is either "admin" or "member" (or empty = no change).
-	if req.Role != "" && req.Role != "admin" && req.Role != "member" {
+	if !isValidUserRole(req.Role) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "角色只能是 admin 或 member"})
 		return
+	}
+
+	// #37: Normalize email on update too — otherwise a later Login would
+	// miss the user, since Login lowercases before lookup.
+	if req.Email != "" {
+		req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	}
 
 	// Use a transaction with SELECT FOR UPDATE to prevent TOCTOU race

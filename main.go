@@ -25,6 +25,13 @@ func main() {
 	// Load .env file
 	godotenv.Load()
 
+	// Validate JWT_SECRET up front. Previously this happened in
+	// middleware/auth.go init(), which tripped `go test` in any package
+	// that imported the middleware. Calling it here keeps the fail-fast
+	// semantic in production while leaving test binaries free to seed a
+	// synthetic secret via SetJWTSecretForTesting.
+	middleware.MustInitJWT()
+
 	// Initialize database
 	db.Init()
 

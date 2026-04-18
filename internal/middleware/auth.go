@@ -20,13 +20,25 @@ import (
 
 var jwtSecret []byte
 
-func init() {
+// MustInitJWT loads JWT_SECRET from the environment and validates it, aborting
+// the process if the value is missing or too short to be safe for HS256. This
+// used to live in package-level init(), which meant `go test` bailed out in
+// CI whenever the test runner wasn't handed a real secret. Splitting it out
+// lets main.go call it explicitly at startup while tests can inject a known
+// secret via SetJWTSecretForTesting.
+func MustInitJWT() {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" || len(secret) < 16 {
 		log.Fatal("JWT_SECRET environment variable must be set and at least 16 characters long. " +
 			"Generate a strong random string, e.g. `openssl rand -hex 32`")
 	}
 	jwtSecret = []byte(secret)
+}
+
+// SetJWTSecretForTesting seeds the package-level secret from a test binary.
+// Not for production use — main.go should call MustInitJWT instead.
+func SetJWTSecretForTesting(secret []byte) {
+	jwtSecret = secret
 }
 
 func GetJWTSecret() []byte {
