@@ -284,7 +284,29 @@ func BuildHTTPClient(timeout time.Duration) *http.Client {
 				return fmt.Errorf("too many redirects")
 			}
 			// Redirect target must also pass SSRF check.
-			return validateURL(req.URL.String())
+			if err := validateURL(req.URL.String()); err != nil {
+				return err
+			}
+			// Even when ssrfAllowed, verify the redirect target does not
+			// resolve to a private IP. This prevents open-redirect chains
+			// from reaching internal services.
+			host := req.URL.Hostname()
+			if ip := net.ParseIP(host); ip != nil {
+				if isPrivateIP(ip) {
+					return errBlockedHost
+				}
+			} else {
+				ips, err := net.DefaultResolver.LookupIP(req.Context(), "ip", host)
+				if err != nil {
+					return fmt.Errorf("redirect target DNS lookup failed: %w", err)
+				}
+				for _, ip := range ips {
+					if isPrivateIP(ip) {
+						return errBlockedHost
+					}
+				}
+			}
+			return nil
 		},
 	}
 }
