@@ -123,11 +123,7 @@ func main() {
 	r.GET("/api/v1/oauth/ga/callback", api.GACallback)
 	r.GET("/api/v1/oauth/yandex/callback", api.YandexCallback)
 
-	// FRW published assets (downloaded images/videos) — served from local
-	// disk. Paths stored in ai_generations.local_path as "/data/frw/...",
-	// so the URL directly maps to the file. No auth: if an attacker can
-	// guess /data/frw/u42_gen17.jpg they're welcome to it.
-	r.Static("/data/frw", "./data/frw")
+	// FRW file serving moved to authenticated v1 group (see ServeFRWFile).
 
 	// Authenticated routes
 	// CSRF runs AFTER auth: it's cheap to skip for non-cookie clients, and
@@ -461,6 +457,9 @@ func main() {
 		// token + user_id copied from the frw.aiaiartist dashboard; apikey
 		// is either set per-user or falls back to the global "frw_apikey"
 		// setting. Gated by the new ai_gen.* permissions.
+		// Authenticated FRW file serving (replaces old unauthenticated r.Static).
+		v1.GET("/data/frw/:kind/:filename", api.ServeFRWFile)
+
 		frwG := v1.Group("/frw")
 		{
 			// Config is viewable/saveable by any user who can use either
