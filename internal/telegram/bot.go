@@ -13,11 +13,13 @@ import (
 	"seo-system/internal/secure"
 )
 
-// escapeMD escapes Telegram Markdown V1 special characters.
-func escapeMD(s string) string {
-	for _, ch := range []string{"_", "*", "`", "["} {
-		s = strings.ReplaceAll(s, ch, "\\"+ch)
-	}
+// escapeHTML escapes characters for Telegram HTML parse mode.
+func escapeHTML(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
+}
 	return s
 }
 
@@ -28,7 +30,7 @@ func Send(botToken, chatID, title, message string) {
 		log.Printf("Telegram not configured, skipping notification: %s", title)
 		return
 	}
-	text := fmt.Sprintf("*%s*\n%s", escapeMD(title), escapeMD(message))
+	text := fmt.Sprintf("<b>%s</b>\n%s", escapeHTML(title), escapeHTML(message))
 	sendMessage(botToken, chatID, text)
 }
 
@@ -76,7 +78,7 @@ func sendMessage(botToken, chatID, text string) {
 	params := url.Values{}
 	params.Set("chat_id", chatID)
 	params.Set("text", text)
-	params.Set("parse_mode", "Markdown")
+	params.Set("parse_mode", "HTML")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.PostForm(apiURL, params)
