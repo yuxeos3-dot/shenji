@@ -82,6 +82,7 @@ func main() {
 
 	// Global middleware
 	r.Use(middleware.CORS())
+	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.IPWhitelist())
 	r.Use(middleware.RecoverLogger())
 	r.Use(api.MetricsCounter())
