@@ -15,8 +15,11 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+// sensitiveKeys are global settings whose values get masked in the admin
+// view. Now that AI / Telegram / OAuth / Bing all live per-user, none of
+// these should ever appear in the global settings table — but we keep the
+// mask list as a defense-in-depth in case a stale row resurfaces.
 var sensitiveKeys = map[string]bool{
-	"ai_api_key":           true,
 	"telegram_bot_token":   true,
 	"gsc_client_secret":    true,
 	"yandex_client_secret": true,

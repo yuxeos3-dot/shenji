@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"seo-system/internal/db"
+	"seo-system/internal/ai"
 	"seo-system/internal/httpx"
 
 	"github.com/gin-gonic/gin"
@@ -64,7 +64,14 @@ func RewriteContent(c *gin.Context) {
 		prompt = buildContentPrompt(req)
 	}
 
-	result, err := callRewriteAI(prompt)
+	userID := c.GetInt64("user_id")
+	apiURL, apiKey, model := ai.ResolveUserAI(userID)
+	if apiKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "请先在「个人 AI 设置」中配置 API Key"})
+		return
+	}
+
+	result, err := callRewriteAI(apiURL, apiKey, model, prompt)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "AI 调用失败: " + err.Error()})
 		return
@@ -120,13 +127,7 @@ func buildContentPrompt(req RewriteRequest) string {
 ]`, req.Type, req.Style, req.Length, req.Keywords, req.Original)
 }
 
-func callRewriteAI(prompt string) (interface{}, error) {
-	apiURL := db.GetSetting("ai_api_url")
-	apiKey := db.GetSetting("ai_api_key")
-	model := db.GetSetting("ai_model")
-	if apiURL == "" {
-		apiURL = "https://ai.router.team/v1"
-	}
+func callRewriteAI(apiURL, apiKey, model, prompt string) (interface{}, error) {
 	if model == "" {
 		model = "claude-sonnet-4-6"
 	}

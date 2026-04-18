@@ -209,6 +209,19 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 
 	updateProgress(60)
 
+	// Resolve the triggering user's AI config. We deliberately do NOT fall
+	// back to a global key — every user owns their own credentials. If the
+	// user hasn't configured AI yet we fail fast so the audit doesn't burn
+	// crawl + analytics work just to die at the first batch call.
+	aiURL, aiKey, aiModel := ai.ResolveUserAI(ownerUserID)
+	if aiKey == "" {
+		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=$1, finished_at=$2 WHERE id=$3",
+			"AI 未配置：请先在「个人 AI 设置」中填写至少 1 组 API Key 后重试", time.Now(), taskID)
+		log.Printf("[audit %d] user %d has no AI config, abort", taskID, ownerUserID)
+		telegram.NotifyUser(ownerUserID, "审计失败", siteName+": 你尚未配置 AI API Key")
+		return
+	}
+
 	// Step 4: Run the technical audit in batches (provider caps output at
 	// ~16k chars per call, so one call can't fit all 29 categories). Each
 	// batch returns its own chapters; we merge and renumber at the end.
@@ -219,7 +232,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	for i, batch := range ai.TechnicalBatches {
 		log.Printf("[audit %d] 技术审计批次 %d/%d：%s", taskID, i+1, batchTotal, batch.Name)
 		bp := ai.BuildTechPromptBatch(batch, site.Domain, sitePages, crawlPages, gscData, gaData, yandexData)
-		chs, raw, model, bErr := ai.CallAIChapters(bp)
+		chs, raw, model, bErr := ai.CallAIChaptersWithConfig(aiURL, aiKey, aiModel, bp)
 		lastModel = model
 		if raw != "" {
 			lastRaw = raw
@@ -256,7 +269,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	var strategyChapter *ai.V6Chapter
 	log.Printf("[audit %d] 调用策略 AI 生成白帽 SEO 建议...", taskID)
 	stratPrompt := ai.BuildStrategyPrompt(site.Domain, sitePages, crawlPages, gscData, gaData, yandexData)
-	if strategyCh, _, sErr := ai.CallAIStrategy(stratPrompt); sErr == nil && strategyCh != nil {
+	if strategyCh, _, sErr := ai.CallAIStrategyWithConfig(aiURL, aiKey, aiModel, stratPrompt); sErr == nil && strategyCh != nil {
 		strategyChapter = strategyCh
 		log.Printf("[audit %d] 策略章节已生成（%d 条建议）", taskID, len(strategyCh.Issues))
 	} else {
