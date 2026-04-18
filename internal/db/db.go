@@ -818,6 +818,11 @@ func Init() {
 		// FRW apikey: added per-user. Drop the global fallback once we
 		// read this column everywhere.
 		`ALTER TABLE users ADD COLUMN frw_apikey TEXT DEFAULT ''`,
+
+		// #37: Normalize existing emails to lowercase and add a
+		// case-insensitive unique index to prevent duplicates.
+		"UPDATE users SET email = LOWER(email)",
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_ci ON users(email COLLATE NOCASE)`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {

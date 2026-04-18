@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"strings"
 	"fmt"
 	"log"
 	"net/http"
@@ -115,6 +116,9 @@ func CreateUser(c *gin.Context) {
 		})
 		return
 	}
+
+	// #37: Normalize email to lowercase before all DB operations.
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 
 	if req.Role == "" {
 		req.Role = "member"
