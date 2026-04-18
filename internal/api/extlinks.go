@@ -200,8 +200,12 @@ func DeleteExternalLink(c *gin.Context) {
 func CheckExternalLink(c *gin.Context) {
 	id := c.Param("id")
 	var url string
-	if err := db.DB.QueryRow("SELECT url FROM external_links WHERE id = ?", id).Scan(&url); err != nil {
+	var checkSiteID string
+	if err := db.DB.QueryRow("SELECT url, site_id FROM external_links WHERE id = ?", id).Scan(&url, &checkSiteID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "外链不存在"})
+		return
+	}
+	if !canAccessSite(c, checkSiteID) {
 		return
 	}
 	result := crawler.FetchPage(crawler.URLSpec{URL: url}, 15*time.Second)

@@ -247,7 +247,7 @@ func main() {
 		v1.POST("/extlinks", api.RequirePermission("extlinks.create"), api.CreateExternalLink)
 		v1.PUT("/extlinks/:id", api.RequirePermission("extlinks.edit"), api.UpdateExternalLink)
 		v1.DELETE("/extlinks/:id", api.RequirePermission("extlinks.delete"), api.DeleteExternalLink)
-		v1.POST("/extlinks/:id/check", api.RequirePermission("extlinks.check"), api.CheckExternalLink)
+		v1.POST("/extlinks/:id/check", api.RequirePermission("extlinks.check"), middleware.UserRateLimit(20), api.CheckExternalLink)
 
 		// GSC
 		v1.GET("/oauth/gsc", api.GetGSCAuthURL)
