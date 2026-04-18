@@ -329,7 +329,7 @@ async function testAI() {
   aiTestResults.value = []
   try {
     const res = await api.testMyAI()
-    aiTestResults.value = res.data?.results || []
+    aiTestResults.value = res.data?.data || res.data?.results || []
   } catch (e) {
     ElMessage.error(e?.response?.data?.error || '测试失败')
   } finally {
