@@ -328,6 +328,15 @@ const OAuthConfigForm = {
   emits: ['save', 'authorize', 'unbind'],
   setup(props, { emit }) {
     const form = ref({ client_id: '', client_secret: '', redirect_uri: '' })
+    // reset() re-syncs the editable form state from the latest props.cfg.
+    // The bug we hit: setup() runs before loadOAuth() returns (it's
+    // async, fired in parallel from the parent's onMounted). The initial
+    // reset() call below picks up an empty cfg and populates form with
+    // "", and because this form state is local the values never sync
+    // back up when cfg later arrives. User saw an empty Client ID +
+    // Redirect URI even after saving them, while the Secret placeholder
+    // (which reads props.cfg directly, not form) correctly said
+    // "已配置". Fix: watch the cfg prop and re-seed on every change.
     const reset = () => {
       form.value = {
         client_id: props.cfg?.client_id || '',
@@ -336,6 +345,18 @@ const OAuthConfigForm = {
       }
     }
     reset()
+    watch(
+      () => props.cfg,
+      (now) => {
+        if (!now) return
+        // Don't wipe a client_secret the user has started typing — only
+        // re-sync the plain fields. Secret stays blank-to-preserve per
+        // the existing UX contract.
+        form.value.client_id = now.client_id || ''
+        form.value.redirect_uri = now.redirect_uri || ''
+      },
+      { deep: true }
+    )
     return () => h('div', { class: 'oauth-form' }, [
       h('div', { class: 'field-row' }, [
         h('label', null, 'Client ID'),
