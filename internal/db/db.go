@@ -210,6 +210,31 @@ var schemaTables = []string{
     ip          TEXT DEFAULT '',
     created_at  TIMESTAMPTZ DEFAULT NOW()
 )`,
+	`CREATE TABLE IF NOT EXISTS push_logs (
+    id          SERIAL PRIMARY KEY,
+    site_id     INTEGER NOT NULL REFERENCES sites(id),
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    platform    TEXT NOT NULL,
+    push_type   TEXT NOT NULL,
+    target_url  TEXT NOT NULL,
+    status      TEXT DEFAULT 'pending',
+    response    TEXT DEFAULT '',
+    error_msg   TEXT DEFAULT '',
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+)`,
+	`CREATE TABLE IF NOT EXISTS push_schedules (
+    id          SERIAL PRIMARY KEY,
+    site_id     INTEGER NOT NULL REFERENCES sites(id),
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    platform    TEXT NOT NULL,
+    push_type   TEXT NOT NULL,
+    target_url  TEXT NOT NULL,
+    cron_expr   TEXT NOT NULL,
+    enabled     BOOLEAN DEFAULT true,
+    last_run_at TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
+)`,
 }
 
 var schemaIndexes = []string{
@@ -228,6 +253,11 @@ var schemaIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_dead_link_site_id      ON dead_link_results(site_id)",
 	"CREATE INDEX IF NOT EXISTS idx_ext_links_site_id      ON external_links(site_id)",
 	"CREATE INDEX IF NOT EXISTS idx_daily_reports_user     ON daily_reports(user_id, report_date)",
+	"CREATE INDEX IF NOT EXISTS idx_push_logs_site_id      ON push_logs(site_id)",
+	"CREATE INDEX IF NOT EXISTS idx_push_logs_user_id      ON push_logs(user_id)",
+	"CREATE INDEX IF NOT EXISTS idx_push_logs_created_at   ON push_logs(created_at)",
+	"CREATE INDEX IF NOT EXISTS idx_push_schedules_site_id ON push_schedules(site_id)",
+	"CREATE INDEX IF NOT EXISTS idx_push_schedules_enabled ON push_schedules(enabled)",
 }
 
 func Init() {

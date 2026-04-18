@@ -96,6 +96,11 @@ var PermissionTree = []PermNode{
 	{Code: "spider", Label: "蜘蛛管理", Children: []PermNode{
 		{Code: "spider.view", Label: "查看蜘蛛统计 / 日志"},
 	}},
+	{Code: "push", Label: "推送管理", Children: []PermNode{
+		{Code: "push.view", Label: "查看推送日志 / 计划"},
+		{Code: "push.submit", Label: "手动推送 Sitemap / URL"},
+		{Code: "push.schedule", Label: "管理推送计划"},
+	}},
 	{Code: "coord", Label: "协同管理", Children: []PermNode{
 		{Code: "coord.view", Label: "查看协同任务"},
 		{Code: "coord.create", Label: "从审计报告创建任务"},

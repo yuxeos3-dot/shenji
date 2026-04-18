@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"seo-system/internal/ai"
+	"seo-system/internal/api"
 	"seo-system/internal/crawler"
 	"seo-system/internal/db"
 	"seo-system/internal/telegram"
@@ -49,6 +50,9 @@ func Start() {
 	// Daily cleanup: clear HTML from audit_pages older than the 10 most
 	// recent audits per site, to save disk space.
 	c.AddFunc("30 3 * * *", cleanupOldAuditHTML)
+
+	// Scheduled push: check every 10 minutes for push schedules that need to run.
+	c.AddFunc("*/10 * * * *", runScheduledPushes)
 
 	c.Start()
 	log.Println("调度器已启动")
@@ -129,6 +133,85 @@ func cleanupOldAuditHTML() {
 		} else if n, _ := res.RowsAffected(); n > 0 {
 			log.Printf("[html-cleanup] cleared HTML from %d audit_pages rows", n)
 		}
+	}
+}
+
+// runScheduledPushes checks push_schedules and runs any that are due.
+// Uses a simple approach: if last_run_at is older than the cron interval,
+// run it. Supports common cron patterns by parsing the expression.
+func runScheduledPushes() {
+	rows, err := db.DB.Query(
+		`SELECT id, site_id, user_id, platform, push_type, target_url, cron_expr, last_run_at
+		 FROM push_schedules WHERE enabled = true`)
+	if err != nil {
+		log.Printf("[push-scheduler] query schedules failed: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	type schedule struct {
+		id        int64
+		siteID    int64
+		userID    int64
+		platform  string
+		pushType  string
+		targetURL string
+		cronExpr  string
+		lastRunAt *string
+	}
+
+	var schedules []schedule
+	for rows.Next() {
+		var s schedule
+		if err := rows.Scan(&s.id, &s.siteID, &s.userID, &s.platform, &s.pushType,
+			&s.targetURL, &s.cronExpr, &s.lastRunAt); err != nil {
+			continue
+		}
+		schedules = append(schedules, s)
+	}
+	rows.Close()
+
+	now := time.Now()
+
+	for _, s := range schedules {
+		// Parse the cron expression to determine the interval.
+		// Use robfig/cron parser to find next run time from last_run_at.
+		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		cronSched, err := parser.Parse(s.cronExpr)
+		if err != nil {
+			log.Printf("[push-scheduler] invalid cron %q for schedule %d: %v", s.cronExpr, s.id, err)
+			continue
+		}
+
+		var lastRun time.Time
+		if s.lastRunAt != nil && *s.lastRunAt != "" {
+			// Try common timestamp formats.
+			for _, layout := range []string{
+				"2006-01-02T15:04:05Z",
+				"2006-01-02 15:04:05",
+				time.RFC3339,
+				"2006-01-02T15:04:05-07:00",
+				"2006-01-02 15:04:05.999999-07",
+				"2006-01-02T15:04:05.999999Z",
+			} {
+				if t, err := time.Parse(layout, *s.lastRunAt); err == nil {
+					lastRun = t
+					break
+				}
+			}
+		}
+		if lastRun.IsZero() {
+			// Never run before: use a time far in the past so it triggers immediately.
+			lastRun = now.Add(-24 * time.Hour)
+		}
+
+		nextRun := cronSched.Next(lastRun)
+		if now.Before(nextRun) {
+			continue // not yet time
+		}
+
+		log.Printf("[push-scheduler] running schedule %d: %s %s -> %s", s.id, s.platform, s.pushType, s.targetURL)
+		go api.RunScheduledPush(s.id, s.siteID, s.userID, s.platform, s.pushType, s.targetURL)
 	}
 }
 

@@ -362,6 +362,16 @@ func main() {
 		v1.GET("/bing/overview", api.RequirePermission("data.view"), api.BingOverview)
 		v1.GET("/bing/site-detail", api.RequirePermission("data.view"), api.BingSiteDetail)
 
+		// Push Management
+		v1.GET("/sites/:id/push/logs", api.RequirePermission("push.view"), api.ListPushLogs)
+		v1.POST("/sites/:id/push/sitemap", api.RequirePermission("push.submit"), api.SubmitSitemap)
+		v1.POST("/push/sitemap-all", api.RequirePermission("push.submit"), api.SubmitSitemapAll)
+		v1.POST("/sites/:id/push/urls", api.RequirePermission("push.submit"), middleware.UserRateLimit(10), api.SubmitURLs)
+		v1.GET("/sites/:id/push/schedules", api.RequirePermission("push.view"), api.ListPushSchedules)
+		v1.POST("/sites/:id/push/schedules", api.RequirePermission("push.schedule"), api.SavePushSchedule)
+		v1.DELETE("/push/schedules/:id", api.RequirePermission("push.schedule"), api.DeletePushSchedule)
+		v1.PUT("/push/schedules/:id/toggle", api.RequirePermission("push.schedule"), api.TogglePushSchedule)
+
 		// Settings (admin only)
 		settings := v1.Group("/settings")
 		settings.Use(middleware.AdminRequired())
