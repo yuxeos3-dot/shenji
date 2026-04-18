@@ -609,6 +609,30 @@ func Init() {
 		"UPDATE users SET email = LOWER(email)",
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_ci ON users(LOWER(email))`,
 		"DO $$ BEGIN ALTER TABLE users ADD COLUMN token_invalidated_after INTEGER DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		// Phase 3: Additional indexes for common query patterns.
+		`CREATE INDEX IF NOT EXISTS idx_sites_created_by ON sites(created_by)`,
+		`CREATE INDEX IF NOT EXISTS idx_coordination_tasks_site ON coordination_tasks(site_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_coordination_events_task ON coordination_events(task_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_geo_articles_site ON geo_articles(site_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_geo_workflow_jobs_user ON geo_workflow_jobs(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_spider_logs_site ON spider_logs(site_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)`,
+		`CREATE INDEX IF NOT EXISTS idx_coordination_tasks_status ON coordination_tasks(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_geo_articles_type_site ON geo_articles(content_type, site_id)`,
+		// Phase 4: Persistent state tables (lockout + OAuth state).
+		`CREATE TABLE IF NOT EXISTS account_lockouts (
+			email TEXT PRIMARY KEY,
+			failure_count INTEGER DEFAULT 0,
+			last_failure_at TIMESTAMPTZ,
+			locked_until TIMESTAMPTZ,
+			updated_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS oauth_states (
+			state TEXT PRIMARY KEY,
+			user_id INTEGER NOT NULL,
+			expires_at TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {
