@@ -82,7 +82,7 @@ func SyncBingData(c *gin.Context) {
 	}
 
 	// Resolve actual Bing site URL by domain.
-	bingSiteURL, err := resolveBingSiteURL(apiKey, domain)
+	bingSiteURL, err := resolveBingSiteURL(apiKey, domain, c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": err.Error()})
 		return

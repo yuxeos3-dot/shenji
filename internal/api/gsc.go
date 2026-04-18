@@ -336,7 +336,7 @@ func SyncGSCData(c *gin.Context) {
 	// Look up the actual GSC property that corresponds to this domain.
 	// User no longer fills a "GSC Site URL" field; the resolver reads
 	// the account's properties and picks the best canonical match.
-	gscSiteURL, err := resolveGSCProperty(token, domain)
+	gscSiteURL, err := resolveGSCProperty(token, domain, c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": err.Error()})
 		return

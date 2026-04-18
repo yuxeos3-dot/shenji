@@ -110,7 +110,7 @@ func SyncGAData(c *gin.Context) {
 		return
 	}
 	// Resolve GA4 property by domain — user no longer enters a property id.
-	gaPropertyID, err := resolveGAProperty(token, domain)
+	gaPropertyID, err := resolveGAProperty(token, domain, c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": err.Error()})
 		return

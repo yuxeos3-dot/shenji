@@ -318,7 +318,7 @@ func SyncYandexData(c *gin.Context) {
 	}
 
 	// Resolve Yandex host_id by domain.
-	yandexHostID, err := resolveYandexHost(token, userID, domain)
+	yandexHostID, err := resolveYandexHost(token, userID, domain, c.GetInt64("user_id"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": err.Error()})
 		return

@@ -100,12 +100,12 @@ func resolveCacheSet(key, value string) {
 // the actual GSC property identifier we should use when calling
 // searchAnalytics/query. It prefers URL-prefix properties (exact https
 // match) over domain properties, but returns either if both exist.
-func resolveGSCProperty(token, domain string) (string, error) {
+func resolveGSCProperty(token, domain string, userID int64) (string, error) {
 	dom := canonicalHost(domain)
 	if dom == "" {
 		return "", fmt.Errorf("站点域名为空")
 	}
-	cacheKey := "gsc:" + dom
+	cacheKey := fmt.Sprintf("gsc:%d:%s", userID, dom)
 	if v, ok := resolveCacheGet(cacheKey); ok {
 		return v, nil
 	}
@@ -161,12 +161,12 @@ func resolveGSCProperty(token, domain string) (string, error) {
 // displayName contains the domain. GA4 does not directly expose the
 // tracked URL in Admin API; property displayNames are user-chosen.
 // Best effort: match case-insensitive substring of the canonical host.
-func resolveGAProperty(token, domain string) (string, error) {
+func resolveGAProperty(token, domain string, userID int64) (string, error) {
 	dom := canonicalHost(domain)
 	if dom == "" {
 		return "", fmt.Errorf("站点域名为空")
 	}
-	cacheKey := "ga:" + dom
+	cacheKey := fmt.Sprintf("ga:%d:%s", userID, dom)
 	if v, ok := resolveCacheGet(cacheKey); ok {
 		return v, nil
 	}
@@ -226,12 +226,12 @@ func resolveGAProperty(token, domain string) (string, error) {
 
 // resolveBingSiteURL finds a verified site under the Bing API key
 // whose URL matches the given domain.
-func resolveBingSiteURL(apiKey, domain string) (string, error) {
+func resolveBingSiteURL(apiKey, domain string, userID int64) (string, error) {
 	dom := canonicalHost(domain)
 	if dom == "" {
 		return "", fmt.Errorf("站点域名为空")
 	}
-	cacheKey := "bing:" + dom
+	cacheKey := fmt.Sprintf("bing:%d:%s", userID, dom)
 	if v, ok := resolveCacheGet(cacheKey); ok {
 		return v, nil
 	}
@@ -265,12 +265,12 @@ func resolveBingSiteURL(apiKey, domain string) (string, error) {
 // resolveYandexHost finds a Yandex host_id matching the given domain.
 // Yandex host_id looks like "https:hl365.com:443" — our canonicalHost
 // normalizer strips the scheme and port for comparison.
-func resolveYandexHost(token, userID, domain string) (string, error) {
+func resolveYandexHost(token, yandexUserID, domain string, appUserID int64) (string, error) {
 	dom := canonicalHost(domain)
 	if dom == "" {
 		return "", fmt.Errorf("站点域名为空")
 	}
-	cacheKey := "yandex:" + dom
+	cacheKey := fmt.Sprintf("yandex:%d:%s", appUserID, dom)
 	if v, ok := resolveCacheGet(cacheKey); ok {
 		return v, nil
 	}
