@@ -22,8 +22,7 @@ KEEP_DAYS="${KEEP_DAYS:-7}"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 dest="${BACKUP_DIR}/seo-${timestamp}.db"
 
-mkdir -p "${BACKUP_DIR}"
-chmod 700 "${BACKUP_DIR}"
+mkdir -p -m 700 "${BACKUP_DIR}"
 
 # Use sqlite's online backup so a running server doesn't corrupt the output.
 sqlite3 "${DB_PATH}" ".backup '${dest}'"
