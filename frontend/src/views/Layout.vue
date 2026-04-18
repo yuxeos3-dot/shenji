@@ -100,6 +100,23 @@ onMounted(() => {
     isMobile.value = window.innerWidth <= 768
     if (!isMobile.value) sidebarOpen.value = true
   })
+  // Handle the OAuth callback redirect. The backend redirects to
+  // "/?oauth=<svc>&status=success" or "/?oauth=<svc>&status=denied&
+  // reason=<human-readable>". Surface it as a toast then strip the
+  // query so it doesn't keep firing on refresh.
+  const q = route.query
+  if (q && q.oauth) {
+    if (q.status === 'success') {
+      ElMessage.success(`✅ ${String(q.oauth).toUpperCase()} 授权成功`)
+    } else if (q.status === 'denied') {
+      ElMessage.error({
+        message: `❌ ${String(q.oauth).toUpperCase()} 授权失败：${q.reason || '未知原因'}`,
+        duration: 10000,
+        showClose: true,
+      })
+    }
+    router.replace({ path: route.path, query: {} })
+  }
 })
 
 // Close sidebar on mobile route change

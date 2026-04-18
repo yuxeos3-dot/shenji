@@ -87,3 +87,34 @@ func OAuthStateStats() int {
 func ClearOAuthStates() {
 	db.DB.Exec("DELETE FROM oauth_states")
 }
+
+// translateOAuthError maps the cryptic error codes Google / Yandex put
+// in the callback URL (?error=access_denied&error_description=...) into
+// a human-readable Chinese hint. The previous behaviour was to ignore
+// the error param entirely and fall through to "缺少授权码", which
+// made it impossible for an operator to tell whether they'd clicked
+// cancel, set up the Cloud project wrong, or hit a scope restriction.
+func translateOAuthError(code, desc string) string {
+	switch code {
+	case "access_denied":
+		return "授权被拒绝：你在同意页点了「取消」，或 OAuth 同意屏幕未添加 webmasters.readonly / analytics.readonly scope。请到 Google Cloud Console 检查 OAuth 同意屏幕，然后重新授权并点「允许」"
+	case "invalid_scope":
+		return "Scope 无效：请到 Google Cloud Console → OAuth 同意屏幕 → 添加 webmasters.readonly / analytics.readonly"
+	case "admin_policy_enforced":
+		return "Google Workspace 管理员策略拒绝：联系域管理员允许第三方 OAuth 应用"
+	case "disallowed_useragent":
+		return "当前浏览器被 Google 禁止 OAuth：请改用 Chrome / Edge / Firefox"
+	case "org_internal":
+		return "OAuth 应用设为「内部应用」，但授权的 Google 账号不在同一个 Workspace 组织"
+	case "redirect_uri_mismatch":
+		return "重定向 URI 不匹配：Google Cloud Console 里的授权重定向 URI 必须和后台填的完全一致"
+	case "unauthorized_client":
+		return "Client ID 无权调用该 API：请到 Google Cloud Console 启用 Search Console API / Analytics Data API"
+	case "invalid_client":
+		return "Client ID 或 Secret 错误：请在「个人中心 → OAuth 应用凭据」重新填写"
+	}
+	if desc != "" {
+		return code + "：" + desc
+	}
+	return "授权失败：" + code
+}

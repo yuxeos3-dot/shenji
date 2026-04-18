@@ -72,6 +72,18 @@ func GetGSCAuthURL(c *gin.Context) {
 }
 
 func GSCCallback(c *gin.Context) {
+	// Google 在用户拒绝、scope 被 consent screen 拦下、或 redirect_uri
+	// 不匹配等场景下不会带 code，而是带 ?error=access_denied / invalid_scope
+	// / admin_policy_enforced 等。之前我们只查 code 缺失，直接回
+	// "缺少授权码"，把真实原因盖住了 —— 先把 Google 自己说的错误
+	// surface 给用户。
+	if oauthErr := c.Query("error"); oauthErr != "" {
+		desc := c.Query("error_description")
+		msg := translateOAuthError(oauthErr, desc)
+		log.Printf("[gsc-callback] Google refused: error=%s desc=%s state=%s", oauthErr, desc, c.Query("state"))
+		c.Redirect(http.StatusFound, "/?oauth=gsc&status=denied&reason="+url.QueryEscape(msg))
+		return
+	}
 	uid, ok := consumeOAuthState(c.Query("state"))
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "OAuth state 无效或已过期，请重新发起授权"})

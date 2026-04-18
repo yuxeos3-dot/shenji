@@ -41,6 +41,13 @@ func GetYandexAuthURL(c *gin.Context) {
 }
 
 func YandexCallback(c *gin.Context) {
+	if oauthErr := c.Query("error"); oauthErr != "" {
+		desc := c.Query("error_description")
+		msg := translateOAuthError(oauthErr, desc)
+		log.Printf("[yandex-callback] OAuth refused: error=%s desc=%s state=%s", oauthErr, desc, c.Query("state"))
+		c.Redirect(http.StatusFound, "/?oauth=yandex&status=denied&reason="+url.QueryEscape(msg))
+		return
+	}
 	uid, ok := consumeOAuthState(c.Query("state"))
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "OAuth state 无效或已过期，请重新发起授权"})
