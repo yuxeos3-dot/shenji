@@ -98,7 +98,11 @@ const api = {
   rejectPendingUser: (id: Id) => instance.post(`/v1/users/${id}/reject`),
   logout: () => instance.post('/v1/auth/logout'),
   changePassword: (data: { old_password: string; new_password: string }) => instance.post('/v1/auth/change-password', data),
-  getMe: () => instance.get('/v1/auth/me'),
+  // Auth probe — used by the router guard on every fresh page load to
+  // decide between /login and the requested route. 401 here means
+  // "anonymous", not "session expired", so suppress the global error
+  // toast that the interceptor would otherwise fire ("未登录").
+  getMe: () => instance.get('/v1/auth/me', { _silent: true } as any),
   getCSRFToken: () => instance.get('/v1/auth/csrf'),
 
   // Users

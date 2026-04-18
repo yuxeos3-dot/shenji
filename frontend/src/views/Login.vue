@@ -139,15 +139,28 @@
 
 <script setup>
 import { ref, reactive, watch, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { useSiteConfigStore } from '../stores/siteConfig'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 const siteConfig = useSiteConfigStore()
+
+// Cold-load optimisation: the router guard now sends new tabs to
+// /login synchronously without waiting for the auth probe, then runs
+// the probe in the background. If the probe comes back as "actually
+// authed" (cookie was valid), bounce to the originally requested
+// route rather than make the user log in again.
+watch(() => userStore.authed, (now) => {
+  if (now) {
+    const dest = (route.query.redirect as string) || '/dashboard'
+    router.replace(dest)
+  }
+})
 
 const mode = ref('login') // 'login' | 'register'
 const loading = ref(false)
@@ -283,6 +296,14 @@ async function handleRegister() {
 
 onMounted(() => {
   if (!siteConfig.title) siteConfig.fetch?.()
+  // Belt + braces with the watcher above: if the auth probe already
+  // resolved to authed=true before this component finished mounting
+  // (rare but possible on a cached cookie), the watch won't fire for
+  // the initial value. Check once on mount too.
+  if (userStore.authed) {
+    const dest = (route.query.redirect as string) || '/dashboard'
+    router.replace(dest)
+  }
 })
 </script>
 

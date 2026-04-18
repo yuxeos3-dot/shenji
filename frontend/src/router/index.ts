@@ -65,23 +65,69 @@ function safeRedirect(fullPath: string): string {
   return fullPath
 }
 
+// authProbed flips true the first time fetchUser resolves, regardless
+// of outcome. Used to distinguish "we haven't checked yet" from
+// "checked, definitely anonymous" so cold-load can route to /login
+// optimistically without re-probing on every step.
+let authProbed = false
+let inflightProbe: Promise<void> | null = null
+
+function probeAuth() {
+  if (inflightProbe) return inflightProbe
+  const userStore = useUserStore()
+  inflightProbe = userStore.fetchUser().finally(() => {
+    authProbed = true
+    inflightProbe = null
+  })
+  return inflightProbe
+}
+
 router.beforeEach(async (to, _from, next) => {
   if (to.path === '/login') {
+    // Visiting /login while already authed (back button, manual URL)
+    // should bounce straight to the dashboard rather than show a stale
+    // form. Otherwise the user clicks 登录 and gets a "登录成功"
+    // toast for what was already a valid session.
+    const userStore = useUserStore()
+    if (userStore.authed) {
+      next({ path: '/dashboard' })
+      return
+    }
     next()
+    // Probe in the background so if the cookie is actually valid,
+    // Login.vue's mounted hook can pick up authed=true and redirect.
+    if (!authProbed) probeAuth()
     return
   }
+
   const userStore = useUserStore()
   if (userStore.authed) {
     next()
     return
   }
-  await userStore.fetchUser()
-  if (userStore.authed) {
-    next()
-  } else {
+
+  // Cold-load fast path: we've never probed and the cookie state is
+  // unknown. The vast majority of cold loads are anonymous (a session
+  // exists for at most a single browser tab at a time, and the typing
+  // a-domain-into-the-bar gesture usually means "I want to log in").
+  // Route to /login synchronously to skip the blank-screen wait — if
+  // the probe comes back authed, the redirect query in /login will
+  // bounce them to their original target.
+  if (!authProbed) {
+    probeAuth().then(() => {
+      // No-op here; the awaiting Login page will react to authed.value
+      // turning true and route forward via its own guard.
+    })
     const target = safeRedirect(to.fullPath)
     next({ path: '/login', query: target ? { redirect: target } : {} })
+    return
   }
+
+  // We've probed and the user is definitely anonymous (otherwise we
+  // would have hit the userStore.authed branch above). Send them to
+  // login proper.
+  const target = safeRedirect(to.fullPath)
+  next({ path: '/login', query: target ? { redirect: target } : {} })
 })
 
 export default router
