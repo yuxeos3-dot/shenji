@@ -231,20 +231,31 @@ func getYandexAccessToken(userID int64) (string, error) {
 const yandexUserIDCacheTTL = 6 * time.Hour
 
 // ClearYandexUserIDCache forces the next Yandex sync to re-fetch the user id.
+// Pass userID=0 to clear all users' caches (admin operation).
 func ClearYandexUserIDCache(userID int64) {
+	if userID == 0 {
+		db.DB.Exec("DELETE FROM settings WHERE key LIKE 'yandex_user_id:%'")
+		return
+	}
 	key := fmt.Sprintf("yandex_user_id:%d", userID)
 	db.DB.Exec("DELETE FROM settings WHERE key = ?", key)
 }
 
-// YandexUserIDCacheStats returns 1 if a cached user id row exists.
+// YandexUserIDCacheStats returns the count of cached user id rows.
+// Pass userID=0 to count all users (admin operation).
 func YandexUserIDCacheStats(userID int64) int {
-	key := fmt.Sprintf("yandex_user_id:%d", userID)
-	var v string
-	db.DB.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
-	if v != "" {
-		return 1
+	var count int
+	if userID == 0 {
+		db.DB.QueryRow("SELECT COUNT(*) FROM settings WHERE key LIKE 'yandex_user_id:%'").Scan(&count)
+	} else {
+		key := fmt.Sprintf("yandex_user_id:%d", userID)
+		var v string
+		db.DB.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
+		if v != "" {
+			count = 1
+		}
 	}
-	return 0
+	return count
 }
 
 // getYandexUserIDCached gets userID from DB cache first, fetches and saves if missing.

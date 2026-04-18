@@ -86,7 +86,7 @@ func ListCaches(c *gin.Context) {
 		{
 			Key: "yandex_user_id", Label: "Yandex user_id 缓存",
 			Description: "Yandex Webmaster API 查询所需 user_id，绑定当前 access_token，6 小时过期。清空后下次同步会重新调 /user/ 拉取。",
-			Size:        YandexUserIDCacheStats(),
+			Size:        YandexUserIDCacheStats(0), // 0 = count all users
 			CanClear:    true,
 		},
 		{
@@ -125,7 +125,7 @@ func ClearCache(c *gin.Context) {
 	case "oauth_state":
 		ClearOAuthStates()
 	case "yandex_user_id":
-		ClearYandexUserIDCache()
+		ClearYandexUserIDCache(0) // 0 = clear all users
 	case "deadlink_progress":
 		ClearDeadlinkProgress()
 	default:
