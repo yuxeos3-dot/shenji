@@ -69,7 +69,7 @@ func lookupReportOwner(reportType string, reportID int64) int64 {
 	}
 	var uid int64
 	// Safe: table is from a whitelist above, not user input.
-	q := "SELECT user_id FROM " + table + " WHERE id = ?"
+	q := "SELECT user_id FROM " + table + " WHERE id = $1"
 	if err := db.DB.QueryRow(q, reportID).Scan(&uid); err == sql.ErrNoRows {
 		return 0
 	} else if err != nil {
@@ -116,7 +116,7 @@ func ListEvaluations(c *gin.Context) {
 		       COALESCE(evaluator_name, ''), content,
 		       created_at, updated_at
 		FROM report_evaluations
-		WHERE report_type = ? AND report_id = ?
+		WHERE report_type = $1 AND report_id = $2
 		ORDER BY created_at ASC`,
 		reportType, reportID,
 	)
@@ -187,7 +187,7 @@ func CreateEvaluation(c *gin.Context) {
 	// confuse the later "admin renamed" case, where we want the
 	// evaluation to show the name that was in effect at write time).
 	var name string
-	if err := db.DB.QueryRow(`SELECT name FROM users WHERE id = ?`, uid).Scan(&name); err != nil && err != sql.ErrNoRows {
+	if err := db.DB.QueryRow(`SELECT name FROM users WHERE id = $1`, uid).Scan(&name); err != nil && err != sql.ErrNoRows {
 		log.Printf("[eval] evaluator name lookup failed uid=%d: %v", uid, err)
 	}
 	if name == "" {
@@ -197,7 +197,7 @@ func CreateEvaluation(c *gin.Context) {
 	_, err := db.DB.Exec(`
 		INSERT INTO report_evaluations
 		  (report_type, report_id, evaluator_id, evaluator_name, content)
-		VALUES (?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT(report_type, report_id, evaluator_id) DO UPDATE SET
 		  content = excluded.content,
 		  evaluator_name = excluded.evaluator_name,
@@ -232,7 +232,7 @@ func DeleteEvaluation(c *gin.Context) {
 	// valid-but-not-yours.
 	var evalUID int64
 	err := db.DB.QueryRow(
-		`SELECT evaluator_id FROM report_evaluations WHERE id = ?`, id,
+		`SELECT evaluator_id FROM report_evaluations WHERE id = $1`, id,
 	).Scan(&evalUID)
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "评价不存在"})
@@ -247,7 +247,7 @@ func DeleteEvaluation(c *gin.Context) {
 		return
 	}
 
-	if _, err := db.DB.Exec(`DELETE FROM report_evaluations WHERE id = ?`, id); err != nil {
+	if _, err := db.DB.Exec(`DELETE FROM report_evaluations WHERE id = $1`, id); err != nil {
 		log.Printf("[eval] delete: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 		return

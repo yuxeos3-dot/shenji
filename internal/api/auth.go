@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -47,7 +48,7 @@ func Login(c *gin.Context) {
 	var id int64
 	var name, email, password, role string
 	err := db.DB.QueryRow(
-		"SELECT id, name, email, password, role FROM users WHERE email = ?", req.Email,
+		"SELECT id, name, email, password, role FROM users WHERE email = $1", req.Email,
 	).Scan(&id, &name, &email, &password, &role)
 	if err != nil {
 		IncLoginFailure()
@@ -74,7 +75,7 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	if _, err := db.DB.Exec("UPDATE users SET last_login = ? WHERE id = ?", time.Now(), id); err != nil {
+	if _, err := db.DB.Exec("UPDATE users SET last_login = $1 WHERE id = $2", time.Now(), id); err != nil {
 		// Non-critical: don't fail the login, but log so we notice DB issues.
 		log.Printf("[auth] update last_login user=%d failed: %v", id, err)
 	}
@@ -114,7 +115,7 @@ func Logout(c *gin.Context) {
 	userID := c.GetInt64("user_id")
 	if userID > 0 {
 		now := time.Now().Unix()
-		db.DB.Exec("UPDATE users SET token_invalidated_after = ? WHERE id = ?", now, userID)
+		db.DB.Exec("UPDATE users SET token_invalidated_after = $1 WHERE id = $2", now, userID)
 		middleware.InvalidateTokenCache(userID)
 	}
 
@@ -140,7 +141,7 @@ func ChangePassword(c *gin.Context) {
 	userID := c.GetInt64("user_id")
 
 	var currentHash string
-	err := db.DB.QueryRow("SELECT password FROM users WHERE id = ?", userID).Scan(&currentHash)
+	err := db.DB.QueryRow("SELECT password FROM users WHERE id = $1", userID).Scan(&currentHash)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "用户不存在"})
 		return
@@ -157,7 +158,7 @@ func ChangePassword(c *gin.Context) {
 		return
 	}
 
-	_, err = db.DB.Exec("UPDATE users SET password = ? WHERE id = ?", string(newHash), userID)
+	_, err = db.DB.Exec("UPDATE users SET password = $1 WHERE id = $2", string(newHash), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "更新密码失败"})
 		return
@@ -165,7 +166,7 @@ func ChangePassword(c *gin.Context) {
 
 	// Invalidate all existing tokens so other sessions are forced to re-login.
 	now := time.Now().Unix()
-	db.DB.Exec("UPDATE users SET token_invalidated_after = ? WHERE id = ?", now, userID)
+	db.DB.Exec("UPDATE users SET token_invalidated_after = $1 WHERE id = $2", now, userID)
 	middleware.InvalidateTokenCache(userID)
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "密码修改成功"})
@@ -177,7 +178,7 @@ func GetMe(c *gin.Context) {
 	var id int64
 	var name, email, role, telegramID string
 	err := db.DB.QueryRow(
-		"SELECT id, name, email, role, telegram_id FROM users WHERE id = ?", userID,
+		"SELECT id, name, email, role, telegram_id FROM users WHERE id = $1", userID,
 	).Scan(&id, &name, &email, &role, &telegramID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "用户不存在"})
@@ -230,7 +231,7 @@ func GetOnlineUsersAPI(c *gin.Context) {
 	placeholders := make([]string, 0, len(userMap))
 	for id := range userMap {
 		userIDs = append(userIDs, id)
-		placeholders = append(placeholders, "?")
+		placeholders = append(placeholders, fmt.Sprintf("$%d", len(placeholders)+1))
 	}
 	nameMap := make(map[int64]string)
 	if len(userIDs) > 0 {

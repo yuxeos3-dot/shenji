@@ -135,7 +135,7 @@ func loadCoordTask(id int64) (*coordTask, error) {
 		LEFT JOIN sites s ON s.id = t.site_id
 		LEFT JOIN users u1 ON u1.id = t.created_by
 		LEFT JOIN users u2 ON u2.id = t.assignee_id
-		WHERE t.id = ?`
+		WHERE t.id = $1`
 	var t coordTask
 	var started, submitted, verified, preAuditAt sql.NullString
 	err := db.DB.QueryRow(q, id).Scan(
@@ -173,7 +173,7 @@ func recordEvent(taskID int64, eventType, fromStatus, toStatus string, actorID i
 	_, err := db.DB.Exec(
 		`INSERT INTO coordination_events
 		 (task_id, event_type, from_status, to_status, actor_id, actor_name, note)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		taskID, eventType, fromStatus, toStatus, actorID, actorName, note,
 	)
 	if err != nil {
@@ -190,7 +190,7 @@ func currentUser(c *gin.Context) (int64, string) {
 		return 0, ""
 	}
 	var name string
-	if err := db.DB.QueryRow("SELECT name FROM users WHERE id = ?", uid).Scan(&name); err != nil && err != sql.ErrNoRows {
+	if err := db.DB.QueryRow("SELECT name FROM users WHERE id = $1", uid).Scan(&name); err != nil && err != sql.ErrNoRows {
 		log.Printf("[coord] currentUser(%d) lookup failed: %v", uid, err)
 	}
 	return uid, name
@@ -248,28 +248,28 @@ func CreateCoordTask(c *gin.Context) {
 	}
 
 	uid, uname := currentUser(c)
-	res, err := db.DB.Exec(
+	var taskID int64
+	err := db.DB.QueryRow(
 		`INSERT INTO coordination_tasks
 		 (site_id, audit_task_id, issue_id, issue_title, issue_severity,
 		  issue_module, issue_chapter, issue_snapshot, note, status,
 		  created_by, assignee_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11) RETURNING id`,
 		req.SiteID, req.AuditTaskID, req.IssueID, req.IssueTitle, req.IssueSeverity,
 		req.IssueModule, req.IssueChapter, req.IssueSnapshot, req.Note,
 		uid, req.AssigneeID,
-	)
+	).Scan(&taskID)
 	if err != nil {
 		log.Printf("[coord] CreateCoordTask insert failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "创建失败"})
 		return
 	}
-	taskID, _ := res.LastInsertId()
 
 	// Timeline: task was created (+ optionally assigned in the same call).
 	recordEvent(taskID, "create", "", coordStatusPending, uid, uname, req.Note)
 	if req.AssigneeID > 0 {
 		var asignName string
-		db.DB.QueryRow("SELECT name FROM users WHERE id = ?", req.AssigneeID).Scan(&asignName)
+		db.DB.QueryRow("SELECT name FROM users WHERE id = $1", req.AssigneeID).Scan(&asignName)
 		recordEvent(taskID, "assign", coordStatusPending, coordStatusPending, uid, uname,
 			fmt.Sprintf("分配给 %s", asignName))
 	}
@@ -288,13 +288,13 @@ func ListCoordTasks(c *gin.Context) {
 	where := []string{"1=1"}
 	args := []interface{}{}
 	if sid := c.Query("site_id"); sid != "" {
-		where = append(where, "t.site_id = ?")
+		where = append(where, fmt.Sprintf("t.site_id = $%d", len(args)+1))
 		args = append(args, sid)
 	} else {
 		role, _ := c.Get("role")
 		if role != "admin" {
 			userID := c.GetInt64("user_id")
-			where = append(where, "t.site_id IN (SELECT id FROM sites WHERE created_by = ?)")
+			where = append(where, "t.site_id IN (SELECT id FROM sites WHERE created_by = $1)")
 			args = append(args, userID)
 		}
 	}
@@ -303,11 +303,11 @@ func ListCoordTasks(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "status 取值非法"})
 			return
 		}
-		where = append(where, "t.status = ?")
+		where = append(where, fmt.Sprintf("t.status = $%d", len(args)+1))
 		args = append(args, s)
 	}
 	if a := c.Query("assignee_id"); a != "" {
-		where = append(where, "t.assignee_id = ?")
+		where = append(where, fmt.Sprintf("t.assignee_id = $%d", len(args)+1))
 		args = append(args, a)
 	}
 	// Admin 用户监控 page passes ?involved_user_id=N to list every task
@@ -316,7 +316,7 @@ func ListCoordTasks(c *gin.Context) {
 	// users anyway since the endpoint is site-scoped downstream.
 	if v := c.Query("involved_user_id"); v != "" {
 		if role, _ := c.Get("role"); role == "admin" {
-			where = append(where, "(t.created_by = ? OR t.assignee_id = ?)")
+			where = append(where, fmt.Sprintf("(t.created_by = $%d OR t.assignee_id = $%d)", len(args)+1, len(args)+2))
 			args = append(args, v, v)
 		}
 	}
@@ -347,7 +347,7 @@ func ListCoordTasks(c *gin.Context) {
 				ELSE 5
 			END,
 			t.created_at DESC
-		LIMIT ? OFFSET ?`
+		LIMIT ` + fmt.Sprintf("$%d", len(args)+1) + ` OFFSET ` + fmt.Sprintf("$%d", len(args)+2)
 
 	rows, err := db.DB.Query(q, append(args, perPage, offset)...)
 	if err != nil {
@@ -416,7 +416,7 @@ func GetCoordTask(c *gin.Context) {
 		`SELECT id, task_id, event_type, from_status, to_status,
 		        actor_id, actor_name, note, created_at
 		 FROM coordination_events
-		 WHERE task_id = ?
+		 WHERE task_id = $1
 		 ORDER BY created_at ASC, id ASC`, id)
 	if err == nil {
 		defer rows.Close()
@@ -443,7 +443,7 @@ func GetCoordTask(c *gin.Context) {
 	arows, err := db.DB.Query(
 		`SELECT id, event_id, filename, size, mime, uploaded_by, uploaded_at
 		 FROM coordination_attachments
-		 WHERE task_id = ? ORDER BY uploaded_at ASC`, id)
+		 WHERE task_id = $1 ORDER BY uploaded_at ASC`, id)
 	if err == nil {
 		defer arows.Close()
 		for arows.Next() {
@@ -495,7 +495,7 @@ func AssignCoordTask(c *gin.Context) {
 
 	// Look up the name for the timeline
 	var assignName string
-	if err := db.DB.QueryRow("SELECT name FROM users WHERE id = ?", body.AssigneeID).Scan(&assignName); err != nil && err != sql.ErrNoRows {
+	if err := db.DB.QueryRow("SELECT name FROM users WHERE id = $1", body.AssigneeID).Scan(&assignName); err != nil && err != sql.ErrNoRows {
 		log.Printf("[coord] AssignCoordTask(%d) assignee lookup failed: %v", id, err)
 	}
 	if assignName == "" {
@@ -513,8 +513,8 @@ func AssignCoordTask(c *gin.Context) {
 		newStatus = coordStatusInProgress
 		_, err := db.DB.Exec(
 			`UPDATE coordination_tasks
-			 SET assignee_id = ?, status = ?, started_at = ?
-			 WHERE id = ? AND status = ?`,
+			 SET assignee_id = $1, status = $2, started_at = $3
+			 WHERE id = $4 AND status = $5`,
 			body.AssigneeID, newStatus, now, id, t.Status)
 		if err != nil {
 			log.Printf("[coord] AssignCoordTask(%d) update failed: %v", id, err)
@@ -524,7 +524,7 @@ func AssignCoordTask(c *gin.Context) {
 	} else {
 		newStatus = t.Status
 		_, err := db.DB.Exec(
-			`UPDATE coordination_tasks SET assignee_id = ? WHERE id = ?`,
+			`UPDATE coordination_tasks SET assignee_id = $1 WHERE id = $2`,
 			body.AssigneeID, id)
 		if err != nil {
 			log.Printf("[coord] AssignCoordTask(%d) reassign failed: %v", id, err)
@@ -564,8 +564,8 @@ func SubmitCoordTask(c *gin.Context) {
 	now := time.Now().UTC()
 	_, err := db.DB.Exec(
 		`UPDATE coordination_tasks
-		 SET status = ?, submitted_at = ?
-		 WHERE id = ? AND (status = ? OR status = ?)`,
+		 SET status = $1, submitted_at = $2
+		 WHERE id = $3 AND (status = $4 OR status = $5)`,
 		coordStatusUnderReview, now, id, coordStatusInProgress, coordStatusAwaitingAnswer)
 	if err != nil {
 		log.Printf("[coord] SubmitCoordTask(%d) update failed: %v", id, err)
@@ -602,7 +602,7 @@ func VerifyCoordTask(c *gin.Context) {
 	}
 	db.DB.QueryRow(
 		`SELECT COUNT(*) FROM audit_tasks
-		 WHERE site_id = ? AND status = 'done' AND created_at > ?`,
+		 WHERE site_id = $1 AND status = 'done' AND created_at > $2`,
 		t.SiteID, *submittedRef,
 	).Scan(&auditCount)
 	if auditCount == 0 {
@@ -614,8 +614,8 @@ func VerifyCoordTask(c *gin.Context) {
 	now := time.Now().UTC()
 	_, err := db.DB.Exec(
 		`UPDATE coordination_tasks
-		 SET status = ?, verified_at = ?
-		 WHERE id = ? AND status = ?`,
+		 SET status = $1, verified_at = $2
+		 WHERE id = $3 AND status = $4`,
 		coordStatusDone, now, id, coordStatusUnderReview)
 	if err != nil {
 		log.Printf("[coord] VerifyCoordTask(%d) update failed: %v", id, err)
@@ -660,8 +660,8 @@ func AskCoordTask(c *gin.Context) {
 		return
 	}
 	_, err := db.DB.Exec(
-		`UPDATE coordination_tasks SET status = ?
-		 WHERE id = ? AND status = ?`,
+		`UPDATE coordination_tasks SET status = $1
+		 WHERE id = $2 AND status = $3`,
 		coordStatusAwaitingAnswer, id, coordStatusInProgress)
 	if err != nil {
 		log.Printf("[coord] AskCoordTask(%d) update failed: %v", id, err)
@@ -706,8 +706,8 @@ func AnswerCoordTask(c *gin.Context) {
 		return
 	}
 	_, err := db.DB.Exec(
-		`UPDATE coordination_tasks SET status = ?
-		 WHERE id = ? AND status = ?`,
+		`UPDATE coordination_tasks SET status = $1
+		 WHERE id = $2 AND status = $3`,
 		coordStatusInProgress, id, coordStatusAwaitingAnswer)
 	if err != nil {
 		log.Printf("[coord] AnswerCoordTask(%d) update failed: %v", id, err)
@@ -781,10 +781,10 @@ func UpdateCoordTask(c *gin.Context) {
 
 	_, err := db.DB.Exec(
 		`UPDATE coordination_tasks
-		 SET note = COALESCE(NULLIF(?, ''), note),
-		     issue_title = COALESCE(NULLIF(?, ''), issue_title),
-		     issue_snapshot = COALESCE(NULLIF(?, ''), issue_snapshot)
-		 WHERE id = ?`,
+		 SET note = COALESCE(NULLIF($1, ''), note),
+		     issue_title = COALESCE(NULLIF($2, ''), issue_title),
+		     issue_snapshot = COALESCE(NULLIF($3, ''), issue_snapshot)
+		 WHERE id = $4`,
 		req.Note, req.IssueTitle, req.IssueSnapshot, id)
 	if err != nil {
 		log.Printf("[coord] UpdateCoordTask(%d) failed: %v", id, err)
@@ -821,9 +821,9 @@ func DeleteCoordTask(c *gin.Context) {
 		return
 	}
 	for _, q := range []string{
-		"DELETE FROM coordination_attachments WHERE task_id = ?",
-		"DELETE FROM coordination_events WHERE task_id = ?",
-		"DELETE FROM coordination_tasks WHERE id = ?",
+		"DELETE FROM coordination_attachments WHERE task_id = $1",
+		"DELETE FROM coordination_events WHERE task_id = $1",
+		"DELETE FROM coordination_tasks WHERE id = $1",
 	} {
 		if _, err := tx.Exec(q, id); err != nil {
 			_ = tx.Rollback()
@@ -856,13 +856,13 @@ func CoordStats(c *gin.Context) {
 	q := "SELECT status, COUNT(*) FROM coordination_tasks"
 	args := []interface{}{}
 	if siteID != "" {
-		q += " WHERE site_id = ?"
+		q += " WHERE site_id = $1"
 		args = append(args, siteID)
 	} else {
 		role, _ := c.Get("role")
 		if role != "admin" {
 			userID := c.GetInt64("user_id")
-			q += " WHERE site_id IN (SELECT id FROM sites WHERE created_by = ?)"
+			q += " WHERE site_id IN (SELECT id FROM sites WHERE created_by = $1)"
 			args = append(args, userID)
 		}
 	}

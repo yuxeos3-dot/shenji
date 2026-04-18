@@ -345,13 +345,12 @@ func saveOverviewAsSync(gscSiteURL, sd, ed string, overviewRaw json.RawMessage) 
 	}
 	// Match to local site by gsc_site_url or by domain fragment.
 	var siteID int64
-	db.DB.QueryRow("SELECT id FROM sites WHERE gsc_site_url = ? LIMIT 1", gscSiteURL).Scan(&siteID)
+	db.DB.QueryRow("SELECT id FROM sites WHERE gsc_site_url = $1 LIMIT 1", gscSiteURL).Scan(&siteID)
 	if siteID == 0 {
 		return
 	}
 	row := resp.Rows[0]
 	db.DB.Exec(`
-		INSERT OR REPLACE INTO gsc_data (site_id, date, clicks, impressions, ctr, position)
-		VALUES (?, ?, ?, ?, ?, ?)`,
+		INSERT INTO gsc_data (site_id, date, clicks, impressions, ctr, position) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (site_id, date) DO UPDATE SET clicks = EXCLUDED.clicks, impressions = EXCLUDED.impressions, ctr = EXCLUDED.ctr, position = EXCLUDED.position`,
 		siteID, ed, int64(row.Clicks), int64(row.Impressions), row.CTR, row.Position)
 }

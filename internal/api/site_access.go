@@ -17,7 +17,7 @@ func canAccessSite(c *gin.Context, siteID string) bool {
 		return true
 	}
 	var createdBy int64
-	err := db.DB.QueryRow("SELECT created_by FROM sites WHERE id = ?", siteID).Scan(&createdBy)
+	err := db.DB.QueryRow("SELECT created_by FROM sites WHERE id = $1", siteID).Scan(&createdBy)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "站点不存在"})
 		return false

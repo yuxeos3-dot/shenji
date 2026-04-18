@@ -298,12 +298,11 @@ func saveBingOverviewAsSync(siteURL, date string, queriesRaw json.RawMessage) {
 	}
 
 	var siteID int64
-	db.DB.QueryRow("SELECT id FROM sites WHERE bing_site_url = ? LIMIT 1", siteURL).Scan(&siteID)
+	db.DB.QueryRow("SELECT id FROM sites WHERE bing_site_url = $1 LIMIT 1", siteURL).Scan(&siteID)
 	if siteID == 0 {
 		return
 	}
 	db.DB.Exec(`
-		INSERT OR REPLACE INTO bing_data (site_id, date, clicks, impressions, ctr, avg_position)
-		VALUES (?, ?, ?, ?, ?, ?)`,
+		INSERT INTO bing_data (site_id, date, clicks, impressions, ctr, avg_position) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (site_id, date) DO UPDATE SET clicks = EXCLUDED.clicks, impressions = EXCLUDED.impressions, ctr = EXCLUDED.ctr, avg_position = EXCLUDED.avg_position`,
 		siteID, date, int64(clicks), int64(impr), ctr, avgPos)
 }

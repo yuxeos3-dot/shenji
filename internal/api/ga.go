@@ -100,7 +100,7 @@ func SyncGAData(c *gin.Context) {
 		return
 	}
 	var domain string
-	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
+	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = $1", siteID).Scan(&domain)
 	if err != nil || domain == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点不存在或无域名"})
 		return
@@ -246,9 +246,7 @@ func SyncGAData(c *gin.Context) {
 	}
 
 	date := time.Now().Format("2006-01-02")
-	db.DB.Exec(`INSERT OR REPLACE INTO ga_data
-		(site_id, date, sessions, users, pageviews, bounce_rate, avg_duration, channels_json, pages_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	db.DB.Exec(`INSERT INTO ga_data (site_id, date, sessions, users, pageviews, bounce_rate, avg_duration, channels_json, pages_json) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (site_id, date) DO UPDATE SET sessions = EXCLUDED.sessions, users = EXCLUDED.users, pageviews = EXCLUDED.pageviews, bounce_rate = EXCLUDED.bounce_rate, avg_duration = EXCLUDED.avg_duration, channels_json = EXCLUDED.channels_json, pages_json = EXCLUDED.pages_json`,
 		siteID, date, sessions, users, pageviews, bounceRate, avgDuration,
 		toJSON(results["channels"]), toJSON(results["pages"]),
 	)
@@ -261,7 +259,7 @@ func SyncGAData(c *gin.Context) {
 		"countries":       json.RawMessage(toJSON(results["countries"])),
 		"trend":           json.RawMessage(toJSON(results["trend"])),
 	})
-	db.DB.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+	db.DB.Exec("INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
 		fmt.Sprintf("ga_extra_%s", siteID), string(extraJSON))
 	if sid, err := strconv.ParseInt(siteID, 10, 64); err == nil {
 		InvalidateGA(sid)

@@ -70,7 +70,7 @@ func SyncBingData(c *gin.Context) {
 	}
 
 	var domain string
-	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
+	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = $1", siteID).Scan(&domain)
 	if err != nil || domain == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点不存在或无域名"})
 		return
@@ -195,10 +195,8 @@ func SyncBingData(c *gin.Context) {
 	}
 
 	date := time.Now().Format("2006-01-02")
-	db.DB.Exec(`INSERT OR REPLACE INTO bing_data
-		(site_id, date, clicks, impressions, ctr, avg_position, index_count,
-		 queries_json, pages_json, crawl_json, errors_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	db.DB.Exec(`INSERT INTO bing_data (site_id, date, clicks, impressions, ctr, avg_position, index_count,
+		 queries_json, pages_json, crawl_json, errors_json) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT (site_id, date) DO UPDATE SET clicks = EXCLUDED.clicks, impressions = EXCLUDED.impressions, ctr = EXCLUDED.ctr, avg_position = EXCLUDED.avg_position, index_count = EXCLUDED.index_count, queries_json = EXCLUDED.queries_json, pages_json = EXCLUDED.pages_json, crawl_json = EXCLUDED.crawl_json, errors_json = EXCLUDED.errors_json`,
 		siteID, date, totalClicks, totalImpressions, avgCTR, avgPosition, indexCount,
 		toStr(results["queries"]), toStr(results["pages"]),
 		toStr(results["crawl"]), toStr(results["errors"]),

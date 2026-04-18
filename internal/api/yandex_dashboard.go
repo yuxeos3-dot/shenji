@@ -304,7 +304,7 @@ func saveYandexOverviewAsSync(hostID, date string, historyRaw json.RawMessage) {
 		return
 	}
 	var siteID int64
-	db.DB.QueryRow("SELECT id FROM sites WHERE yandex_host_id = ? LIMIT 1", hostID).Scan(&siteID)
+	db.DB.QueryRow("SELECT id FROM sites WHERE yandex_host_id = $1 LIMIT 1", hostID).Scan(&siteID)
 	if siteID == 0 {
 		// Try fuzzy match by host URL fragment.
 		cleanHost := strings.ReplaceAll(hostID, "https:", "")
@@ -314,14 +314,13 @@ func saveYandexOverviewAsSync(hostID, date string, historyRaw json.RawMessage) {
 		if cleanHost == "" {
 			return
 		}
-		db.DB.QueryRow("SELECT id FROM sites WHERE REPLACE(REPLACE(domain, 'https://', ''), 'http://', '') = ? LIMIT 1", cleanHost).Scan(&siteID)
+		db.DB.QueryRow("SELECT id FROM sites WHERE REPLACE(REPLACE(domain, 'https://', ''), 'http://', '') = $1 LIMIT 1", cleanHost).Scan(&siteID)
 		if siteID == 0 {
 			return
 		}
 	}
 	db.DB.Exec(`
-		INSERT OR REPLACE INTO yandex_data (site_id, date, clicks, impressions)
-		VALUES (?, ?, ?, ?)`,
+		INSERT INTO yandex_data (site_id, date, clicks, impressions) VALUES ($1, $2, $3, $4) ON CONFLICT (site_id, date) DO UPDATE SET clicks = EXCLUDED.clicks, impressions = EXCLUDED.impressions`,
 		siteID, date,
 		int64(clicks),
 		int64(shows),

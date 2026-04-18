@@ -77,7 +77,7 @@ func ListCoordTestPages(c *gin.Context) {
 
 	rows, err := db.DB.Query(`
 		SELECT id, task_id, name, url, last_fetched_at, status_code, ttfb_ms, created_at
-		FROM coord_test_pages WHERE task_id = ? ORDER BY created_at ASC`, taskID)
+		FROM coord_test_pages WHERE task_id = $1 ORDER BY created_at ASC`, taskID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
 		return
@@ -131,15 +131,15 @@ func CreateCoordTestPage(c *gin.Context) {
 	}
 
 	uid := c.GetInt64("user_id")
-	res, err := db.DB.Exec(
-		`INSERT INTO coord_test_pages (task_id, name, url, created_by) VALUES (?, ?, ?, ?)`,
-		taskID, req.Name, req.URL, uid)
+	var id int64
+	err := db.DB.QueryRow(
+		`INSERT INTO coord_test_pages (task_id, name, url, created_by) VALUES ($1, $2, $3, $4) RETURNING id`,
+		taskID, req.Name, req.URL, uid).Scan(&id)
 	if err != nil {
 		log.Printf("[coord-preaudit] create page: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存失败"})
 		return
 	}
-	id, _ := res.LastInsertId()
 	WriteAuditLog(c, "coord_test_page_add", "coord_test_page",
 		fmt.Sprintf("%d", id), req.URL)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"id": id}})
@@ -153,7 +153,7 @@ func DeleteCoordTestPage(c *gin.Context) {
 		return
 	}
 	res, err := db.DB.Exec(
-		`DELETE FROM coord_test_pages WHERE id = ? AND task_id = ?`, pageID, taskID)
+		`DELETE FROM coord_test_pages WHERE id = $1 AND task_id = $2`, pageID, taskID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 		return
@@ -178,7 +178,7 @@ func FetchCoordTestPage(c *gin.Context) {
 	}
 	var name, u string
 	err := db.DB.QueryRow(
-		`SELECT name, url FROM coord_test_pages WHERE id = ? AND task_id = ?`,
+		`SELECT name, url FROM coord_test_pages WHERE id = $1 AND task_id = $2`,
 		pageID, taskID).Scan(&name, &u)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "页面不存在"})
@@ -189,8 +189,8 @@ func FetchCoordTestPage(c *gin.Context) {
 	now := time.Now().Format("2006-01-02 15:04:05")
 	_, err = db.DB.Exec(
 		`UPDATE coord_test_pages
-		 SET last_html = ?, last_fetched_at = ?, status_code = ?, ttfb_ms = ?
-		 WHERE id = ?`,
+		 SET last_html = $1, last_fetched_at = $2, status_code = $3, ttfb_ms = $4
+		 WHERE id = $5`,
 		result.HTML, now, result.StatusCode, result.TTFB, pageID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存抓取结果失败"})
@@ -221,7 +221,7 @@ func GetCoordTestPageSource(c *gin.Context) {
 	var lastFetchedAt sql.NullString
 	err := db.DB.QueryRow(
 		`SELECT name, url, COALESCE(last_html, ''), last_fetched_at
-		 FROM coord_test_pages WHERE id = ? AND task_id = ?`,
+		 FROM coord_test_pages WHERE id = $1 AND task_id = $2`,
 		pageID, taskID).Scan(&name, &u, &html, &lastFetchedAt)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "页面不存在"})
@@ -262,7 +262,7 @@ func PreAuditCoordTask(c *gin.Context) {
 	rows, err := db.DB.Query(
 		`SELECT id, name, url, COALESCE(last_html,''), COALESCE(last_fetched_at,''),
 		        COALESCE(status_code,0)
-		 FROM coord_test_pages WHERE task_id = ? ORDER BY created_at ASC`, taskID)
+		 FROM coord_test_pages WHERE task_id = $1 ORDER BY created_at ASC`, taskID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询测试页失败"})
 		return
@@ -333,8 +333,8 @@ func PreAuditCoordTask(c *gin.Context) {
 	now := time.Now().UTC()
 	_, err = db.DB.Exec(
 		`UPDATE coordination_tasks
-		 SET pre_audit_verdict = ?, pre_audit_result = ?, pre_audit_at = ?
-		 WHERE id = ?`,
+		 SET pre_audit_verdict = $1, pre_audit_result = $2, pre_audit_at = $3
+		 WHERE id = $4`,
 		verdict, reasoning, now, taskID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存预审核结果失败"})
@@ -547,8 +547,8 @@ func RejectCoordTask(c *gin.Context) {
 
 	_, err := db.DB.Exec(
 		`UPDATE coordination_tasks
-		 SET status = ?, submitted_at = NULL, pre_audit_verdict = '', pre_audit_result = ''
-		 WHERE id = ? AND status = ?`,
+		 SET status = $1, submitted_at = NULL, pre_audit_verdict = '', pre_audit_result = ''
+		 WHERE id = $2 AND status = $3`,
 		coordStatusInProgress, id, coordStatusUnderReview)
 	if err != nil {
 		log.Printf("[coord] RejectCoordTask(%d) update failed: %v", id, err)

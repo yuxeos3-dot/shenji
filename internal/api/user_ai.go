@@ -85,7 +85,7 @@ func SaveMyAIConfig(c *gin.Context) {
 		}
 	}
 	js, _ := json.Marshal(cfg)
-	if _, err := db.DB.Exec("UPDATE users SET ai_configs=? WHERE id=?", string(js), userID); err != nil {
+	if _, err := db.DB.Exec("UPDATE users SET ai_configs=$1 WHERE id=$2", string(js), userID); err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "保存失败"})
 		return
 	}
@@ -156,7 +156,7 @@ func testAISlot(slot AISlot) error {
 
 func loadUserAIConfig(userID int64) UserAIConfig {
 	var raw string
-	db.DB.QueryRow("SELECT COALESCE(ai_configs,'') FROM users WHERE id=?", userID).Scan(&raw)
+	db.DB.QueryRow("SELECT COALESCE(ai_configs,'') FROM users WHERE id=$1", userID).Scan(&raw)
 	var cfg UserAIConfig
 	if raw != "" {
 		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {

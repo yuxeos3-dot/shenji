@@ -52,7 +52,7 @@ func ServeFRWFile(c *gin.Context) {
 	// Check that the generation record exists in DB.
 	var exists int
 	err := db.DB.QueryRow(
-		"SELECT 1 FROM ai_generations WHERE id = ? AND user_id = ?",
+		"SELECT 1 FROM ai_generations WHERE id = $1 AND user_id = $2",
 		genID, fileOwnerID,
 	).Scan(&exists)
 	if err != nil {

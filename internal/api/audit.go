@@ -32,7 +32,7 @@ func TriggerAudit(c *gin.Context) {
 	// Check site exists
 	var domain, name, urlCat, urlDet, urlNL, urlND, urlSearch, urlStatic string
 	err := db.DB.QueryRow(
-		"SELECT domain, name, url_category, url_detail, url_news_list, url_news_detail, url_search, url_static FROM sites WHERE id = ?",
+		"SELECT domain, name, url_category, url_detail, url_news_list, url_news_detail, url_search, url_static FROM sites WHERE id = $1",
 		siteID,
 	).Scan(&domain, &name, &urlCat, &urlDet, &urlNL, &urlND, &urlSearch, &urlStatic)
 	if err != nil {
@@ -40,20 +40,16 @@ func TriggerAudit(c *gin.Context) {
 		return
 	}
 
-	result, err := db.DB.Exec(
-		"INSERT INTO audit_tasks (site_id, triggered_by, status) VALUES (?, ?, 'running')",
+	var taskID int64
+	err := db.DB.QueryRow(
+		"INSERT INTO audit_tasks (site_id, triggered_by, status) VALUES ($1, $2, 'running') RETURNING id",
 		siteID, userID,
-	)
+	).Scan(&taskID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "创建任务失败"})
 		return
 	}
 
-	taskID, err := result.LastInsertId()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "获取任务 ID 失败"})
-		return
-	}
 
 	// Run audit asynchronously. Pass the triggering user's id so
 	// completion / failure notices go to *their* Telegram bot rather
@@ -82,7 +78,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 					log.Printf("[audit %d] mark-failed panic: %v", taskID, rr)
 				}
 			}()
-			if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
+			if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=$1, finished_at=$2 WHERE id=$3",
 				"internal panic", time.Now(), taskID); err != nil {
 				log.Printf("[audit %d] mark-failed exec 失败: %v", taskID, err)
 			}
@@ -90,7 +86,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	}()
 
 	updateProgress := func(progress int) {
-		if _, err := db.DB.Exec("UPDATE audit_tasks SET progress=? WHERE id=?", progress, taskID); err != nil {
+		if _, err := db.DB.Exec("UPDATE audit_tasks SET progress=$1 WHERE id=$2", progress, taskID); err != nil {
 			log.Printf("[audit %d] update progress failed: %v", taskID, err)
 		}
 	}
@@ -106,7 +102,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	// Save crawled pages
 	for _, p := range crawlPages {
 		if _, err := db.DB.Exec(
-			"INSERT INTO audit_pages (task_id, page_type, url, status_code, ttfb_ms, html, html_size, error_msg) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			"INSERT INTO audit_pages (task_id, page_type, url, status_code, ttfb_ms, html, html_size, error_msg) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
 			taskID, p.PageType, p.URL, p.StatusCode, p.TTFB, p.HTML, p.HTMLSize, p.Error,
 		); err != nil {
 			log.Printf("[audit %d] insert audit_page failed url=%s: %v", taskID, p.URL, err)
@@ -117,7 +113,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	// Step 2: Auto re-fetch all site_pages to ensure fresh HTML
 	log.Printf("[audit %d] 抓取站点监控页面...", taskID)
 	pageRows, err := db.DB.Query(
-		"SELECT id, name, url FROM site_pages WHERE site_id = ?", siteID,
+		"SELECT id, name, url FROM site_pages WHERE site_id = $1", siteID,
 	)
 	if err == nil {
 		defer pageRows.Close()
@@ -137,7 +133,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 		for i, p := range pageList {
 			result := crawler.FetchPage(crawler.URLSpec{PageType: p.name, URL: p.url}, 30*time.Second)
 			now := time.Now().UTC().Format("2006-01-02 15:04:05")
-			if _, err := db.DB.Exec(`UPDATE site_pages SET last_html=?, last_fetched_at=?, status_code=?, ttfb_ms=? WHERE id=?`,
+			if _, err := db.DB.Exec(`UPDATE site_pages SET last_html=$1, last_fetched_at=$2, status_code=$3, ttfb_ms=$4 WHERE id=$5`,
 				result.HTML, now, result.StatusCode, result.TTFB, p.id); err != nil {
 				log.Printf("[audit %d] update site_pages failed: %v", taskID, err)
 			}
@@ -153,7 +149,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	// Step 3: Fetch site_pages (now freshly fetched above)
 	var sitePages []ai.SitePageForPrompt
 	rows, err := db.DB.Query(
-		"SELECT name, url, last_html, last_fetched_at, status_code, ttfb_ms FROM site_pages WHERE site_id = ? AND last_html != ''",
+		"SELECT name, url, last_html, last_fetched_at, status_code, ttfb_ms FROM site_pages WHERE site_id = $1 AND last_html != ''",
 		siteID,
 	)
 	if err == nil {
@@ -180,7 +176,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	var gscCTR, gscPosition float64
 	var gscKeywords, gscPages string
 	if err := db.DB.QueryRow(
-		"SELECT clicks, impressions, ctr, position, keywords_json, pages_json FROM gsc_data WHERE site_id = ? ORDER BY date DESC LIMIT 1",
+		"SELECT clicks, impressions, ctr, position, keywords_json, pages_json FROM gsc_data WHERE site_id = $1 ORDER BY date DESC LIMIT 1",
 		siteID,
 	).Scan(&gscClicks, &gscImpressions, &gscCTR, &gscPosition, &gscKeywords, &gscPages); err == nil {
 		gscData = &ai.GSCDataForPrompt{
@@ -193,7 +189,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	var gaSessions, gaUsers, gaPageviews int
 	var gaChannels string
 	if err := db.DB.QueryRow(
-		"SELECT sessions, users, pageviews, channels_json FROM ga_data WHERE site_id = ? ORDER BY date DESC LIMIT 1",
+		"SELECT sessions, users, pageviews, channels_json FROM ga_data WHERE site_id = $1 ORDER BY date DESC LIMIT 1",
 		siteID,
 	).Scan(&gaSessions, &gaUsers, &gaPageviews, &gaChannels); err == nil {
 		gaData = &ai.GADataForPrompt{
@@ -204,7 +200,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	var yandexIndexCount int
 	var yandexErrors string
 	if err := db.DB.QueryRow(
-		"SELECT index_count, errors_json FROM yandex_data WHERE site_id = ? ORDER BY date DESC LIMIT 1",
+		"SELECT index_count, errors_json FROM yandex_data WHERE site_id = $1 ORDER BY date DESC LIMIT 1",
 		siteID,
 	).Scan(&yandexIndexCount, &yandexErrors); err == nil {
 		yandexData = &ai.YandexDataForPrompt{IndexCount: yandexIndexCount, Errors: yandexErrors}
@@ -245,10 +241,10 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 		}
 		db.DB.Exec(
 			`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, v6_report, raw_ai_response)
-			 VALUES (?, '[]', '[]', '[]', '[]', '', '', ?, '', ?)`,
+			 VALUES ($1, '[]', '[]', '[]', '[]', '', '', $2, '', $3)`,
 			taskID, lastModel, rawSnippet,
 		)
-		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
+		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=$1, finished_at=$2 WHERE id=$3",
 			"所有技术审计批次均失败", time.Now(), taskID)
 		log.Printf("[audit %d] 所有技术审计批次均失败", taskID)
 		NotifyUser(ownerUserID, "审计失败", siteName+" 审计失败：AI 调用异常")
@@ -292,23 +288,23 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	tx, txErr := db.DB.Begin()
 	if txErr != nil {
 		log.Printf("[audit %d] begin tx failed: %v", taskID, txErr)
-		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
+		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=$1, finished_at=$2 WHERE id=$3",
 			"数据库写入失败: "+txErr.Error(), time.Now(), taskID)
 		return
 	}
 	if _, err := tx.Exec(
 		`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, v6_report)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		taskID, string(seoJSON), string(codeJSON), string(secJSON), string(perfJSON),
 		analysisResult.Suggestions, analysisResult.Summary, model, analysisResult.V6Report,
 	); err != nil {
 		tx.Rollback()
 		log.Printf("[audit %d] insert audit_results failed: %v", taskID, err)
-		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
+		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=$1, finished_at=$2 WHERE id=$3",
 			"审计结果写入失败: "+err.Error(), time.Now(), taskID)
 		return
 	}
-	if _, err := tx.Exec("UPDATE audit_tasks SET status='done', progress=100, finished_at=? WHERE id=?", time.Now(), taskID); err != nil {
+	if _, err := tx.Exec("UPDATE audit_tasks SET status='done', progress=100, finished_at=$1 WHERE id=$2", time.Now(), taskID); err != nil {
 		tx.Rollback()
 		log.Printf("[audit %d] update audit_tasks failed: %v", taskID, err)
 		return
@@ -335,7 +331,7 @@ func DeleteAudit(c *gin.Context) {
 
 	var status string
 	var deleteSiteID int64
-	if err := tx.QueryRow("SELECT site_id, status FROM audit_tasks WHERE id = ?", taskID).Scan(&deleteSiteID, &status); err != nil {
+	if err := tx.QueryRow("SELECT site_id, status FROM audit_tasks WHERE id = $1", taskID).Scan(&deleteSiteID, &status); err != nil {
 		_ = tx.Rollback()
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "任务不存在"})
 		return
@@ -351,9 +347,9 @@ func DeleteAudit(c *gin.Context) {
 	}
 
 	for _, q := range []string{
-		"DELETE FROM audit_results WHERE task_id = ?",
-		"DELETE FROM audit_pages   WHERE task_id = ?",
-		"DELETE FROM audit_tasks   WHERE id = ?",
+		"DELETE FROM audit_results WHERE task_id = $1",
+		"DELETE FROM audit_pages   WHERE task_id = $1",
+		"DELETE FROM audit_tasks   WHERE id = $1",
 	} {
 		if _, err := tx.Exec(q, taskID); err != nil {
 			_ = tx.Rollback()
@@ -378,10 +374,10 @@ func ListAudits(c *gin.Context) {
 	offset := (page - 1) * perPage
 
 	var total int
-	db.DB.QueryRow("SELECT COUNT(*) FROM audit_tasks WHERE site_id = ?", siteID).Scan(&total)
+	db.DB.QueryRow("SELECT COUNT(*) FROM audit_tasks WHERE site_id = $1", siteID).Scan(&total)
 
 	rows, err := db.DB.Query(
-		"SELECT id, site_id, triggered_by, status, progress, error_msg, created_at, finished_at FROM audit_tasks WHERE site_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+		"SELECT id, site_id, triggered_by, status, progress, error_msg, created_at, finished_at FROM audit_tasks WHERE site_id = $1 ORDER BY id DESC LIMIT $2 OFFSET $3",
 		siteID, perPage, offset,
 	)
 	if err != nil {
@@ -432,7 +428,7 @@ func GetAudit(c *gin.Context) {
 	var errorMsg, createdAt string
 	var finishedAt *string
 	err := db.DB.QueryRow(
-		"SELECT id, site_id, triggered_by, status, progress, error_msg, created_at, finished_at FROM audit_tasks WHERE id = ?",
+		"SELECT id, site_id, triggered_by, status, progress, error_msg, created_at, finished_at FROM audit_tasks WHERE id = $1",
 		taskID,
 	).Scan(&id, &siteID, &triggeredBy, &status, &progress, &errorMsg, &createdAt, &finishedAt)
 	if err != nil {
@@ -457,7 +453,7 @@ func GetAudit(c *gin.Context) {
 	// Get results if exists
 	var seoIssues, codeIssues, secIssues, perfIssues, suggestions, summary, aiModel, v6Report, rawAI string
 	err = db.DB.QueryRow(
-		"SELECT seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, COALESCE(v6_report,''), COALESCE(raw_ai_response,'') FROM audit_results WHERE task_id = ?",
+		"SELECT seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, COALESCE(v6_report,''), COALESCE(raw_ai_response,'') FROM audit_results WHERE task_id = $1",
 		taskID,
 	).Scan(&seoIssues, &codeIssues, &secIssues, &perfIssues, &suggestions, &summary, &aiModel, &v6Report, &rawAI)
 
@@ -488,7 +484,7 @@ func GetAudit(c *gin.Context) {
 func GetAuditPages(c *gin.Context) {
 	taskID := c.Param("task_id")
 	var auditSiteID int64
-	if err := db.DB.QueryRow("SELECT site_id FROM audit_tasks WHERE id = ?", taskID).Scan(&auditSiteID); err != nil {
+	if err := db.DB.QueryRow("SELECT site_id FROM audit_tasks WHERE id = $1", taskID).Scan(&auditSiteID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "任务不存在"})
 		return
 	}
@@ -496,7 +492,7 @@ func GetAuditPages(c *gin.Context) {
 		return
 	}
 	rows, err := db.DB.Query(
-		"SELECT id, page_type, url, status_code, ttfb_ms, html, html_size, error_msg, fetched_at FROM audit_pages WHERE task_id = ?",
+		"SELECT id, page_type, url, status_code, ttfb_ms, html, html_size, error_msg, fetched_at FROM audit_pages WHERE task_id = $1",
 		taskID,
 	)
 	if err != nil {
@@ -535,7 +531,7 @@ func GetAuditPageByType(c *gin.Context) {
 	taskID := c.Param("task_id")
 	pageType := c.Param("type")
 	var auditSiteID int64
-	if err := db.DB.QueryRow("SELECT site_id FROM audit_tasks WHERE id = ?", taskID).Scan(&auditSiteID); err != nil {
+	if err := db.DB.QueryRow("SELECT site_id FROM audit_tasks WHERE id = $1", taskID).Scan(&auditSiteID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "任务不存在"})
 		return
 	}
@@ -547,7 +543,7 @@ func GetAuditPageByType(c *gin.Context) {
 	var pt, url, html, errorMsg, fetchedAt string
 	var statusCode, ttfb, htmlSize int
 	err := db.DB.QueryRow(
-		"SELECT id, page_type, url, status_code, ttfb_ms, html, html_size, error_msg, fetched_at FROM audit_pages WHERE task_id = ? AND page_type = ?",
+		"SELECT id, page_type, url, status_code, ttfb_ms, html, html_size, error_msg, fetched_at FROM audit_pages WHERE task_id = $1 AND page_type = $2",
 		taskID, pageType,
 	).Scan(&id, &pt, &url, &statusCode, &ttfb, &html, &htmlSize, &errorMsg, &fetchedAt)
 	if err != nil {

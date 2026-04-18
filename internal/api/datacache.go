@@ -117,7 +117,7 @@ func listAllSiteIDs() ([]int64, error) {
 func loadGSCRows(siteID int64) []gin.H {
 	rows, err := db.DB.Query(
 		`SELECT date, clicks, impressions, ctr, position, keywords_json, pages_json, devices_json, countries_json
-		 FROM gsc_data WHERE site_id = ? ORDER BY date DESC LIMIT 30`,
+		 FROM gsc_data WHERE site_id = $1 ORDER BY date DESC LIMIT 30`,
 		siteID,
 	)
 	if err != nil {
@@ -150,7 +150,7 @@ func loadGSCRows(siteID int64) []gin.H {
 func loadGARowsWithExtra(siteID int64) ([]gin.H, json.RawMessage) {
 	rows, err := db.DB.Query(
 		`SELECT date, sessions, users, pageviews, bounce_rate, avg_duration, channels_json, pages_json
-		 FROM ga_data WHERE site_id = ? ORDER BY date DESC LIMIT 30`,
+		 FROM ga_data WHERE site_id = $1 ORDER BY date DESC LIMIT 30`,
 		siteID,
 	)
 	if err != nil {
@@ -176,7 +176,7 @@ func loadGARowsWithExtra(siteID int64) ([]gin.H, json.RawMessage) {
 		out = []gin.H{}
 	}
 	var extraStr string
-	db.DB.QueryRow("SELECT value FROM settings WHERE key = ?", "ga_extra_"+strconv.FormatInt(siteID, 10)).Scan(&extraStr)
+	db.DB.QueryRow("SELECT value FROM settings WHERE key = $1", "ga_extra_"+strconv.FormatInt(siteID, 10)).Scan(&extraStr)
 	var extra json.RawMessage
 	if extraStr != "" {
 		extra = json.RawMessage(extraStr)
@@ -188,7 +188,7 @@ func loadBingRows(siteID int64) []gin.H {
 	rows, err := db.DB.Query(
 		`SELECT date, clicks, impressions, ctr, avg_position, index_count,
 		        queries_json, pages_json, crawl_json, errors_json
-		 FROM bing_data WHERE site_id = ? ORDER BY date DESC LIMIT 30`,
+		 FROM bing_data WHERE site_id = $1 ORDER BY date DESC LIMIT 30`,
 		siteID,
 	)
 	if err != nil {
@@ -221,7 +221,7 @@ func loadBingRows(siteID int64) []gin.H {
 func loadYandexRows(siteID int64) []gin.H {
 	rows, err := db.DB.Query(
 		`SELECT date, clicks, impressions, index_count, keywords_json, errors_json
-		 FROM yandex_data WHERE site_id = ? ORDER BY date DESC LIMIT 30`,
+		 FROM yandex_data WHERE site_id = $1 ORDER BY date DESC LIMIT 30`,
 		siteID,
 	)
 	if err != nil {

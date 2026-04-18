@@ -80,7 +80,7 @@ func loadWeeklyReport(id int64) (*weeklyReportRow, error) {
 		LEFT JOIN users u ON u.id = w.user_id
 		LEFT JOIN departments d ON d.id = u.department_id
 		LEFT JOIN dept_groups g ON g.id = u.group_id
-		WHERE w.id = ?`, id,
+		WHERE w.id = $1`, id,
 	).Scan(&r.ID, &r.UserID, &r.UserName, &r.DepartmentName, &r.GroupName,
 		&r.WeekStart, &r.WeekEnd, &r.Content, &r.SourceDailyIDs,
 		&r.Status, &submittedAt, &r.CreatedAt, &r.UpdatedAt)
@@ -133,7 +133,7 @@ func ListWeeklyReports(c *gin.Context) {
 		LEFT JOIN users u ON u.id = w.user_id
 		LEFT JOIN departments d ON d.id = u.department_id
 		LEFT JOIN dept_groups g ON g.id = u.group_id
-		WHERE w.user_id = ?
+		WHERE w.user_id = $1
 		ORDER BY w.week_start DESC, w.id DESC`, target)
 	if err != nil {
 		log.Printf("[weekly] list: %v", err)
@@ -174,15 +174,15 @@ func AdminListAllWeeklyReports(c *gin.Context) {
 	where := []string{"1=1"}
 	args := []interface{}{}
 	if v := c.Query("department_id"); v != "" {
-		where = append(where, "u.department_id = ?")
+		where = append(where, fmt.Sprintf("u.department_id = $%d", len(args)+1))
 		args = append(args, v)
 	}
 	if v := c.Query("group_id"); v != "" {
-		where = append(where, "u.group_id = ?")
+		where = append(where, fmt.Sprintf("u.group_id = $%d", len(args)+1))
 		args = append(args, v)
 	}
 	if v := c.Query("week_start"); v != "" {
-		where = append(where, "w.week_start = ?")
+		where = append(where, fmt.Sprintf("w.week_start = $%d", len(args)+1))
 		args = append(args, v)
 	}
 
@@ -266,7 +266,7 @@ func GenerateWeeklyReport(c *gin.Context) {
 	// overwriting what the user polished before.
 	var existingID int64
 	db.DB.QueryRow(
-		`SELECT id FROM weekly_reports WHERE user_id = ? AND week_start = ? AND week_end = ?`,
+		`SELECT id FROM weekly_reports WHERE user_id = $1 AND week_start = $2 AND week_end = $3`,
 		uid, req.WeekStart, req.WeekEnd,
 	).Scan(&existingID)
 	if existingID > 0 {
@@ -281,7 +281,7 @@ func GenerateWeeklyReport(c *gin.Context) {
 	// Pull the caller's dailies in range.
 	rows, err := db.DB.Query(
 		`SELECT id, report_date, content FROM daily_reports
-		 WHERE user_id = ? AND report_date BETWEEN ? AND ?
+		 WHERE user_id = $1 AND report_date BETWEEN $2 AND $3
 		 ORDER BY report_date ASC`,
 		uid, req.WeekStart, req.WeekEnd,
 	)
@@ -335,18 +335,18 @@ func GenerateWeeklyReport(c *gin.Context) {
 		summary = "> ⚠️ AI 润色未能运行，以下是本周日汇报的原始拼接，请手动整理后提交。\n\n" + concat.String()
 	}
 
-	res, err := db.DB.Exec(
+	var id int64
+	err := db.DB.QueryRow(
 		`INSERT INTO weekly_reports
 		 (user_id, week_start, week_end, content, source_daily_ids, status)
-		 VALUES (?, ?, ?, ?, ?, 'draft')`,
+		 VALUES ($1, $2, $3, $4, $5, 'draft') RETURNING id`,
 		uid, req.WeekStart, req.WeekEnd, summary, string(srcJSON),
-	)
+	).Scan(&id)
 	if err != nil {
 		log.Printf("[weekly] insert: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存失败"})
 		return
 	}
-	id, _ := res.LastInsertId()
 	WriteAuditLog(c, "weekly_generate", "weekly_report", fmt.Sprintf("%d", id),
 		fmt.Sprintf("%s ~ %s (%d 篇日汇报)", req.WeekStart, req.WeekEnd, len(pieces)))
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"id": id}})
@@ -472,7 +472,7 @@ func GetWeeklyReport(c *gin.Context) {
 
 // UpdateWeeklyReportRequest is partial — only content is editable.
 // Date range is fixed at creation time to avoid weird edge cases
-// (what about the dailies that no longer fall in the new range?).
+// (what about the dailies that no longer fall in the new range$1).
 type UpdateWeeklyReportRequest struct {
 	Content string `json:"content"`
 }
@@ -506,7 +506,7 @@ func UpdateWeeklyReport(c *gin.Context) {
 	}
 
 	_, err = db.DB.Exec(
-		`UPDATE weekly_reports SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		`UPDATE weekly_reports SET content = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
 		req.Content, id,
 	)
 	if err != nil {
@@ -547,7 +547,7 @@ func SubmitWeeklyReport(c *gin.Context) {
 
 	_, err = db.DB.Exec(
 		`UPDATE weekly_reports SET status = 'submitted', submitted_at = CURRENT_TIMESTAMP,
-		 updated_at = CURRENT_TIMESTAMP WHERE id = ?`, id,
+		 updated_at = CURRENT_TIMESTAMP WHERE id = $1`, id,
 	)
 	if err != nil {
 		log.Printf("[weekly] submit: %v", err)
@@ -622,7 +622,7 @@ func DeleteWeeklyReport(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "已提交的周汇报不可删除"})
 		return
 	}
-	if _, err := db.DB.Exec(`DELETE FROM weekly_reports WHERE id = ?`, id); err != nil {
+	if _, err := db.DB.Exec(`DELETE FROM weekly_reports WHERE id = $1`, id); err != nil {
 		log.Printf("[weekly] delete: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 		return

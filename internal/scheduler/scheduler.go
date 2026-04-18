@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -61,7 +62,7 @@ func reapZombieTasks() {
 		 SET status='timeout',
 		     error_msg='任务超时（超过30分钟未完成，自动标记超时）',
 		     finished_at=CURRENT_TIMESTAMP
-		 WHERE status='running' AND created_at < ?`, cutoff,
+		 WHERE status='running' AND created_at < $1`, cutoff,
 	)
 	if err != nil {
 		log.Printf("zombie task cleanup failed: %v", err)
@@ -119,7 +120,7 @@ func cleanupOldAuditHTML() {
 		placeholders := make([]string, len(chunk))
 		args := make([]interface{}, len(chunk))
 		for j, id := range chunk {
-			placeholders[j] = "?"
+			placeholders[j] = fmt.Sprintf("$%d", j+1)
 			args[j] = id
 		}
 		query := "UPDATE audit_pages SET html = '' WHERE id IN (" + strings.Join(placeholders, ",") + ")"
@@ -193,7 +194,7 @@ func runPerSiteIntervalCheck() {
 				// Check not already run today
 				var lastTime *string
 				db.DB.QueryRow(
-					"SELECT created_at FROM audit_tasks WHERE site_id=? ORDER BY id DESC LIMIT 1", s.ID,
+					"SELECT created_at FROM audit_tasks WHERE site_id=$1 ORDER BY id DESC LIMIT 1", s.ID,
 				).Scan(&lastTime)
 				if lastTime != nil {
 					t, err := time.Parse("2006-01-02T15:04:05Z", *lastTime)
@@ -217,7 +218,7 @@ func runPerSiteIntervalCheck() {
 		if s.IntervalHours > 0 {
 			var lastTime *string
 			db.DB.QueryRow(
-				"SELECT created_at FROM audit_tasks WHERE site_id=? ORDER BY id DESC LIMIT 1", s.ID,
+				"SELECT created_at FROM audit_tasks WHERE site_id=$1 ORDER BY id DESC LIMIT 1", s.ID,
 			).Scan(&lastTime)
 			shouldRun := false
 			if lastTime == nil {
@@ -336,7 +337,7 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 					log.Printf("站点 %d mark-failed panic: %v", siteID, rr)
 				}
 			}()
-			if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg='internal panic', finished_at=? WHERE site_id=? AND status='running'", time.Now(), siteID); err != nil {
+			if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg='internal panic', finished_at=$1 WHERE site_id=$2 AND status='running'", time.Now(), siteID); err != nil {
 				log.Printf("站点 %d mark-failed exec 失败: %v", siteID, err)
 			}
 		}
@@ -346,7 +347,7 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	// the per-user model every user has their own Telegram bot; scheduled
 	// audits fire off the creator's bot rather than a shared one.
 	var ownerUserID int64
-	db.DB.QueryRow("SELECT COALESCE(created_by,0) FROM sites WHERE id = ?", siteID).Scan(&ownerUserID)
+	db.DB.QueryRow("SELECT COALESCE(created_by,0) FROM sites WHERE id = $1", siteID).Scan(&ownerUserID)
 
 	// Resolve the site owner's personal AI config for the audit.
 	aiURL, aiKey, aiModel := ai.ResolveUserAI(ownerUserID)
@@ -355,21 +356,17 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		return
 	}
 
-	result, err := db.DB.Exec(
-		"INSERT INTO audit_tasks (site_id, triggered_by, status, progress) VALUES (?, 0, 'running', 10)", siteID,
-	)
+	var taskID int64
+	err := db.DB.QueryRow(
+		"INSERT INTO audit_tasks (site_id, triggered_by, status, progress) VALUES ($1, 0, 'running', 10) RETURNING id", siteID,
+	).Scan(&taskID)
 	if err != nil {
 		log.Printf("创建巡检任务失败 站点%d: %v", siteID, err)
 		return
 	}
-	taskID, err := result.LastInsertId()
-	if err != nil {
-		log.Printf("创建巡检任务 LastInsertId 失败 站点%d: %v", siteID, err)
-		return
-	}
 
 	updateProgress := func(progress int) {
-		if _, err := db.DB.Exec("UPDATE audit_tasks SET progress=? WHERE id=?", progress, taskID); err != nil {
+		if _, err := db.DB.Exec("UPDATE audit_tasks SET progress=$1 WHERE id=$2", progress, taskID); err != nil {
 			log.Printf("[audit %d] update progress failed: %v", taskID, err)
 		}
 	}
@@ -378,7 +375,7 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	pages := crawler.CrawlAllPages(config)
 	for _, p := range pages {
 		if _, err := db.DB.Exec(
-			"INSERT INTO audit_pages (task_id, page_type, url, status_code, ttfb_ms, html, html_size, error_msg) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			"INSERT INTO audit_pages (task_id, page_type, url, status_code, ttfb_ms, html, html_size, error_msg) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
 			taskID, p.PageType, p.URL, p.StatusCode, p.TTFB, p.HTML, p.HTMLSize, p.Error,
 		); err != nil {
 			log.Printf("[audit %d] insert audit_page failed: %v", taskID, err)
@@ -388,7 +385,7 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 
 	// Step 2: re-fetch monitored site_pages so AI uses fresh HTML
 	var sitePages []ai.SitePageForPrompt
-	pageRows, err := db.DB.Query("SELECT id, name, url FROM site_pages WHERE site_id = ?", siteID)
+	pageRows, err := db.DB.Query("SELECT id, name, url FROM site_pages WHERE site_id = $1", siteID)
 	if err == nil {
 		defer pageRows.Close()
 		type pageInfo struct {
@@ -406,7 +403,7 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		for _, p := range pageList {
 			fp := crawler.FetchPage(crawler.URLSpec{PageType: p.name, URL: p.url}, 30*time.Second)
 			now := time.Now().UTC().Format("2006-01-02 15:04:05")
-			if _, err := db.DB.Exec(`UPDATE site_pages SET last_html=?, last_fetched_at=?, status_code=?, ttfb_ms=? WHERE id=?`,
+			if _, err := db.DB.Exec(`UPDATE site_pages SET last_html=$1, last_fetched_at=$2, status_code=$3, ttfb_ms=$4 WHERE id=$5`,
 				fp.HTML, now, fp.StatusCode, fp.TTFB, p.id); err != nil {
 				log.Printf("[audit %d] update site_pages id=%d failed: %v", taskID, p.id, err)
 			}
@@ -427,7 +424,7 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		var ctr, position float64
 		var kwJSON, pgJSON string
 		if err := db.DB.QueryRow(
-			"SELECT clicks, impressions, ctr, position, keywords_json, pages_json FROM gsc_data WHERE site_id = ? ORDER BY date DESC LIMIT 1",
+			"SELECT clicks, impressions, ctr, position, keywords_json, pages_json FROM gsc_data WHERE site_id = $1 ORDER BY date DESC LIMIT 1",
 			siteID,
 		).Scan(&clicks, &impressions, &ctr, &position, &kwJSON, &pgJSON); err == nil {
 			gscData = &ai.GSCDataForPrompt{Clicks: clicks, Impressions: impressions, CTR: ctr, Position: position, Keywords: kwJSON, Pages: pgJSON}
@@ -437,7 +434,7 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		var sessions, users, pv int
 		var channels string
 		if err := db.DB.QueryRow(
-			"SELECT sessions, users, pageviews, channels_json FROM ga_data WHERE site_id = ? ORDER BY date DESC LIMIT 1",
+			"SELECT sessions, users, pageviews, channels_json FROM ga_data WHERE site_id = $1 ORDER BY date DESC LIMIT 1",
 			siteID,
 		).Scan(&sessions, &users, &pv, &channels); err == nil {
 			gaData = &ai.GADataForPrompt{Sessions: sessions, Users: users, Pageviews: pv, Channels: channels}
@@ -447,7 +444,7 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		var idx int
 		var errs string
 		if err := db.DB.QueryRow(
-			"SELECT index_count, errors_json FROM yandex_data WHERE site_id = ? ORDER BY date DESC LIMIT 1",
+			"SELECT index_count, errors_json FROM yandex_data WHERE site_id = $1 ORDER BY date DESC LIMIT 1",
 			siteID,
 		).Scan(&idx, &errs); err == nil {
 			yandexData = &ai.YandexDataForPrompt{IndexCount: idx, Errors: errs}
@@ -483,12 +480,12 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		}
 		if _, err := db.DB.Exec(
 			`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, v6_report, raw_ai_response)
-			 VALUES (?, '[]', '[]', '[]', '[]', '', '', ?, '', ?)`,
+			 VALUES ($1, '[]', '[]', '[]', '[]', '', '', $2, '', $3)`,
 			taskID, lastModel, snippet,
 		); err != nil {
 			log.Printf("[audit %d] scheduler insert empty results failed: %v", taskID, err)
 		}
-		if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg='所有技术审计批次均失败', finished_at=? WHERE id=?",
+		if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg='所有技术审计批次均失败', finished_at=$1 WHERE id=$2",
 			time.Now(), taskID); err != nil {
 			log.Printf("[audit %d] scheduler mark-failed failed: %v", taskID, err)
 		}
@@ -527,13 +524,13 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	tx, txErr := db.DB.Begin()
 	if txErr != nil {
 		log.Printf("[audit %d] scheduler begin tx failed: %v", taskID, txErr)
-		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
+		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=$1, finished_at=$2 WHERE id=$3",
 			"数据库写入失败: "+txErr.Error(), time.Now(), taskID)
 		return
 	}
 	if _, err := tx.Exec(
 		`INSERT INTO audit_results (task_id, seo_issues, code_issues, security_issues, perf_issues, suggestions, summary, ai_model, v6_report)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		taskID, string(seoJSON), string(codeJSON), string(secJSON), string(perfJSON),
 		analysisResult.Suggestions, analysisResult.Summary, lastModel, analysisResult.V6Report,
 	); err != nil {
@@ -541,13 +538,13 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 			log.Printf("[audit %d] scheduler rollback failed: %v", taskID, rbErr)
 		}
 		log.Printf("[audit %d] scheduler insert results failed: %v", taskID, err)
-		if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=?, finished_at=? WHERE id=?",
+		if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=$1, finished_at=$2 WHERE id=$3",
 			"写入失败: "+err.Error(), time.Now(), taskID); err != nil {
 			log.Printf("[audit %d] scheduler mark-failed failed: %v", taskID, err)
 		}
 		return
 	}
-	if _, err := tx.Exec("UPDATE audit_tasks SET status='done', progress=100, finished_at=? WHERE id=?", time.Now(), taskID); err != nil {
+	if _, err := tx.Exec("UPDATE audit_tasks SET status='done', progress=100, finished_at=$1 WHERE id=$2", time.Now(), taskID); err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil {
 			log.Printf("[audit %d] scheduler rollback failed: %v", taskID, rbErr)
 		}

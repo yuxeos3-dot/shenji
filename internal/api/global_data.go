@@ -11,6 +11,7 @@ package api
 // have 50 properties in their GSC account — all 50 show up here.
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -208,7 +209,7 @@ func listUsersWithPlatformBinding(platform, filterUserID string) []struct {
 	}
 	args := []interface{}{}
 	if filterUserID != "" {
-		q += " AND u.id = ?"
+		q += fmt.Sprintf(" AND u.id = $%d", len(args)+1)
 		args = append(args, filterUserID)
 	}
 	q += " ORDER BY u.name ASC"

@@ -36,11 +36,11 @@ func ListReports(c *gin.Context) {
 
 	if !isAdmin {
 		// Non-admin: force filter to own reports only
-		query += " AND r.user_id = ?"
+		query += fmt.Sprintf(" AND r.user_id = $%d", len(args)+1)
 		args = append(args, currentUserID)
 	} else if userIDFilter != "" {
 		// Admin filtered by specific user
-		query += " AND r.user_id = ?"
+		query += fmt.Sprintf(" AND r.user_id = $%d", len(args)+1)
 		args = append(args, userIDFilter)
 	}
 
@@ -50,7 +50,7 @@ func ListReports(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "日期格式需为 YYYY-MM-DD"})
 			return
 		}
-		query += " AND r.report_date = ?"
+		query += fmt.Sprintf(" AND r.report_date = $%d", len(args)+1)
 		args = append(args, normalized)
 	}
 
@@ -62,7 +62,7 @@ func ListReports(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "start 日期格式需为 YYYY-MM-DD"})
 			return
 		}
-		query += " AND r.report_date >= ?"
+		query += fmt.Sprintf(" AND r.report_date >= $%d", len(args)+1)
 		args = append(args, start)
 	}
 	if end := c.Query("end"); end != "" {
@@ -70,7 +70,7 @@ func ListReports(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "end 日期格式需为 YYYY-MM-DD"})
 			return
 		}
-		query += " AND r.report_date <= ?"
+		query += fmt.Sprintf(" AND r.report_date <= $%d", len(args)+1)
 		args = append(args, end)
 	}
 
@@ -118,7 +118,7 @@ func SubmitReport(c *gin.Context) {
 
 	_, err := db.DB.Exec(
 		`INSERT INTO daily_reports (user_id, report_date, content, tasks_done, tasks_todo, issues, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		 VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
 		 ON CONFLICT(user_id, report_date) DO UPDATE SET
 		 content=excluded.content, tasks_done=excluded.tasks_done, tasks_todo=excluded.tasks_todo,
 		 issues=excluded.issues, updated_at=CURRENT_TIMESTAMP`,
@@ -134,7 +134,7 @@ func SubmitReport(c *gin.Context) {
 	// off the shared bot, which leaked every user's activity to whoever
 	// happened to own the global bot.)
 	var userName string
-	db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName)
+	db.DB.QueryRow("SELECT name FROM users WHERE id = $1", userID).Scan(&userName)
 	NotifyUser(userID, "每日汇报已提交", userName+" 提交了 "+reportDate+" 的工作汇报")
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "汇报提交成功"})
@@ -152,7 +152,7 @@ func GetReportByDate(c *gin.Context) {
 	var id int64
 	var content, tasksDone, tasksTodo, issues, createdAt string
 	err = db.DB.QueryRow(
-		"SELECT id, content, tasks_done, tasks_todo, issues, created_at FROM daily_reports WHERE user_id = ? AND report_date = ?",
+		"SELECT id, content, tasks_done, tasks_todo, issues, created_at FROM daily_reports WHERE user_id = $1 AND report_date = $2",
 		userID, date,
 	).Scan(&id, &content, &tasksDone, &tasksTodo, &issues, &createdAt)
 	if err != nil {
@@ -401,7 +401,7 @@ func ExportReports(c *gin.Context) {
 	rows, err := db.DB.Query(
 		`SELECT r.report_date, u.name, r.content, r.tasks_done, r.tasks_todo, r.issues
 		 FROM daily_reports r JOIN users u ON r.user_id = u.id
-		 WHERE r.report_date BETWEEN ? AND ? ORDER BY r.report_date, u.name`,
+		 WHERE r.report_date BETWEEN $1 AND $2 ORDER BY r.report_date, u.name`,
 		startDate, endDate,
 	)
 	if err != nil {

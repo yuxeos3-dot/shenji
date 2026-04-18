@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"encoding/xml"
 	"io"
 	"log"
@@ -100,7 +101,7 @@ func GetDeadLinks(c *gin.Context) {
 
 	// Filter
 	statusFilter := c.Query("status_filter") // dead / redirect / ok / all
-	where := "site_id = ?"
+	where := fmt.Sprintf("site_id = $%d", len(args)+1)
 	args := []interface{}{siteID}
 	switch statusFilter {
 	case "dead":
@@ -116,7 +117,7 @@ func GetDeadLinks(c *gin.Context) {
 
 	queryArgs := append(args, perPage, offset)
 	rows, err := db.DB.Query(
-		"SELECT id, url, source_page, status_code, ttfb_ms, checked_at FROM dead_link_results WHERE "+where+" ORDER BY status_code ASC, id DESC LIMIT ? OFFSET ?",
+		"SELECT id, url, source_page, status_code, ttfb_ms, checked_at FROM dead_link_results WHERE "+where+fmt.Sprintf(" ORDER BY status_code ASC, id DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2),
 		queryArgs...)
 	if err != nil {
 		c.JSON(200, gin.H{"code": 0, "data": gin.H{"items": []gin.H{}, "total": 0}})
@@ -142,10 +143,10 @@ func GetDeadLinks(c *gin.Context) {
 
 	// Also return summary counts so frontend doesn't need a second query.
 	var totalAll, totalDead, totalRedirect, totalOk int
-	db.DB.QueryRow("SELECT COUNT(*) FROM dead_link_results WHERE site_id=?", siteID).Scan(&totalAll)
-	db.DB.QueryRow("SELECT COUNT(*) FROM dead_link_results WHERE site_id=? AND (status_code>=400 OR status_code<=0)", siteID).Scan(&totalDead)
-	db.DB.QueryRow("SELECT COUNT(*) FROM dead_link_results WHERE site_id=? AND status_code>=300 AND status_code<400", siteID).Scan(&totalRedirect)
-	db.DB.QueryRow("SELECT COUNT(*) FROM dead_link_results WHERE site_id=? AND status_code>=200 AND status_code<300", siteID).Scan(&totalOk)
+	db.DB.QueryRow("SELECT COUNT(*) FROM dead_link_results WHERE site_id=$1", siteID).Scan(&totalAll)
+	db.DB.QueryRow("SELECT COUNT(*) FROM dead_link_results WHERE site_id=$1 AND (status_code>=400 OR status_code<=0)", siteID).Scan(&totalDead)
+	db.DB.QueryRow("SELECT COUNT(*) FROM dead_link_results WHERE site_id=$1 AND status_code>=300 AND status_code<400", siteID).Scan(&totalRedirect)
+	db.DB.QueryRow("SELECT COUNT(*) FROM dead_link_results WHERE site_id=$1 AND status_code>=200 AND status_code<300", siteID).Scan(&totalOk)
 
 	c.JSON(200, gin.H{"code": 0, "data": gin.H{
 		"items": results, "total": total, "page": page, "per_page": perPage,
@@ -177,7 +178,7 @@ func RetryDeadLinks(c *gin.Context) {
 
 	// Get all dead links for this site
 	rows, err := db.DB.Query(
-		"SELECT id, url FROM dead_link_results WHERE site_id=? AND (status_code>=400 OR status_code<=0)",
+		"SELECT id, url FROM dead_link_results WHERE site_id=$1 AND (status_code>=400 OR status_code<=0)",
 		siteID)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "查询失败"})
@@ -246,7 +247,7 @@ func RetryDeadLinks(c *gin.Context) {
 				}
 				ttfb := time.Since(start).Milliseconds()
 				now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
-				if _, err := db.DB.Exec("UPDATE dead_link_results SET status_code=?, ttfb_ms=?, checked_at=? WHERE id=?",
+				if _, err := db.DB.Exec("UPDATE dead_link_results SET status_code=$1, ttfb_ms=$2, checked_at=$3 WHERE id=$4",
 					sc, ttfb, now, d.id); err != nil {
 					log.Printf("[deadlinks] retry update id=%d failed: %v", d.id, err)
 				}
@@ -290,7 +291,7 @@ func StartDeadLinkCheck(c *gin.Context) {
 	}
 
 	var domain string
-	db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
+	db.DB.QueryRow("SELECT domain FROM sites WHERE id = $1", siteID).Scan(&domain)
 	if domain == "" {
 		c.JSON(404, gin.H{"code": -1, "error": "站点不存在"})
 		return
@@ -496,7 +497,7 @@ func runDeadLinkCheck(siteID, domain string, job *DeadLinkJob) {
 	// This avoids 20 concurrent goroutines all fighting for the SQLite write
 	// lock, which was causing the "卡死" issue.
 	IncDeadlinkRun()
-	db.DB.Exec("DELETE FROM dead_link_results WHERE site_id = ?", siteID)
+	db.DB.Exec("DELETE FROM dead_link_results WHERE site_id = $1", siteID)
 
 	batch := make([]checkResult, 0, 50)
 	flush := func() {
@@ -511,7 +512,7 @@ func runDeadLinkCheck(siteID, domain string, job *DeadLinkJob) {
 		now := time.Now().Format("2006-01-02T15:04:05Z")
 		for _, r := range batch {
 			tx.Exec(`INSERT INTO dead_link_results (site_id, url, source_page, status_code, ttfb_ms, checked_at)
-				VALUES (?, ?, 'sitemap', ?, ?, ?)`, siteID, r.url, r.statusCode, r.ttfb, now)
+				VALUES ($1, $2, 'sitemap', $3, $4, $5)`, siteID, r.url, r.statusCode, r.ttfb, now)
 		}
 		if err := tx.Commit(); err != nil {
 			log.Printf("[deadlink] batch commit failed: %v", err)

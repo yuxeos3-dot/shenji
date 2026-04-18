@@ -45,7 +45,7 @@ func NotifyUser(userID int64, title, message string) {
 	}
 	var enc, chatID string
 	err := db.DB.QueryRow(
-		`SELECT COALESCE(bot_token,''), COALESCE(chat_id,'') FROM user_telegram WHERE user_id = ?`,
+		`SELECT COALESCE(bot_token,''), COALESCE(chat_id,'') FROM user_telegram WHERE user_id = $1`,
 		userID,
 	).Scan(&enc, &chatID)
 	if err != nil {

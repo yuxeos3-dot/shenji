@@ -171,22 +171,23 @@ func UploadCoordAttachment(c *gin.Context) {
 
 	// Record an event first so the timeline shows WHO uploaded WHAT,
 	// and we can point the attachment row back at that event.
-	res, err := db.DB.Exec(
+	var eventID int64
+	err := db.DB.QueryRow(
 		`INSERT INTO coordination_events
 		 (task_id, event_type, from_status, to_status, actor_id, actor_name, note)
-		 VALUES (?, 'upload', ?, ?, ?, ?, ?)`,
-		id, t.Status, t.Status, uid, uname, "📎 上传："+fh.Filename)
+		 VALUES ($1, 'upload', $2, $3, $4, $5, $6) RETURNING id`,
+		id, t.Status, t.Status, uid, uname, "📎 上传："+fh.Filename).Scan(&eventID)
 	if err != nil {
 		log.Printf("[coord-upload] event insert failed: %v", err)
 	}
-	eventID, _ := res.LastInsertId()
 
 	// Now the attachment row.
-	aRes, err := db.DB.Exec(
+	var aID int64
+	err := db.DB.QueryRow(
 		`INSERT INTO coordination_attachments
 		 (task_id, event_id, filename, filepath, size, mime, uploaded_by)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, eventID, fh.Filename, rel, fh.Size, mimeType, uid)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+		id, eventID, fh.Filename, rel, fh.Size, mimeType, uid).Scan(&aID)
 	if err != nil {
 		// Roll back the file on DB failure so we don't leak orphans.
 		_ = os.Remove(abs)
@@ -194,7 +195,6 @@ func UploadCoordAttachment(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存失败"})
 		return
 	}
-	aID, _ := aRes.LastInsertId()
 
 	WriteAuditLog(c, "coord_upload", "coordination_attachment", fmt.Sprintf("%d", aID), fh.Filename)
 	c.JSON(http.StatusOK, gin.H{
@@ -224,7 +224,7 @@ func ServeCoordAttachment(c *gin.Context) {
 
 	var filename, rel, mimeType string
 	err := db.DB.QueryRow(
-		`SELECT filename, filepath, mime FROM coordination_attachments WHERE id = ?`, id,
+		`SELECT filename, filepath, mime FROM coordination_attachments WHERE id = $1`, id,
 	).Scan(&filename, &rel, &mimeType)
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "附件不存在"})
@@ -310,7 +310,7 @@ func DeleteCoordAttachment(c *gin.Context) {
 	var rel, filename string
 	err := db.DB.QueryRow(
 		`SELECT task_id, filepath, filename, uploaded_by
-		 FROM coordination_attachments WHERE id = ?`, id,
+		 FROM coordination_attachments WHERE id = $1`, id,
 	).Scan(&taskID, &rel, &filename, &uploadedBy)
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "附件不存在"})
@@ -332,7 +332,7 @@ func DeleteCoordAttachment(c *gin.Context) {
 		return
 	}
 
-	if _, err := db.DB.Exec(`DELETE FROM coordination_attachments WHERE id = ?`, id); err != nil {
+	if _, err := db.DB.Exec(`DELETE FROM coordination_attachments WHERE id = $1`, id); err != nil {
 		log.Printf("[coord-attach] delete row %d: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 		return

@@ -383,13 +383,12 @@ func saveGAOverviewAsSync(propertyID, date string, overviewRaw json.RawMessage) 
 		return
 	}
 	var siteID int64
-	db.DB.QueryRow("SELECT id FROM sites WHERE ga_property_id = ? LIMIT 1", propertyID).Scan(&siteID)
+	db.DB.QueryRow("SELECT id FROM sites WHERE ga_property_id = $1 LIMIT 1", propertyID).Scan(&siteID)
 	if siteID == 0 {
 		return
 	}
 	db.DB.Exec(`
-		INSERT OR REPLACE INTO ga_data (site_id, date, sessions, users, pageviews, bounce_rate, avg_duration)
-		VALUES (?, ?, ?, ?, ?, ?, 0)`,
+		INSERT INTO ga_data (site_id, date, sessions, users, pageviews, bounce_rate, avg_duration) VALUES ($1, $2, $3, $4, $5, $6, 0) ON CONFLICT (site_id, date) DO UPDATE SET sessions = EXCLUDED.sessions, users = EXCLUDED.users, pageviews = EXCLUDED.pageviews, bounce_rate = EXCLUDED.bounce_rate, avg_duration = EXCLUDED.avg_duration`,
 		siteID, date,
 		int64(parseFloatSafe(mv[0].Value)), // sessions
 		int64(parseFloatSafe(mv[1].Value)), // users (totalUsers)

@@ -52,10 +52,10 @@ func ListSites(c *gin.Context) {
 
 	var args []interface{}
 	if !isAdmin {
-		query += " WHERE s.created_by = ?"
+		query += " WHERE s.created_by = $1"
 		args = append(args, userID)
 	} else if filterUser != "" {
-		query += " WHERE s.created_by = ?"
+		query += " WHERE s.created_by = $1"
 		args = append(args, filterUser)
 	}
 	query += " ORDER BY s.id DESC"
@@ -111,21 +111,21 @@ func CreateSite(c *gin.Context) {
 	}
 
 	userID := c.GetInt64("user_id")
-	result, err := db.DB.Exec(
+	var id int64
+	err := db.DB.QueryRow(
 		`INSERT INTO sites (domain, name, gsc_site_url, ga_property_id, yandex_host_id, bing_site_url,
 		 url_category, url_detail, url_news_list, url_news_detail, url_search, url_static,
 		 url_pages_json, audit_schedule_enabled, audit_interval_hours, audit_daily_hour, created_by)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
 		req.Domain, req.Name, req.GscSiteURL, req.GaPropertyID, req.YandexHostID, req.BingSiteURL,
 		req.URLCategory, req.URLDetail, req.URLNewsList, req.URLNewsDetail, req.URLSearch, req.URLStatic,
 		req.URLPagesJSON, req.AuditScheduleEnabled, req.AuditIntervalHours, req.AuditDailyHour, userID,
-	)
+	).Scan(&id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "你已有一个该域名的站点"})
 		return
 	}
 
-	id, _ := result.LastInsertId()
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"id": id}})
 }
 
@@ -157,7 +157,7 @@ func GetSite(c *gin.Context) {
 	err := db.DB.QueryRow(`SELECT id, domain, name, gsc_site_url, ga_property_id, yandex_host_id,
 		url_category, url_detail, url_news_list, url_news_detail, url_search, url_static,
 		status, COALESCE(audit_schedule_enabled,'false'), COALESCE(audit_interval_hours,0), COALESCE(audit_daily_hour,-1),
-		created_at FROM sites WHERE id = ?`, id).Scan(
+		created_at FROM sites WHERE id = $1`, id).Scan(
 		&site.ID, &site.Domain, &site.Name, &site.GscSiteURL, &site.GaPropertyID, &site.YandexHostID,
 		&site.URLCategory, &site.URLDetail, &site.URLNewsList, &site.URLNewsDetail,
 		&site.URLSearch, &site.URLStatic, &site.Status,
@@ -187,10 +187,10 @@ func UpdateSite(c *gin.Context) {
 	}
 
 	_, err := db.DB.Exec(
-		`UPDATE sites SET domain=?, name=?, gsc_site_url=?, ga_property_id=?, yandex_host_id=?, bing_site_url=?,
-		 url_category=?, url_detail=?, url_news_list=?, url_news_detail=?, url_search=?, url_static=?,
-		 audit_schedule_enabled=?, audit_interval_hours=?, audit_daily_hour=?
-		 WHERE id=?`,
+		`UPDATE sites SET domain=$1, name=$2, gsc_site_url=$3, ga_property_id=$4, yandex_host_id=$5, bing_site_url=$6,
+		 url_category=$7, url_detail=$8, url_news_list=$9, url_news_detail=$10, url_search=$11, url_static=$12,
+		 audit_schedule_enabled=$13, audit_interval_hours=$14, audit_daily_hour=$15
+		 WHERE id=$16`,
 		req.Domain, req.Name, req.GscSiteURL, req.GaPropertyID, req.YandexHostID, req.BingSiteURL,
 		req.URLCategory, req.URLDetail, req.URLNewsList, req.URLNewsDetail, req.URLSearch, req.URLStatic,
 		req.AuditScheduleEnabled, req.AuditIntervalHours, req.AuditDailyHour, id,
@@ -233,30 +233,30 @@ func DeleteSite(c *gin.Context) {
 		args  []interface{}
 	}{
 		// Platform data
-		{"DELETE FROM dead_link_results WHERE site_id = ?", []interface{}{id}},
-		{"DELETE FROM external_links WHERE site_id = ?", []interface{}{id}},
-		{"DELETE FROM site_pages WHERE site_id = ?", []interface{}{id}},
-		{"DELETE FROM gsc_data WHERE site_id = ?", []interface{}{id}},
-		{"DELETE FROM ga_data WHERE site_id = ?", []interface{}{id}},
-		{"DELETE FROM bing_data WHERE site_id = ?", []interface{}{id}},
-		{"DELETE FROM yandex_data WHERE site_id = ?", []interface{}{id}},
-		{"DELETE FROM spider_logs WHERE site_id = ?", []interface{}{id}},
+		{"DELETE FROM dead_link_results WHERE site_id = $1", []interface{}{id}},
+		{"DELETE FROM external_links WHERE site_id = $1", []interface{}{id}},
+		{"DELETE FROM site_pages WHERE site_id = $1", []interface{}{id}},
+		{"DELETE FROM gsc_data WHERE site_id = $1", []interface{}{id}},
+		{"DELETE FROM ga_data WHERE site_id = $1", []interface{}{id}},
+		{"DELETE FROM bing_data WHERE site_id = $1", []interface{}{id}},
+		{"DELETE FROM yandex_data WHERE site_id = $1", []interface{}{id}},
+		{"DELETE FROM spider_logs WHERE site_id = $1", []interface{}{id}},
 		// Audit cascade (results/pages reference tasks)
-		{"DELETE FROM audit_results WHERE task_id IN (SELECT id FROM audit_tasks WHERE site_id = ?)", []interface{}{id}},
-		{"DELETE FROM audit_pages   WHERE task_id IN (SELECT id FROM audit_tasks WHERE site_id = ?)", []interface{}{id}},
-		{"DELETE FROM audit_tasks WHERE site_id = ?", []interface{}{id}},
+		{"DELETE FROM audit_results WHERE task_id IN (SELECT id FROM audit_tasks WHERE site_id = $1)", []interface{}{id}},
+		{"DELETE FROM audit_pages   WHERE task_id IN (SELECT id FROM audit_tasks WHERE site_id = $1)", []interface{}{id}},
+		{"DELETE FROM audit_tasks WHERE site_id = $1", []interface{}{id}},
 		// Coordination cascade (events/attachments/test_pages reference tasks)
-		{"DELETE FROM coord_test_pages WHERE task_id IN (SELECT id FROM coordination_tasks WHERE site_id = ?)", []interface{}{id}},
-		{"DELETE FROM coordination_attachments WHERE task_id IN (SELECT id FROM coordination_tasks WHERE site_id = ?)", []interface{}{id}},
-		{"DELETE FROM coordination_events WHERE task_id IN (SELECT id FROM coordination_tasks WHERE site_id = ?)", []interface{}{id}},
-		{"DELETE FROM coordination_tasks WHERE site_id = ?", []interface{}{id}},
+		{"DELETE FROM coord_test_pages WHERE task_id IN (SELECT id FROM coordination_tasks WHERE site_id = $1)", []interface{}{id}},
+		{"DELETE FROM coordination_attachments WHERE task_id IN (SELECT id FROM coordination_tasks WHERE site_id = $1)", []interface{}{id}},
+		{"DELETE FROM coordination_events WHERE task_id IN (SELECT id FROM coordination_tasks WHERE site_id = $1)", []interface{}{id}},
+		{"DELETE FROM coordination_tasks WHERE site_id = $1", []interface{}{id}},
 		// GEO content cascade (titles reference title_libs)
-		{"DELETE FROM geo_workflow_jobs WHERE site_id = ?", []interface{}{id}},
-		{"DELETE FROM geo_articles WHERE site_id = ?", []interface{}{id}},
-		{"DELETE FROM geo_titles WHERE lib_id IN (SELECT id FROM geo_title_libs WHERE site_id = ?)", []interface{}{id}},
-		{"DELETE FROM geo_title_libs WHERE site_id = ?", []interface{}{id}},
+		{"DELETE FROM geo_workflow_jobs WHERE site_id = $1", []interface{}{id}},
+		{"DELETE FROM geo_articles WHERE site_id = $1", []interface{}{id}},
+		{"DELETE FROM geo_titles WHERE lib_id IN (SELECT id FROM geo_title_libs WHERE site_id = $1)", []interface{}{id}},
+		{"DELETE FROM geo_title_libs WHERE site_id = $1", []interface{}{id}},
 		// Finally, the site itself
-		{"DELETE FROM sites WHERE id = ?", []interface{}{id}},
+		{"DELETE FROM sites WHERE id = $1", []interface{}{id}},
 	}
 	for _, s := range steps {
 		if err := execInTx(s.query, s.args...); err != nil {

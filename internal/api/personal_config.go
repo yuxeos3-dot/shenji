@@ -55,7 +55,7 @@ func LoadUserOAuthClient(userID int64, service string) (clientID, clientSecret, 
 	var cidStr, csStr string
 	err = db.DB.QueryRow(
 		`SELECT COALESCE(client_id,''), COALESCE(client_secret,''), COALESCE(redirect_uri,'')
-		 FROM user_oauth_config WHERE user_id = ? AND service = ?`,
+		 FROM user_oauth_config WHERE user_id = $1 AND service = $2`,
 		userID, service,
 	).Scan(&cidStr, &csStr, &redirectURI)
 	if err != nil {
@@ -76,7 +76,7 @@ func LoadUserOAuthClient(userID int64, service string) (clientID, clientSecret, 
 // LoadUserBingKey returns the user's Bing API key (decrypted).
 func LoadUserBingKey(userID int64) (string, error) {
 	var enc string
-	err := db.DB.QueryRow(`SELECT COALESCE(api_key,'') FROM user_bing WHERE user_id = ?`, userID).Scan(&enc)
+	err := db.DB.QueryRow(`SELECT COALESCE(api_key,'') FROM user_bing WHERE user_id = $1`, userID).Scan(&enc)
 	if err != nil {
 		return "", err
 	}
@@ -93,7 +93,7 @@ func LoadUserBingKey(userID int64) (string, error) {
 func LoadUserTelegram(userID int64) (botToken, chatID string, err error) {
 	var enc string
 	err = db.DB.QueryRow(
-		`SELECT COALESCE(bot_token,''), COALESCE(chat_id,'') FROM user_telegram WHERE user_id = ?`,
+		`SELECT COALESCE(bot_token,''), COALESCE(chat_id,'') FROM user_telegram WHERE user_id = $1`,
 		userID,
 	).Scan(&enc, &chatID)
 	if err != nil {
@@ -115,7 +115,7 @@ func LoadUserTelegram(userID int64) (botToken, chatID string, err error) {
 // refuse to call FRW in that case rather than falling back to a global.
 func LoadUserFrwApiKey(userID int64) string {
 	var enc string
-	if err := db.DB.QueryRow(`SELECT COALESCE(frw_apikey,'') FROM users WHERE id = ?`, userID).Scan(&enc); err != nil {
+	if err := db.DB.QueryRow(`SELECT COALESCE(frw_apikey,'') FROM users WHERE id = $1`, userID).Scan(&enc); err != nil {
 		return ""
 	}
 	if enc == "" {
@@ -148,7 +148,7 @@ func GetMyOAuthConfigs(c *gin.Context) {
 		var clientID, clientSecretEnc, redirectURI string
 		err := db.DB.QueryRow(
 			`SELECT COALESCE(client_id,''), COALESCE(client_secret,''), COALESCE(redirect_uri,'')
-			 FROM user_oauth_config WHERE user_id = ? AND service = ?`,
+			 FROM user_oauth_config WHERE user_id = $1 AND service = $2`,
 			uid, svc,
 		).Scan(&clientID, &clientSecretEnc, &redirectURI)
 		if err != nil && err != sql.ErrNoRows {
@@ -162,7 +162,7 @@ func GetMyOAuthConfigs(c *gin.Context) {
 		// Bound status: presence of an access token.
 		var expiresAt sql.NullString
 		if err := db.DB.QueryRow(
-			`SELECT COALESCE(expires_at,'') FROM user_oauth_tokens WHERE user_id = ? AND service = ?`,
+			`SELECT COALESCE(expires_at,'') FROM user_oauth_tokens WHERE user_id = $1 AND service = $2`,
 			uid, svc,
 		).Scan(&expiresAt); err == nil {
 			cfg.Bound = true
@@ -219,7 +219,7 @@ func PutMyOAuthConfig(c *gin.Context) {
 	if secretEnc != "" {
 		_, err := db.DB.Exec(
 			`INSERT INTO user_oauth_config (user_id, service, client_id, client_secret, redirect_uri)
-			 VALUES (?, ?, ?, ?, ?)
+			 VALUES ($1, $2, $3, $4, $5)
 			 ON CONFLICT(user_id, service) DO UPDATE SET
 			   client_id = excluded.client_id,
 			   client_secret = excluded.client_secret,
@@ -236,7 +236,7 @@ func PutMyOAuthConfig(c *gin.Context) {
 		// Preserve existing client_secret.
 		_, err := db.DB.Exec(
 			`INSERT INTO user_oauth_config (user_id, service, client_id, client_secret, redirect_uri)
-			 VALUES (?, ?, ?, '', ?)
+			 VALUES ($1, $2, $3, '', $4)
 			 ON CONFLICT(user_id, service) DO UPDATE SET
 			   client_id = excluded.client_id,
 			   redirect_uri = excluded.redirect_uri,
@@ -267,7 +267,7 @@ func UnbindMyOAuthToken(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "service 非法"})
 		return
 	}
-	if _, err := db.DB.Exec(`DELETE FROM user_oauth_tokens WHERE user_id = ? AND service = ?`, uid, svc); err != nil {
+	if _, err := db.DB.Exec(`DELETE FROM user_oauth_tokens WHERE user_id = $1 AND service = $2`, uid, svc); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "解绑失败"})
 		return
 	}
@@ -285,7 +285,7 @@ func GetMyTelegram(c *gin.Context) {
 	}
 	var enc, chatID string
 	err := db.DB.QueryRow(
-		`SELECT COALESCE(bot_token,''), COALESCE(chat_id,'') FROM user_telegram WHERE user_id = ?`,
+		`SELECT COALESCE(bot_token,''), COALESCE(chat_id,'') FROM user_telegram WHERE user_id = $1`,
 		uid,
 	).Scan(&enc, &chatID)
 	if err != nil && err != sql.ErrNoRows {
@@ -327,7 +327,7 @@ func PutMyTelegram(c *gin.Context) {
 			return
 		}
 		_, err = db.DB.Exec(
-			`INSERT INTO user_telegram (user_id, bot_token, chat_id) VALUES (?, ?, ?)
+			`INSERT INTO user_telegram (user_id, bot_token, chat_id) VALUES ($1, $2, $3)
 			 ON CONFLICT(user_id) DO UPDATE SET
 			   bot_token = excluded.bot_token,
 			   chat_id = excluded.chat_id,
@@ -341,7 +341,7 @@ func PutMyTelegram(c *gin.Context) {
 	} else {
 		// Update only chat_id; keep token as-is.
 		_, err := db.DB.Exec(
-			`INSERT INTO user_telegram (user_id, bot_token, chat_id) VALUES (?, '', ?)
+			`INSERT INTO user_telegram (user_id, bot_token, chat_id) VALUES ($1, '', $2)
 			 ON CONFLICT(user_id) DO UPDATE SET
 			   chat_id = excluded.chat_id,
 			   updated_at = CURRENT_TIMESTAMP`,
@@ -363,7 +363,7 @@ func GetMyBing(c *gin.Context) {
 		return
 	}
 	var enc string
-	if err := db.DB.QueryRow(`SELECT COALESCE(api_key,'') FROM user_bing WHERE user_id = ?`, uid).Scan(&enc); err != nil && err != sql.ErrNoRows {
+	if err := db.DB.QueryRow(`SELECT COALESCE(api_key,'') FROM user_bing WHERE user_id = $1`, uid).Scan(&enc); err != nil && err != sql.ErrNoRows {
 		log.Printf("[personal-config] GetMyBing uid=%d: %v", uid, err)
 	}
 	masked := ""
@@ -395,7 +395,7 @@ func PutMyBing(c *gin.Context) {
 	}
 	if strings.TrimSpace(req.APIKey) == "" {
 		// empty = unbind
-		if _, err := db.DB.Exec(`DELETE FROM user_bing WHERE user_id = ?`, uid); err != nil {
+		if _, err := db.DB.Exec(`DELETE FROM user_bing WHERE user_id = $1`, uid); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "清除失败"})
 			return
 		}
@@ -408,7 +408,7 @@ func PutMyBing(c *gin.Context) {
 		return
 	}
 	if _, err := db.DB.Exec(
-		`INSERT INTO user_bing (user_id, api_key) VALUES (?, ?)
+		`INSERT INTO user_bing (user_id, api_key) VALUES ($1, $2)
 		 ON CONFLICT(user_id) DO UPDATE SET
 		   api_key = excluded.api_key,
 		   updated_at = CURRENT_TIMESTAMP`,
@@ -428,7 +428,7 @@ func GetMyFrw(c *gin.Context) {
 		return
 	}
 	var enc string
-	if err := db.DB.QueryRow(`SELECT COALESCE(frw_apikey,'') FROM users WHERE id = ?`, uid).Scan(&enc); err != nil && err != sql.ErrNoRows {
+	if err := db.DB.QueryRow(`SELECT COALESCE(frw_apikey,'') FROM users WHERE id = $1`, uid).Scan(&enc); err != nil && err != sql.ErrNoRows {
 		log.Printf("[personal-config] GetMyFrw uid=%d: %v", uid, err)
 	}
 	masked := ""
@@ -459,7 +459,7 @@ func PutMyFrw(c *gin.Context) {
 		return
 	}
 	if strings.TrimSpace(req.APIKey) == "" {
-		if _, err := db.DB.Exec(`UPDATE users SET frw_apikey = '' WHERE id = ?`, uid); err != nil {
+		if _, err := db.DB.Exec(`UPDATE users SET frw_apikey = '' WHERE id = $1`, uid); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "清除失败"})
 			return
 		}
@@ -471,7 +471,7 @@ func PutMyFrw(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "加密失败"})
 		return
 	}
-	if _, err := db.DB.Exec(`UPDATE users SET frw_apikey = ? WHERE id = ?`, enc, uid); err != nil {
+	if _, err := db.DB.Exec(`UPDATE users SET frw_apikey = $1 WHERE id = $2`, enc, uid); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存失败"})
 		return
 	}
@@ -501,12 +501,12 @@ func GetUserPlatformStatus(c *gin.Context) {
 func oauthStatus(uid int64, svc string) gin.H {
 	var cid, secret string
 	db.DB.QueryRow(
-		`SELECT COALESCE(client_id,''), COALESCE(client_secret,'') FROM user_oauth_config WHERE user_id = ? AND service = ?`,
+		`SELECT COALESCE(client_id,''), COALESCE(client_secret,'') FROM user_oauth_config WHERE user_id = $1 AND service = $2`,
 		uid, svc,
 	).Scan(&cid, &secret)
 	var expiresAt sql.NullString
 	db.DB.QueryRow(
-		`SELECT COALESCE(expires_at,'') FROM user_oauth_tokens WHERE user_id = ? AND service = ?`,
+		`SELECT COALESCE(expires_at,'') FROM user_oauth_tokens WHERE user_id = $1 AND service = $2`,
 		uid, svc,
 	).Scan(&expiresAt)
 	h := gin.H{
@@ -529,7 +529,7 @@ func simpleBound(uid int64, sqlStmt string) gin.H {
 
 func telegramBound(uid int64) gin.H {
 	var tok, chat string
-	db.DB.QueryRow(`SELECT COALESCE(bot_token,''), COALESCE(chat_id,'') FROM user_telegram WHERE user_id = ?`, uid).Scan(&tok, &chat)
+	db.DB.QueryRow(`SELECT COALESCE(bot_token,''), COALESCE(chat_id,'') FROM user_telegram WHERE user_id = $1`, uid).Scan(&tok, &chat)
 	return gin.H{"bound": tok != "" && chat != ""}
 }
 
@@ -546,7 +546,7 @@ func aiBound(uid int64) gin.H {
 
 func userSiteCount(uid int64) int {
 	var n int
-	db.DB.QueryRow(`SELECT COUNT(*) FROM sites WHERE created_by = ?`, uid).Scan(&n)
+	db.DB.QueryRow(`SELECT COUNT(*) FROM sites WHERE created_by = $1`, uid).Scan(&n)
 	return n
 }
 
@@ -572,7 +572,7 @@ func GetUserOverview(c *gin.Context) {
 		FROM users u
 		LEFT JOIN departments d ON d.id = u.department_id
 		LEFT JOIN dept_groups g ON g.id = u.group_id
-		WHERE u.id = ?`, uid,
+		WHERE u.id = $1`, uid,
 	).Scan(&name, &email, &role, &lastLogin, &deptName, &groupName)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "用户不存在"})
@@ -581,20 +581,20 @@ func GetUserOverview(c *gin.Context) {
 
 	// Site counts by audit status.
 	var sitesTotal, sitesHealthy, sitesPending, sitesFailed int
-	db.DB.QueryRow(`SELECT COUNT(*) FROM sites WHERE created_by = ?`, uid).Scan(&sitesTotal)
+	db.DB.QueryRow(`SELECT COUNT(*) FROM sites WHERE created_by = $1`, uid).Scan(&sitesTotal)
 	db.DB.QueryRow(`
 		SELECT COUNT(*) FROM sites s
-		WHERE s.created_by = ?
+		WHERE s.created_by = $1
 		  AND (SELECT status FROM audit_tasks WHERE site_id = s.id ORDER BY id DESC LIMIT 1) = 'done'`,
 		uid).Scan(&sitesHealthy)
 	db.DB.QueryRow(`
 		SELECT COUNT(*) FROM sites s
-		WHERE s.created_by = ?
+		WHERE s.created_by = $1
 		  AND (SELECT status FROM audit_tasks WHERE site_id = s.id ORDER BY id DESC LIMIT 1) IS NULL`,
 		uid).Scan(&sitesPending)
 	db.DB.QueryRow(`
 		SELECT COUNT(*) FROM sites s
-		WHERE s.created_by = ?
+		WHERE s.created_by = $1
 		  AND (SELECT status FROM audit_tasks WHERE site_id = s.id ORDER BY id DESC LIMIT 1) = 'error'`,
 		uid).Scan(&sitesFailed)
 
@@ -609,7 +609,7 @@ func GetUserOverview(c *gin.Context) {
 		       COALESCE(SUM(CASE WHEN status='under_review' THEN 1 ELSE 0 END),0),
 		       COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END),0)
 		FROM coordination_tasks
-		WHERE created_by = ? OR assignee_id = ?`,
+		WHERE created_by = $1 OR assignee_id = $2`,
 		uid, uid,
 	).Scan(&coordTotal, &coordPending, &coordInProgress, &coordUnderReview, &coordDone)
 
@@ -646,9 +646,9 @@ func platformsSummary(uid int64) gin.H {
 		"gsc":      oauthStatus(uid, "gsc"),
 		"ga":       oauthStatus(uid, "ga"),
 		"yandex":   oauthStatus(uid, "yandex"),
-		"bing":     simpleBound(uid, "SELECT COALESCE(api_key,'') FROM user_bing WHERE user_id = ?"),
+		"bing":     simpleBound(uid, "SELECT COALESCE(api_key,'') FROM user_bing WHERE user_id = $1"),
 		"telegram": telegramBound(uid),
-		"frw":      simpleBound(uid, "SELECT COALESCE(frw_apikey,'') FROM users WHERE id = ?"),
+		"frw":      simpleBound(uid, "SELECT COALESCE(frw_apikey,'') FROM users WHERE id = $1"),
 		"ai":       aiBound(uid),
 	}
 }

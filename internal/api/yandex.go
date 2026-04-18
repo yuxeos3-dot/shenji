@@ -127,8 +127,8 @@ func refreshYandexToken(userID int64, refreshToken string) (string, error) {
 	}
 	newExpiry := time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
 	if _, err := db.DB.Exec(
-		`UPDATE user_oauth_tokens SET access_token = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
-		 WHERE user_id = ? AND service = 'yandex'`,
+		`UPDATE user_oauth_tokens SET access_token = $1, expires_at = $2, updated_at = CURRENT_TIMESTAMP
+		 WHERE user_id = $3 AND service = 'yandex'`,
 		MustEncryptToken(result.AccessToken), newExpiry, userID,
 	); err != nil {
 		return "", fmt.Errorf("Yandex token 存储失败: %w", err)
@@ -238,7 +238,7 @@ func ClearYandexUserIDCache(userID int64) {
 		return
 	}
 	key := fmt.Sprintf("yandex_user_id:%d", userID)
-	db.DB.Exec("DELETE FROM settings WHERE key = ?", key)
+	db.DB.Exec("DELETE FROM settings WHERE key = $1", key)
 }
 
 // YandexUserIDCacheStats returns the count of cached user id rows.
@@ -250,7 +250,7 @@ func YandexUserIDCacheStats(userID int64) int {
 	} else {
 		key := fmt.Sprintf("yandex_user_id:%d", userID)
 		var v string
-		db.DB.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
+		db.DB.QueryRow("SELECT value FROM settings WHERE key = $1", key).Scan(&v)
 		if v != "" {
 			count = 1
 		}
@@ -268,7 +268,7 @@ func getYandexUserIDCached(appUserID int64, token string) (string, error) {
 	}
 	cacheKey := fmt.Sprintf("yandex_user_id:%d", appUserID)
 	var cached string
-	db.DB.QueryRow("SELECT value FROM settings WHERE key = ?", cacheKey).Scan(&cached)
+	db.DB.QueryRow("SELECT value FROM settings WHERE key = $1", cacheKey).Scan(&cached)
 	if cached != "" {
 		parts := strings.SplitN(cached, "|", 3)
 		// Legacy entries without fingerprint/ts → treat as stale.
@@ -285,7 +285,7 @@ func getYandexUserIDCached(appUserID int64, token string) (string, error) {
 		return "", err
 	}
 	payload := fmt.Sprintf("%s|%d|%s", tokenFingerprint, time.Now().Unix(), userID)
-	db.DB.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", cacheKey, payload)
+	db.DB.Exec("INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", cacheKey, payload)
 	return userID, nil
 }
 
@@ -299,7 +299,7 @@ func SyncYandexData(c *gin.Context) {
 	}
 
 	var domain string
-	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
+	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = $1", siteID).Scan(&domain)
 	if err != nil || domain == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点不存在或无域名"})
 		return
@@ -445,7 +445,7 @@ func SyncYandexData(c *gin.Context) {
 
 	date := time.Now().Format("2006-01-02")
 	db.DB.Exec(
-		"INSERT OR REPLACE INTO yandex_data (site_id, date, clicks, impressions, index_count, keywords_json, errors_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO yandex_data (site_id, date, clicks, impressions, index_count, keywords_json, errors_json) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (site_id, date) DO UPDATE SET clicks = EXCLUDED.clicks, impressions = EXCLUDED.impressions, index_count = EXCLUDED.index_count, keywords_json = EXCLUDED.keywords_json, errors_json = EXCLUDED.errors_json",
 		siteID, date, totalClicks, totalImpressions, indexCount, keywordsJSON, errorsJSON,
 	)
 	if sid, err := strconv.ParseInt(siteID, 10, 64); err == nil {

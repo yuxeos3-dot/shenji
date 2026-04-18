@@ -123,7 +123,7 @@ func IngestSpiderLog(c *gin.Context) {
 		dom = strings.TrimPrefix(dom, "http://")
 		dom = strings.TrimRight(dom, "/")
 		db.DB.QueryRow(
-			"SELECT id FROM sites WHERE LOWER(domain) = ? LIMIT 1",
+			"SELECT id FROM sites WHERE LOWER(domain) = $1 LIMIT 1",
 			dom,
 		).Scan(&siteID)
 	}
@@ -153,7 +153,7 @@ func IngestSpiderLog(c *gin.Context) {
 
 	if _, err := db.DB.Exec(
 		`INSERT INTO spider_logs (site_id, spider, ip, user_agent, url, status_code, ttfb_ms, referrer, visited_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		siteID, spider, req.IP, req.UserAgent, req.URL, req.StatusCode, req.TTFBms, req.Referrer, visitedAt,
 	); err != nil {
 		log.Printf("[spider] insert failed: %v", err)
@@ -193,7 +193,7 @@ func SpiderOverview(c *gin.Context) {
 	count := func(since time.Time) int {
 		var n int
 		db.DB.QueryRow(
-			"SELECT COUNT(*) FROM spider_logs WHERE site_id = ? AND visited_at >= ?",
+			"SELECT COUNT(*) FROM spider_logs WHERE site_id = $1 AND visited_at >= $2",
 			siteID, since,
 		).Scan(&n)
 		return n
@@ -207,7 +207,7 @@ func SpiderOverview(c *gin.Context) {
 	var breakdown []row
 	if rows, err := db.DB.Query(
 		`SELECT spider, COUNT(*) FROM spider_logs
-		 WHERE site_id = ? AND visited_at >= ?
+		 WHERE site_id = $1 AND visited_at >= $2
 		 GROUP BY spider ORDER BY 2 DESC`,
 		siteID, day7,
 	); err == nil {
@@ -228,7 +228,7 @@ func SpiderOverview(c *gin.Context) {
 	var topURLs []urlRow
 	if rows, err := db.DB.Query(
 		`SELECT url, COUNT(*) as hits FROM spider_logs
-		 WHERE site_id = ? AND visited_at >= ? AND url != ''
+		 WHERE site_id = $1 AND visited_at >= $2 AND url != ''
 		 GROUP BY url ORDER BY hits DESC LIMIT 10`,
 		siteID, day7,
 	); err == nil {
@@ -249,7 +249,7 @@ func SpiderOverview(c *gin.Context) {
 	var lastVisits []lastVisit
 	if rows, err := db.DB.Query(
 		`SELECT spider, MAX(visited_at) FROM spider_logs
-		 WHERE site_id = ? GROUP BY spider ORDER BY 2 DESC LIMIT 20`,
+		 WHERE site_id = $1 GROUP BY spider ORDER BY 2 DESC LIMIT 20`,
 		siteID,
 	); err == nil {
 		defer rows.Close()
@@ -286,15 +286,15 @@ func SpiderSiteSummary(c *gin.Context) {
 	day7 := time.Now().UTC().Add(-7 * 24 * time.Hour)
 
 	// Scalar subqueries keep the main query simple — the GROUP-BY + CASE
-	// form was tripping up modernc/sqlite's aggregate handling on an empty
+	// form was tripping up pgx's aggregate handling on an empty
 	// spider_logs table (returning an error instead of a zero row).
 	rows, err := db.DB.Query(
 		`SELECT s.id, s.name, s.domain,
-		        (SELECT COUNT(*)                    FROM spider_logs WHERE site_id = s.id AND visited_at >= ?) AS hits_7d,
-		        (SELECT COUNT(DISTINCT spider)      FROM spider_logs WHERE site_id = s.id AND visited_at >= ?) AS spiders_7d,
+		        (SELECT COUNT(*)                    FROM spider_logs WHERE site_id = s.id AND visited_at >= $1) AS hits_7d,
+		        (SELECT COUNT(DISTINCT spider)      FROM spider_logs WHERE site_id = s.id AND visited_at >= $2) AS spiders_7d,
 		        (SELECT MAX(visited_at)             FROM spider_logs WHERE site_id = s.id) AS last_visit
 		 FROM sites s
-		 WHERE (? = 'admin' OR s.created_by = ?)
+		 WHERE ($3 = 'admin' OR s.created_by = $4)
 		 ORDER BY hits_7d DESC, s.id`,
 		day7, day7, role, userID,
 	)
@@ -352,8 +352,8 @@ func SpiderDailyTrend(c *gin.Context) {
 
 	since := time.Now().UTC().AddDate(0, 0, -days)
 	rows, err := db.DB.Query(
-		`SELECT strftime('%Y-%m-%d', visited_at) as d, spider, COUNT(*)
-		 FROM spider_logs WHERE site_id = ? AND visited_at >= ?
+		`SELECT TO_CHAR(visited_at, 'YYYY-MM-DD') as d, spider, COUNT(*)
+		 FROM spider_logs WHERE site_id = $1 AND visited_at >= $2
 		 GROUP BY d, spider ORDER BY d ASC`,
 		siteID, since,
 	)
@@ -396,11 +396,11 @@ func SpiderLogs(c *gin.Context) {
 		if !canAccessSite(c, siteID) {
 			return
 		}
-		where += " AND sl.site_id = ?"
+		where += fmt.Sprintf(" AND sl.site_id = $%d", len(args)+1)
 		args = append(args, siteID)
 	}
 	if spider != "" {
-		where += " AND sl.spider = ?"
+		where += fmt.Sprintf(" AND sl.spider = $%d", len(args)+1)
 		args = append(args, spider)
 	}
 
@@ -410,7 +410,7 @@ func SpiderLogs(c *gin.Context) {
 	q := `SELECT sl.id, sl.site_id, s.domain, sl.spider, sl.ip, sl.user_agent, sl.url,
 	             sl.status_code, sl.ttfb_ms, sl.referrer, sl.visited_at
 	      FROM spider_logs sl LEFT JOIN sites s ON sl.site_id = s.id
-	      WHERE ` + where + ` ORDER BY sl.visited_at DESC LIMIT ? OFFSET ?`
+	      WHERE ` + where + fmt.Sprintf(` ORDER BY sl.visited_at DESC LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
 	rows, err := db.DB.Query(q, append(args, perPage, offset)...)
 	if err != nil {
 		log.Printf("[spider] SpiderLogs query failed: %v", err)

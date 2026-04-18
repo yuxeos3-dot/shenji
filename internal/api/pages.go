@@ -19,7 +19,7 @@ func ListSitePages(c *gin.Context) {
 	}
 	rows, err := db.DB.Query(`
 		SELECT id, site_id, name, url, last_fetched_at, status_code, ttfb_ms, created_at
-		FROM site_pages WHERE site_id = ? ORDER BY created_at ASC
+		FROM site_pages WHERE site_id = $1 ORDER BY created_at ASC
 	`, siteID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
@@ -72,15 +72,15 @@ func CreateSitePage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "URL 无效: " + err.Error()})
 		return
 	}
-	result, err := db.DB.Exec(
-		"INSERT INTO site_pages (site_id, name, url) VALUES (?, ?, ?)",
+	var id int64
+	err := db.DB.QueryRow(
+		"INSERT INTO site_pages (site_id, name, url) VALUES ($1, $2, $3) RETURNING id",
 		siteID, req.Name, req.URL,
-	)
+	).Scan(&id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "添加失败"})
 		return
 	}
-	id, _ := result.LastInsertId()
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"id": id}})
 }
 
@@ -91,7 +91,7 @@ func DeleteSitePage(c *gin.Context) {
 	if !canAccessSite(c, siteID) {
 		return
 	}
-	_, err := db.DB.Exec("DELETE FROM site_pages WHERE id = ? AND site_id = ?", pageID, siteID)
+	_, err := db.DB.Exec("DELETE FROM site_pages WHERE id = $1 AND site_id = $2", pageID, siteID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 		return
@@ -108,7 +108,7 @@ func FetchSitePage(c *gin.Context) {
 	}
 
 	var name, url string
-	err := db.DB.QueryRow("SELECT name, url FROM site_pages WHERE id = ? AND site_id = ?", pageID, siteID).
+	err := db.DB.QueryRow("SELECT name, url FROM site_pages WHERE id = $1 AND site_id = $2", pageID, siteID).
 		Scan(&name, &url)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "页面不存在"})
@@ -120,7 +120,7 @@ func FetchSitePage(c *gin.Context) {
 
 	now := time.Now().Format("2006-01-02 15:04:05")
 	_, err = db.DB.Exec(`
-		UPDATE site_pages SET last_html=?, last_fetched_at=?, status_code=?, ttfb_ms=? WHERE id=?
+		UPDATE site_pages SET last_html=$1, last_fetched_at=$2, status_code=$3, ttfb_ms=$4 WHERE id=$5
 	`, result.HTML, now, result.StatusCode, result.TTFB, pageID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存抓取结果失败"})
@@ -153,7 +153,7 @@ func GetSitePageSource(c *gin.Context) {
 	var statusCode, ttfb int64
 	err := db.DB.QueryRow(`
 		SELECT name, url, last_html, last_fetched_at, status_code, ttfb_ms
-		FROM site_pages WHERE id = ? AND site_id = ?
+		FROM site_pages WHERE id = $1 AND site_id = $2
 	`, pageID, siteID).Scan(&name, &url, &lastHTML, &lastFetchedAt, &statusCode, &ttfb)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "页面不存在"})

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -19,7 +20,7 @@ func WriteAuditLog(c *gin.Context, action, targetType, targetID, detail string) 
 	emailStr, _ := email.(string)
 	ip := c.ClientIP()
 	if _, err := db.DB.Exec(
-		"INSERT INTO audit_logs (user_id, user_email, action, target_type, target_id, detail, ip) VALUES (?,?,?,?,?,?,?)",
+		"INSERT INTO audit_logs (user_id, user_email, action, target_type, target_id, detail, ip) VALUES ($1,$2,$3,$4,$5,$6,$7)",
 		userID, emailStr, action, targetType, targetID, detail, ip,
 	); err != nil {
 		log.Printf("[audit_log] failed to write audit log (action=%s, target=%s/%s): %v", action, targetType, targetID, err)
@@ -48,19 +49,19 @@ func ListAuditLogs(c *gin.Context) {
 	args := []interface{}{}
 
 	if uid := c.Query("user_id"); uid != "" {
-		where += " AND user_id = ?"
+		where += fmt.Sprintf(" AND user_id = $%d", len(args)+1)
 		args = append(args, uid)
 	}
 	if act := c.Query("action"); act != "" {
-		where += " AND action = ?"
+		where += fmt.Sprintf(" AND action = $%d", len(args)+1)
 		args = append(args, act)
 	}
 	if sd := c.Query("start_date"); sd != "" {
-		where += " AND created_at >= ?"
+		where += fmt.Sprintf(" AND created_at >= $%d", len(args)+1)
 		args = append(args, sd)
 	}
 	if ed := c.Query("end_date"); ed != "" {
-		where += " AND created_at <= ?"
+		where += fmt.Sprintf(" AND created_at <= $%d", len(args)+1)
 		args = append(args, ed+" 23:59:59")
 	}
 
@@ -74,7 +75,7 @@ func ListAuditLogs(c *gin.Context) {
 
 	// Fetch page.
 	querySQL := "SELECT id, user_id, user_email, action, target_type, target_id, detail, ip, created_at FROM audit_logs WHERE " +
-		where + " ORDER BY id DESC LIMIT ? OFFSET ?"
+		where + fmt.Sprintf(" ORDER BY id DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2)
 	queryArgs := append(args, perPage, offset)
 	rows, err := db.DB.Query(querySQL, queryArgs...)
 	if err != nil {

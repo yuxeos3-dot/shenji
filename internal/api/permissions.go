@@ -260,7 +260,7 @@ func MigrateLegacyPermissions() {
 			continue
 		}
 		js, _ := json.Marshal(next)
-		if _, err := db.DB.Exec(`UPDATE users SET permissions = ? WHERE id = ?`, string(js), x.id); err != nil {
+		if _, err := db.DB.Exec(`UPDATE users SET permissions = $1 WHERE id = $2`, string(js), x.id); err != nil {
 			log.Printf("[perm-migration] user %d: update failed: %v", x.id, err)
 			continue
 		}
@@ -284,7 +284,7 @@ func GetPermissionTree(c *gin.Context) {
 func GetUserPermissions(c *gin.Context) {
 	userID := c.Param("id")
 	var perms string
-	db.DB.QueryRow("SELECT COALESCE(permissions,'') FROM users WHERE id=?", userID).Scan(&perms)
+	db.DB.QueryRow("SELECT COALESCE(permissions,'') FROM users WHERE id=$1", userID).Scan(&perms)
 	var list []string
 	if perms != "" {
 		if err := json.Unmarshal([]byte(perms), &list); err != nil {
@@ -329,7 +329,7 @@ func SaveUserPermissions(c *gin.Context) {
 		return
 	}
 	js, _ := json.Marshal(cleaned)
-	if _, err := db.DB.Exec("UPDATE users SET permissions=? WHERE id=?", string(js), userID); err != nil {
+	if _, err := db.DB.Exec("UPDATE users SET permissions=$1 WHERE id=$2", string(js), userID); err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "保存失败"})
 		return
 	}
@@ -376,7 +376,7 @@ func HasPermission(c *gin.Context, perm string) bool {
 		return false
 	}
 	var permsJSON string
-	if err := db.DB.QueryRow("SELECT COALESCE(permissions,'') FROM users WHERE id=?", userID).Scan(&permsJSON); err != nil && err != sql.ErrNoRows {
+	if err := db.DB.QueryRow("SELECT COALESCE(permissions,'') FROM users WHERE id=$1", userID).Scan(&permsJSON); err != nil && err != sql.ErrNoRows {
 		log.Printf("[permissions] load permissions failed for user %d: %v", userID, err)
 		return false
 	}
@@ -427,7 +427,7 @@ func GetMyPermissions(c *gin.Context) {
 	}
 	userID := c.GetInt64("user_id")
 	var permsJSON string
-	db.DB.QueryRow("SELECT COALESCE(permissions,'') FROM users WHERE id=?", userID).Scan(&permsJSON)
+	db.DB.QueryRow("SELECT COALESCE(permissions,'') FROM users WHERE id=$1", userID).Scan(&permsJSON)
 	var perms []string
 	if permsJSON != "" {
 		if err := json.Unmarshal([]byte(permsJSON), &perms); err != nil {

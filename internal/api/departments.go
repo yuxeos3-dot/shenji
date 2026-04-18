@@ -49,7 +49,7 @@ func ListDepartments(c *gin.Context) {
 		       (SELECT COUNT(*) FROM dept_groups g WHERE g.department_id = d.id),
 		       (SELECT COUNT(*) FROM users u WHERE u.department_id = d.id)
 		FROM departments d
-		ORDER BY d.name COLLATE NOCASE
+		ORDER BY d.name 
 	`)
 	if err != nil {
 		log.Printf("[departments] list: %v", err)
@@ -86,9 +86,10 @@ func CreateDepartment(c *gin.Context) {
 		return
 	}
 	uid := c.GetInt64("user_id")
-	res, err := db.DB.Exec(
-		`INSERT INTO departments (name, created_by) VALUES (?, ?)`,
-		name, uid)
+	var id int64
+	err := db.DB.QueryRow(
+		`INSERT INTO departments (name, created_by) VALUES ($1, $2) RETURNING id`,
+		name, uid).Scan(&id)
 	if err != nil {
 		// SQLite UNIQUE constraint violation → "UNIQUE constraint failed"
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -99,7 +100,6 @@ func CreateDepartment(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "创建失败"})
 		return
 	}
-	id, _ := res.LastInsertId()
 	WriteAuditLog(c, "dept_create", "department", itoaID(id), name)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"id": id, "name": name}})
 }
@@ -116,7 +116,7 @@ func UpdateDepartment(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "部门名称不能为空"})
 		return
 	}
-	res, err := db.DB.Exec(`UPDATE departments SET name = ? WHERE id = ?`, name, id)
+	res, err := db.DB.Exec(`UPDATE departments SET name = $1 WHERE id = $2`, name, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "部门名称已存在"})
@@ -143,7 +143,7 @@ func DeleteDepartment(c *gin.Context) {
 
 	// Read current row first so the audit log has the old name.
 	var name string
-	err := db.DB.QueryRow(`SELECT name FROM departments WHERE id = ?`, id).Scan(&name)
+	err := db.DB.QueryRow(`SELECT name FROM departments WHERE id = $1`, id).Scan(&name)
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "部门不存在"})
 		return
@@ -164,18 +164,18 @@ func DeleteDepartment(c *gin.Context) {
 	// about to be deleted would orphan the group_id too, so wipe both
 	// in the same statement.
 	if _, err := tx.Exec(
-		`UPDATE users SET department_id = 0, group_id = 0 WHERE department_id = ?`, id,
+		`UPDATE users SET department_id = 0, group_id = 0 WHERE department_id = $1`, id,
 	); err != nil {
 		log.Printf("[departments] delete detach users: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "解除用户绑定失败"})
 		return
 	}
-	if _, err := tx.Exec(`DELETE FROM dept_groups WHERE department_id = ?`, id); err != nil {
+	if _, err := tx.Exec(`DELETE FROM dept_groups WHERE department_id = $1`, id); err != nil {
 		log.Printf("[departments] delete groups: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除组失败"})
 		return
 	}
-	if _, err := tx.Exec(`DELETE FROM departments WHERE id = ?`, id); err != nil {
+	if _, err := tx.Exec(`DELETE FROM departments WHERE id = $1`, id); err != nil {
 		log.Printf("[departments] delete: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 		return
@@ -197,7 +197,7 @@ func ListGroups(c *gin.Context) {
 	where := ""
 	args := []interface{}{}
 	if dept := c.Query("department_id"); dept != "" {
-		where = "WHERE g.department_id = ?"
+		where = "WHERE g.department_id = $1"
 		args = append(args, dept)
 	}
 
@@ -207,7 +207,7 @@ func ListGroups(c *gin.Context) {
 		FROM dept_groups g
 		LEFT JOIN departments d ON d.id = g.department_id
 		` + where + `
-		ORDER BY d.name COLLATE NOCASE, g.name COLLATE NOCASE
+		ORDER BY d.name , g.name 
 	`
 	rows, err := db.DB.Query(q, args...)
 	if err != nil {
@@ -248,16 +248,17 @@ func CreateGroup(c *gin.Context) {
 	// Confirm the department actually exists — prevents the foreign-key-
 	// in-spirit from getting dangling rows.
 	var exists int
-	db.DB.QueryRow(`SELECT 1 FROM departments WHERE id = ?`, req.DepartmentID).Scan(&exists)
+	db.DB.QueryRow(`SELECT 1 FROM departments WHERE id = $1`, req.DepartmentID).Scan(&exists)
 	if exists != 1 {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "指定的部门不存在"})
 		return
 	}
 
 	uid := c.GetInt64("user_id")
-	res, err := db.DB.Exec(
-		`INSERT INTO dept_groups (department_id, name, created_by) VALUES (?, ?, ?)`,
-		req.DepartmentID, name, uid)
+	var id int64
+	err := db.DB.QueryRow(
+		`INSERT INTO dept_groups (department_id, name, created_by) VALUES ($1, $2, $3) RETURNING id`,
+		req.DepartmentID, name, uid).Scan(&id)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "该部门下已有同名组"})
@@ -267,7 +268,6 @@ func CreateGroup(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "创建失败"})
 		return
 	}
-	id, _ := res.LastInsertId()
 	WriteAuditLog(c, "group_create", "group", itoaID(id), name)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"id": id, "name": name}})
 }
@@ -286,7 +286,7 @@ func UpdateGroup(c *gin.Context) {
 	}
 
 	res, err := db.DB.Exec(
-		`UPDATE dept_groups SET department_id = ?, name = ? WHERE id = ?`,
+		`UPDATE dept_groups SET department_id = $1, name = $2 WHERE id = $3`,
 		req.DepartmentID, name, id)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -309,7 +309,7 @@ func DeleteGroup(c *gin.Context) {
 	id := parseInt64Param(c, "id")
 
 	var name string
-	err := db.DB.QueryRow(`SELECT name FROM dept_groups WHERE id = ?`, id).Scan(&name)
+	err := db.DB.QueryRow(`SELECT name FROM dept_groups WHERE id = $1`, id).Scan(&name)
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "组不存在"})
 		return
@@ -329,12 +329,12 @@ func DeleteGroup(c *gin.Context) {
 	// Detach users pointed at this group, but leave their department_id
 	// intact — the user is still in the department, just without a
 	// specific group.
-	if _, err := tx.Exec(`UPDATE users SET group_id = 0 WHERE group_id = ?`, id); err != nil {
+	if _, err := tx.Exec(`UPDATE users SET group_id = 0 WHERE group_id = $1`, id); err != nil {
 		log.Printf("[groups] delete detach users: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "解除用户绑定失败"})
 		return
 	}
-	if _, err := tx.Exec(`DELETE FROM dept_groups WHERE id = ?`, id); err != nil {
+	if _, err := tx.Exec(`DELETE FROM dept_groups WHERE id = $1`, id); err != nil {
 		log.Printf("[groups] delete: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 		return

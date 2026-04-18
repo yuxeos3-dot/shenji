@@ -60,7 +60,7 @@ func loadMonthlyReport(id int64) (*monthlyReportRow, error) {
 		LEFT JOIN users u ON u.id = m.user_id
 		LEFT JOIN departments d ON d.id = u.department_id
 		LEFT JOIN dept_groups g ON g.id = u.group_id
-		WHERE m.id = ?`, id,
+		WHERE m.id = $1`, id,
 	).Scan(&r.ID, &r.UserID, &r.UserName, &r.DepartmentName, &r.GroupName,
 		&r.Year, &r.Month, &r.Content, &r.SourceWeeklyIDs,
 		&r.Status, &submittedAt, &r.CreatedAt, &r.UpdatedAt)
@@ -122,7 +122,7 @@ func ListMonthlyReports(c *gin.Context) {
 		LEFT JOIN users u ON u.id = m.user_id
 		LEFT JOIN departments d ON d.id = u.department_id
 		LEFT JOIN dept_groups g ON g.id = u.group_id
-		WHERE m.user_id = ?
+		WHERE m.user_id = $1
 		ORDER BY m.year DESC, m.month DESC`, target)
 	if err != nil {
 		log.Printf("[monthly] list: %v", err)
@@ -159,19 +159,19 @@ func AdminListAllMonthlyReports(c *gin.Context) {
 	where := []string{"1=1"}
 	args := []interface{}{}
 	if v := c.Query("department_id"); v != "" {
-		where = append(where, "u.department_id = ?")
+		where = append(where, fmt.Sprintf("u.department_id = $%d", len(args)+1))
 		args = append(args, v)
 	}
 	if v := c.Query("group_id"); v != "" {
-		where = append(where, "u.group_id = ?")
+		where = append(where, fmt.Sprintf("u.group_id = $%d", len(args)+1))
 		args = append(args, v)
 	}
 	if v := c.Query("year"); v != "" {
-		where = append(where, "m.year = ?")
+		where = append(where, fmt.Sprintf("m.year = $%d", len(args)+1))
 		args = append(args, v)
 	}
 	if v := c.Query("month"); v != "" {
-		where = append(where, "m.month = ?")
+		where = append(where, fmt.Sprintf("m.month = $%d", len(args)+1))
 		args = append(args, v)
 	}
 
@@ -246,7 +246,7 @@ func GenerateMonthlyReport(c *gin.Context) {
 	// Dedup: one monthly report per (user, year, month).
 	var existingID int64
 	db.DB.QueryRow(
-		`SELECT id FROM monthly_reports WHERE user_id = ? AND year = ? AND month = ?`,
+		`SELECT id FROM monthly_reports WHERE user_id = $1 AND year = $2 AND month = $3`,
 		uid, req.Year, req.Month,
 	).Scan(&existingID)
 	if existingID > 0 {
@@ -265,8 +265,8 @@ func GenerateMonthlyReport(c *gin.Context) {
 	// avoid double-counting a week that spans into an adjacent month.
 	rows, err := db.DB.Query(
 		`SELECT id, week_start, week_end, content FROM weekly_reports
-		 WHERE user_id = ? AND status = 'submitted'
-		   AND week_start BETWEEN ? AND ?
+		 WHERE user_id = $1 AND status = 'submitted'
+		   AND week_start BETWEEN $2 AND $3
 		 ORDER BY week_start ASC`,
 		uid, start, end,
 	)
@@ -318,18 +318,18 @@ func GenerateMonthlyReport(c *gin.Context) {
 		summary = "> ⚠️ AI 润色未能运行，以下是本月周汇报的原始拼接，请手动整理后提交。\n\n" + concat.String()
 	}
 
-	res, err := db.DB.Exec(
+	var id int64
+	err := db.DB.QueryRow(
 		`INSERT INTO monthly_reports
 		 (user_id, year, month, content, source_weekly_ids, status)
-		 VALUES (?, ?, ?, ?, ?, 'draft')`,
+		 VALUES ($1, $2, $3, $4, $5, 'draft') RETURNING id`,
 		uid, req.Year, req.Month, summary, string(srcJSON),
-	)
+	).Scan(&id)
 	if err != nil {
 		log.Printf("[monthly] insert: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存失败"})
 		return
 	}
-	id, _ := res.LastInsertId()
 	WriteAuditLog(c, "monthly_generate", "monthly_report", fmt.Sprintf("%d", id),
 		fmt.Sprintf("%d-%02d (%d 篇周汇报)", req.Year, req.Month, len(pieces)))
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"id": id}})
@@ -481,7 +481,7 @@ func UpdateMonthlyReport(c *gin.Context) {
 	}
 
 	_, err = db.DB.Exec(
-		`UPDATE monthly_reports SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		`UPDATE monthly_reports SET content = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
 		req.Content, id,
 	)
 	if err != nil {
@@ -519,7 +519,7 @@ func SubmitMonthlyReport(c *gin.Context) {
 
 	_, err = db.DB.Exec(
 		`UPDATE monthly_reports SET status = 'submitted', submitted_at = CURRENT_TIMESTAMP,
-		 updated_at = CURRENT_TIMESTAMP WHERE id = ?`, id,
+		 updated_at = CURRENT_TIMESTAMP WHERE id = $1`, id,
 	)
 	if err != nil {
 		log.Printf("[monthly] submit: %v", err)
@@ -586,7 +586,7 @@ func DeleteMonthlyReport(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "已提交的月汇报不可删除"})
 		return
 	}
-	if _, err := db.DB.Exec(`DELETE FROM monthly_reports WHERE id = ?`, id); err != nil {
+	if _, err := db.DB.Exec(`DELETE FROM monthly_reports WHERE id = $1`, id); err != nil {
 		log.Printf("[monthly] delete: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 		return

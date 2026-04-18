@@ -47,7 +47,7 @@ type frwConfig struct {
 // users.frw_config. No global fallback.
 func loadFRWConfig(userID int64) frwConfig {
 	var raw string
-	db.DB.QueryRow("SELECT COALESCE(frw_config,'') FROM users WHERE id=?", userID).Scan(&raw)
+	db.DB.QueryRow("SELECT COALESCE(frw_config,'') FROM users WHERE id=$1", userID).Scan(&raw)
 	var cfg frwConfig
 	if raw != "" {
 		_ = json.Unmarshal([]byte(raw), &cfg)
@@ -109,7 +109,7 @@ func SaveMyFRWConfig(c *gin.Context) {
 		UserID: firstNonEmpty(strings.TrimSpace(in.UserID), old.UserID),
 	}
 	js, _ := json.Marshal(cfg)
-	if _, err := db.DB.Exec("UPDATE users SET frw_config=? WHERE id=?", string(js), userID); err != nil {
+	if _, err := db.DB.Exec("UPDATE users SET frw_config=$1 WHERE id=$2", string(js), userID); err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "保存失败"})
 		return
 	}
@@ -119,7 +119,7 @@ func SaveMyFRWConfig(c *gin.Context) {
 			c.JSON(500, gin.H{"code": -1, "error": "加密失败"})
 			return
 		}
-		if _, err := db.DB.Exec("UPDATE users SET frw_apikey=? WHERE id=?", enc, userID); err != nil {
+		if _, err := db.DB.Exec("UPDATE users SET frw_apikey=$1 WHERE id=$2", enc, userID); err != nil {
 			c.JSON(500, gin.H{"code": -1, "error": "保存失败"})
 			return
 		}
@@ -149,10 +149,10 @@ func stripMask(v, old string) string {
 func ListFRWGenerations(c *gin.Context) {
 	userID := c.GetInt64("user_id")
 	kind := c.Query("kind") // "image" | "video"; empty = both
-	q := "SELECT id, kind, mode, prompt, source_url, frw_task_id, status, progress, result_url, local_path, error_msg, created_at FROM ai_generations WHERE user_id=?"
+	q := "SELECT id, kind, mode, prompt, source_url, frw_task_id, status, progress, result_url, local_path, error_msg, created_at FROM ai_generations WHERE user_id=$1"
 	args := []interface{}{userID}
 	if kind == "image" || kind == "video" {
-		q += " AND kind=?"
+		q += fmt.Sprintf(" AND kind=$%d", len(args)+1)
 		args = append(args, kind)
 	}
 	q += " ORDER BY id DESC LIMIT 200"
@@ -221,13 +221,13 @@ func SubmitFRWGeneration(c *gin.Context) {
 		return
 	}
 
-	r, err := db.DB.Exec(`INSERT INTO ai_generations (user_id, kind, mode, prompt, source_url, frw_task_id, status, progress) VALUES (?,?,?,?,?,?,?,?)`,
-		userID, kind, in.Mode, in.Prompt, in.SourceURL, res.TaskID, res.Status, res.Progress)
+	var id int64
+	err := db.DB.QueryRow(`INSERT INTO ai_generations (user_id, kind, mode, prompt, source_url, frw_task_id, status, progress) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+		userID, kind, in.Mode, in.Prompt, in.SourceURL, res.TaskID, res.Status, res.Progress).Scan(&id)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "保存任务失败: " + err.Error()})
 		return
 	}
-	id, _ := r.LastInsertId()
 
 	// Fire & forget poller.
 	go pollFRWTask(id)
@@ -272,7 +272,7 @@ func fetchGenerationRow(id, userID int64) gin.H {
 	var st int
 	var pg float64
 	var ct time.Time
-	err := db.DB.QueryRow(`SELECT kind, mode, prompt, source_url, frw_task_id, status, progress, result_url, local_path, error_msg, created_at FROM ai_generations WHERE id=? AND user_id=?`, id, userID).Scan(&kd, &md, &pr, &sr, &tid, &st, &pg, &ru, &lp, &em, &ct)
+	err := db.DB.QueryRow(`SELECT kind, mode, prompt, source_url, frw_task_id, status, progress, result_url, local_path, error_msg, created_at FROM ai_generations WHERE id=$1 AND user_id=$2`, id, userID).Scan(&kd, &md, &pr, &sr, &tid, &st, &pg, &ru, &lp, &em, &ct)
 	if err != nil {
 		return nil
 	}
@@ -312,7 +312,7 @@ func pollFRWTask(id int64) {
 	var userID int64
 	var kind, taskID string
 	var status int
-	if err := db.DB.QueryRow(`SELECT user_id, kind, frw_task_id, status FROM ai_generations WHERE id=?`, id).Scan(&userID, &kind, &taskID, &status); err != nil {
+	if err := db.DB.QueryRow(`SELECT user_id, kind, frw_task_id, status FROM ai_generations WHERE id=$1`, id).Scan(&userID, &kind, &taskID, &status); err != nil {
 		return
 	}
 	if taskID == "" || status == 2 || status == -1 || status == 4 {
@@ -332,10 +332,10 @@ func pollFRWTask(id int64) {
 		if err != nil {
 			// 401 or network. Persist as failure so the user gets a
 			// meaningful message in the UI, then bail.
-			db.DB.Exec(`UPDATE ai_generations SET status=-1, error_msg=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, err.Error(), id)
+			db.DB.Exec(`UPDATE ai_generations SET status=-1, error_msg=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2`, err.Error(), id)
 			return
 		}
-		_, _ = db.DB.Exec(`UPDATE ai_generations SET status=?, progress=?, result_url=?, error_msg=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		_, _ = db.DB.Exec(`UPDATE ai_generations SET status=$1, progress=$2, result_url=$3, error_msg=$4, updated_at=CURRENT_TIMESTAMP WHERE id=$5`,
 			q.Status, q.Progress, q.OutData, q.Message, id)
 		if q.Status == 2 || q.Status == -1 || q.Status == 4 {
 			return
@@ -343,7 +343,7 @@ func pollFRWTask(id int64) {
 		time.Sleep(interval)
 	}
 	// Exceeded our own deadline — mark timeout locally so the row doesn't hang.
-	db.DB.Exec(`UPDATE ai_generations SET status=4, error_msg='本地轮询超时', updated_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	db.DB.Exec(`UPDATE ai_generations SET status=4, error_msg='本地轮询超时', updated_at=CURRENT_TIMESTAMP WHERE id=$1`, id)
 }
 
 // ─── POST /frw/generations/:id/publish ───────────────────────────────────
@@ -402,7 +402,7 @@ func PublishFRWGeneration(c *gin.Context) {
 		return
 	}
 	relPath := "/" + filepath.ToSlash(full) // served via a static route
-	if _, err := db.DB.Exec(`UPDATE ai_generations SET local_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, relPath, id); err != nil {
+	if _, err := db.DB.Exec(`UPDATE ai_generations SET local_path=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2`, relPath, id); err != nil {
 		log.Printf("[frw] persist local_path failed: %v", err)
 	}
 	c.JSON(200, gin.H{"code": 0, "data": gin.H{"local_path": relPath, "size": len(data)}})
@@ -440,7 +440,7 @@ func DeleteFRWGeneration(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	// Scrub local file if any.
 	var lp string
-	db.DB.QueryRow(`SELECT COALESCE(local_path,'') FROM ai_generations WHERE id=? AND user_id=?`, id, userID).Scan(&lp)
+	db.DB.QueryRow(`SELECT COALESCE(local_path,'') FROM ai_generations WHERE id=$1 AND user_id=$2`, id, userID).Scan(&lp)
 	if lp != "" && strings.HasPrefix(lp, "/data/frw/") {
 		cleanPath := strings.TrimPrefix(lp, "/")
 		absPath, err := filepath.Abs(cleanPath)
@@ -448,7 +448,7 @@ func DeleteFRWGeneration(c *gin.Context) {
 			os.Remove(absPath)
 		}
 	}
-	res, err := db.DB.Exec(`DELETE FROM ai_generations WHERE id=? AND user_id=?`, id, userID)
+	res, err := db.DB.Exec(`DELETE FROM ai_generations WHERE id=$1 AND user_id=$2`, id, userID)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": err.Error()})
 		return

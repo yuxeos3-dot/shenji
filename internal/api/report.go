@@ -20,7 +20,7 @@ func DownloadAuditReport(c *gin.Context) {
 
 	var siteID int64
 	var status string
-	if err := db.DB.QueryRow("SELECT site_id, status FROM audit_tasks WHERE id = ?", taskID).
+	if err := db.DB.QueryRow("SELECT site_id, status FROM audit_tasks WHERE id = $1", taskID).
 		Scan(&siteID, &status); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "审计任务不存在"})
 		return
@@ -34,12 +34,12 @@ func DownloadAuditReport(c *gin.Context) {
 	}
 
 	var domain string
-	db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
+	db.DB.QueryRow("SELECT domain FROM sites WHERE id = $1", siteID).Scan(&domain)
 	domain = strings.TrimPrefix(strings.TrimPrefix(domain, "https://"), "http://")
 	domain = strings.TrimRight(domain, "/")
 
 	var v6Report string
-	if err := db.DB.QueryRow("SELECT COALESCE(v6_report,'') FROM audit_results WHERE task_id = ?", taskID).
+	if err := db.DB.QueryRow("SELECT COALESCE(v6_report,'') FROM audit_results WHERE task_id = $1", taskID).
 		Scan(&v6Report); err != nil || v6Report == "" {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "审计报告数据不存在"})
 		return

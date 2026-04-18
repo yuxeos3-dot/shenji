@@ -114,7 +114,7 @@ func saveUserOAuthToken(userID int64, service string, tok *OAuthToken) error {
 	}
 	_, err := db.DB.Exec(
 		`INSERT INTO user_oauth_tokens (user_id, service, access_token, refresh_token, expires_at)
-		 VALUES (?, ?, ?, ?, ?)
+		 VALUES ($1, $2, $3, $4, $5)
 		 ON CONFLICT(user_id, service) DO UPDATE SET
 		   access_token = excluded.access_token,
 		   refresh_token = CASE WHEN excluded.refresh_token != '' THEN excluded.refresh_token ELSE user_oauth_tokens.refresh_token END,
@@ -194,7 +194,7 @@ func loadAndRefreshOAuth(userID int64, service string) (string, error) {
 		var storedAccess, storedRefresh string
 		err = db.DB.QueryRow(
 			`SELECT access_token, COALESCE(refresh_token,''), expires_at
-			 FROM user_oauth_tokens WHERE user_id = ? AND service = ?`,
+			 FROM user_oauth_tokens WHERE user_id = $1 AND service = $2`,
 			userID, service,
 		).Scan(&storedAccess, &storedRefresh, &expiresAt)
 		if err != nil {
@@ -267,8 +267,8 @@ func loadAndRefreshOAuth(userID int64, service string) (string, error) {
 
 	newExpiry := time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
 	if _, err := db.DB.Exec(
-		`UPDATE user_oauth_tokens SET access_token = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
-		 WHERE user_id = ? AND service = ?`,
+		`UPDATE user_oauth_tokens SET access_token = $1, expires_at = $2, updated_at = CURRENT_TIMESTAMP
+		 WHERE user_id = $3 AND service = $4`,
 		MustEncryptToken(result.AccessToken), newExpiry, userID, service,
 	); err != nil {
 		log.Printf("[%s] persist refreshed token uid=%d: %v", service, userID, err)
@@ -321,7 +321,7 @@ func SyncGSCData(c *gin.Context) {
 	}
 
 	var domain string
-	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = ?", siteID).Scan(&domain)
+	err := db.DB.QueryRow("SELECT domain FROM sites WHERE id = $1", siteID).Scan(&domain)
 	if err != nil || domain == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点不存在或无域名"})
 		return
@@ -420,8 +420,7 @@ func SyncGSCData(c *gin.Context) {
 	countriesJSON := extractRows(results["countries"])
 
 	if _, err := db.DB.Exec(
-		`INSERT OR REPLACE INTO gsc_data (site_id, date, clicks, impressions, ctr, position, keywords_json, pages_json, devices_json, countries_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO gsc_data (site_id, date, clicks, impressions, ctr, position, keywords_json, pages_json, devices_json, countries_json) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (site_id, date) DO UPDATE SET clicks = EXCLUDED.clicks, impressions = EXCLUDED.impressions, ctr = EXCLUDED.ctr, position = EXCLUDED.position, keywords_json = EXCLUDED.keywords_json, pages_json = EXCLUDED.pages_json, devices_json = EXCLUDED.devices_json, countries_json = EXCLUDED.countries_json`,
 		siteID, ed, totalClicks, totalImpressions, avgCTR, avgPosition,
 		keywordsJSON, pagesJSON, devicesJSON, countriesJSON,
 	); err != nil {
@@ -495,7 +494,7 @@ func StoreSiteKeywords(c *gin.Context) {
 	// Find matching site by gsc_site_url or domain
 	var siteID int64
 	err := db.DB.QueryRow(
-		"SELECT id FROM sites WHERE gsc_site_url = ? OR domain = ? LIMIT 1",
+		"SELECT id FROM sites WHERE gsc_site_url = $1 OR domain = $2 LIMIT 1",
 		req.SiteURL, req.SiteURL,
 	).Scan(&siteID)
 	if err != nil {
@@ -504,7 +503,7 @@ func StoreSiteKeywords(c *gin.Context) {
 		cleanURL = strings.TrimPrefix(cleanURL, "http://")
 		cleanURL = strings.TrimRight(cleanURL, "/")
 		db.DB.QueryRow(
-			"SELECT id FROM sites WHERE REPLACE(REPLACE(REPLACE(gsc_site_url,'sc-domain:',''),'https://',''),'http://','') = ? LIMIT 1",
+			"SELECT id FROM sites WHERE REPLACE(REPLACE(REPLACE(gsc_site_url,'sc-domain:',''),'https://',''),'http://','') = $1 LIMIT 1",
 			cleanURL,
 		).Scan(&siteID)
 	}
@@ -536,8 +535,7 @@ func StoreSiteKeywords(c *gin.Context) {
 
 	date := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 	db.DB.Exec(
-		`INSERT OR REPLACE INTO gsc_data (site_id, date, clicks, impressions, ctr, position, keywords_json, pages_json, devices_json, countries_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO gsc_data (site_id, date, clicks, impressions, ctr, position, keywords_json, pages_json, devices_json, countries_json) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (site_id, date) DO UPDATE SET clicks = EXCLUDED.clicks, impressions = EXCLUDED.impressions, ctr = EXCLUDED.ctr, position = EXCLUDED.position, keywords_json = EXCLUDED.keywords_json, pages_json = EXCLUDED.pages_json, devices_json = EXCLUDED.devices_json, countries_json = EXCLUDED.countries_json`,
 		siteID, date, req.Clicks, req.Impressions, req.CTR, req.Position, kw, pg, dv, ct,
 	)
 	InvalidateGSC(siteID)

@@ -28,10 +28,10 @@ func GetExternalLinks(c *gin.Context) {
 	offset := (page - 1) * perPage
 
 	var total int
-	db.DB.QueryRow("SELECT COUNT(*) FROM external_links WHERE site_id = ?", siteID).Scan(&total)
+	db.DB.QueryRow("SELECT COUNT(*) FROM external_links WHERE site_id = $1", siteID).Scan(&total)
 
 	rows, err := db.DB.Query(`SELECT id, site_id, url, anchor_text, source_url, rel_type, category, note, status_code, checked_at, created_at
-		FROM external_links WHERE site_id = ? ORDER BY id DESC LIMIT ? OFFSET ?`, siteID, perPage, offset)
+		FROM external_links WHERE site_id = $1 ORDER BY id DESC LIMIT $2 OFFSET $3`, siteID, perPage, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
 		return
@@ -107,11 +107,11 @@ func ImportExtlinkPool(c *gin.Context) {
 		}
 		// Skip duplicates
 		var exists int
-		db.DB.QueryRow("SELECT COUNT(*) FROM extlink_pool WHERE url=?", url).Scan(&exists)
+		db.DB.QueryRow("SELECT COUNT(*) FROM extlink_pool WHERE url=$1", url).Scan(&exists)
 		if exists > 0 {
 			continue
 		}
-		if _, err := db.DB.Exec("INSERT INTO extlink_pool (url, name, created_by) VALUES (?, ?, ?)", url, name, userID); err == nil {
+		if _, err := db.DB.Exec("INSERT INTO extlink_pool (url, name, created_by) VALUES ($1, $2, $3)", url, name, userID); err == nil {
 			count++
 		}
 	}
@@ -119,7 +119,7 @@ func ImportExtlinkPool(c *gin.Context) {
 }
 
 func DeleteExtlinkPoolItem(c *gin.Context) {
-	db.DB.Exec("DELETE FROM extlink_pool WHERE id=?", c.Param("id"))
+	db.DB.Exec("DELETE FROM extlink_pool WHERE id=$1", c.Param("id"))
 	c.JSON(200, gin.H{"code": 0, "data": "删除成功"})
 }
 
@@ -151,13 +151,13 @@ func CreateExternalLink(c *gin.Context) {
 	if req.RelType == "" {
 		req.RelType = "dofollow"
 	}
-	result, err := db.DB.Exec(`INSERT INTO external_links (site_id, url, anchor_text, source_url, rel_type, category, note) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		req.SiteID, req.URL, req.AnchorText, req.SourceURL, req.RelType, req.Category, req.Note)
+	var id int64
+	err := db.DB.QueryRow(`INSERT INTO external_links (site_id, url, anchor_text, source_url, rel_type, category, note) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+		req.SiteID, req.URL, req.AnchorText, req.SourceURL, req.RelType, req.Category, req.Note).Scan(&id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "添加失败"})
 		return
 	}
-	id, _ := result.LastInsertId()
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"id": id}})
 }
 
@@ -165,7 +165,7 @@ func UpdateExternalLink(c *gin.Context) {
 	id := c.Param("id")
 	// Verify ownership via site_id
 	var siteID string
-	if err := db.DB.QueryRow("SELECT site_id FROM external_links WHERE id=?", id).Scan(&siteID); err != nil {
+	if err := db.DB.QueryRow("SELECT site_id FROM external_links WHERE id=$1", id).Scan(&siteID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "外链不存在"})
 		return
 	}
@@ -177,7 +177,7 @@ func UpdateExternalLink(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "参数错误"})
 		return
 	}
-	db.DB.Exec(`UPDATE external_links SET url=?, anchor_text=?, source_url=?, rel_type=?, category=?, note=? WHERE id=?`,
+	db.DB.Exec(`UPDATE external_links SET url=$1, anchor_text=$2, source_url=$3, rel_type=$4, category=$5, note=$6 WHERE id=$7`,
 		req.URL, req.AnchorText, req.SourceURL, req.RelType, req.Category, req.Note, id)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "更新成功"})
 }
@@ -186,14 +186,14 @@ func DeleteExternalLink(c *gin.Context) {
 	id := c.Param("id")
 	// Verify ownership via site_id
 	var siteID string
-	if err := db.DB.QueryRow("SELECT site_id FROM external_links WHERE id=?", id).Scan(&siteID); err != nil {
+	if err := db.DB.QueryRow("SELECT site_id FROM external_links WHERE id=$1", id).Scan(&siteID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "外链不存在"})
 		return
 	}
 	if !canAccessSite(c, siteID) {
 		return
 	}
-	db.DB.Exec("DELETE FROM external_links WHERE id = ?", id)
+	db.DB.Exec("DELETE FROM external_links WHERE id = $1", id)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "删除成功"})
 }
 
@@ -201,7 +201,7 @@ func CheckExternalLink(c *gin.Context) {
 	id := c.Param("id")
 	var url string
 	var checkSiteID string
-	if err := db.DB.QueryRow("SELECT url, site_id FROM external_links WHERE id = ?", id).Scan(&url, &checkSiteID); err != nil {
+	if err := db.DB.QueryRow("SELECT url, site_id FROM external_links WHERE id = $1", id).Scan(&url, &checkSiteID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "外链不存在"})
 		return
 	}
@@ -210,6 +210,6 @@ func CheckExternalLink(c *gin.Context) {
 	}
 	result := crawler.FetchPage(crawler.URLSpec{URL: url}, 15*time.Second)
 	now := time.Now().Format("2006-01-02 15:04:05")
-	db.DB.Exec("UPDATE external_links SET status_code=?, checked_at=? WHERE id=?", result.StatusCode, now, id)
+	db.DB.Exec("UPDATE external_links SET status_code=$1, checked_at=$2 WHERE id=$3", result.StatusCode, now, id)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status_code": result.StatusCode, "ttfb_ms": result.TTFB}})
 }

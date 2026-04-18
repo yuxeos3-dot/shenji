@@ -103,7 +103,7 @@ func getTokenInvalidatedAfter(userID int64) int64 {
 	tokenInvalidationMu.RUnlock()
 
 	var val int64
-	db.DB.QueryRow("SELECT COALESCE(token_invalidated_after, 0) FROM users WHERE id = ?", userID).Scan(&val)
+	db.DB.QueryRow("SELECT COALESCE(token_invalidated_after, 0) FROM users WHERE id = $1", userID).Scan(&val)
 
 	tokenInvalidationMu.Lock()
 	tokenInvalidationCache[userID] = &tokenInvalidationEntry{

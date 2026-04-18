@@ -138,17 +138,17 @@ func CreateUser(c *gin.Context) {
 		return
 	}
 
-	result, err := db.DB.Exec(
+	var id int64
+	err := db.DB.QueryRow(
 		`INSERT INTO users (name, email, password, role, department_id, group_id)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 		req.Name, req.Email, string(hash), req.Role, req.DepartmentID, req.GroupID,
-	)
+	).Scan(&id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "创建失败，邮箱可能已存在"})
 		return
 	}
 
-	id, _ := result.LastInsertId()
 
 	// Initial permissions — skip entirely for admins (they have all
 	// perms implicitly) and when the caller didn't send any (empty
@@ -161,7 +161,7 @@ func CreateUser(c *gin.Context) {
 		cleaned, permErr := cleanPermissionList(req.Permissions)
 		if permErr == nil {
 			js, _ := json.Marshal(cleaned)
-			db.DB.Exec("UPDATE users SET permissions=? WHERE id=?", string(js), id)
+			db.DB.Exec("UPDATE users SET permissions=$1 WHERE id=$2", string(js), id)
 		} else {
 			log.Printf("[create_user] id=%d perms rejected: %v", id, permErr)
 		}
@@ -181,7 +181,7 @@ func validateDeptGroupPair(deptID, groupID int64) error {
 	}
 	if deptID > 0 {
 		var exists int
-		db.DB.QueryRow(`SELECT 1 FROM departments WHERE id = ?`, deptID).Scan(&exists)
+		db.DB.QueryRow(`SELECT 1 FROM departments WHERE id = $1`, deptID).Scan(&exists)
 		if exists != 1 {
 			return fmt.Errorf("指定的部门不存在")
 		}
@@ -191,7 +191,7 @@ func validateDeptGroupPair(deptID, groupID int64) error {
 			return fmt.Errorf("选择组必须先选部门")
 		}
 		var gDept int64
-		db.DB.QueryRow(`SELECT department_id FROM dept_groups WHERE id = ?`, groupID).Scan(&gDept)
+		db.DB.QueryRow(`SELECT department_id FROM dept_groups WHERE id = $1`, groupID).Scan(&gDept)
 		if gDept == 0 {
 			return fmt.Errorf("指定的组不存在")
 		}
@@ -221,7 +221,7 @@ func UpdateUser(c *gin.Context) {
 	// own record and accidentally picks role=member.
 	if req.Role != "" && req.Role != "admin" {
 		var curRole string
-		if err := db.DB.QueryRow("SELECT role FROM users WHERE id = ?", id).Scan(&curRole); err != nil {
+		if err := db.DB.QueryRow("SELECT role FROM users WHERE id = $1", id).Scan(&curRole); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "用户不存在"})
 			return
 		}
@@ -244,7 +244,7 @@ func UpdateUser(c *gin.Context) {
 		// still gets validated against the existing department.
 		var curDept, curGroup int64
 		db.DB.QueryRow(
-			"SELECT COALESCE(department_id, 0), COALESCE(group_id, 0) FROM users WHERE id = ?", id,
+			"SELECT COALESCE(department_id, 0), COALESCE(group_id, 0) FROM users WHERE id = $1", id,
 		).Scan(&curDept, &curGroup)
 		newDept := curDept
 		newGroup := curGroup
@@ -265,7 +265,7 @@ func UpdateUser(c *gin.Context) {
 			return
 		}
 		if _, err := db.DB.Exec(
-			"UPDATE users SET department_id = ?, group_id = ? WHERE id = ?",
+			"UPDATE users SET department_id = $1, group_id = $2 WHERE id = $3",
 			newDept, newGroup, id,
 		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "更新部门/组失败"})
@@ -274,7 +274,7 @@ func UpdateUser(c *gin.Context) {
 	}
 
 	_, err := db.DB.Exec(
-		"UPDATE users SET name = COALESCE(NULLIF(?, ''), name), email = COALESCE(NULLIF(?, ''), email), role = COALESCE(NULLIF(?, ''), role), telegram_id = ? WHERE id = ?",
+		"UPDATE users SET name = COALESCE(NULLIF($1, ''), name), email = COALESCE(NULLIF($2, ''), email), role = COALESCE(NULLIF($3, ''), role), telegram_id = $4 WHERE id = $5",
 		req.Name, req.Email, req.Role, req.TelegramID, id,
 	)
 	if err != nil {
@@ -300,7 +300,7 @@ func DeleteUser(c *gin.Context) {
 	// Prevent deleting the last admin — losing every admin wedges the
 	// system until someone edits the DB by hand.
 	var role string
-	if err := db.DB.QueryRow("SELECT role FROM users WHERE id = ?", id).Scan(&role); err != nil {
+	if err := db.DB.QueryRow("SELECT role FROM users WHERE id = $1", id).Scan(&role); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "用户不存在"})
 		return
 	}
@@ -327,20 +327,20 @@ func DeleteUser(c *gin.Context) {
 		args []interface{}
 	}{
 		// Reassign site ownership to the deleting admin so sites don't orphan.
-		{"UPDATE sites SET created_by = ? WHERE created_by = ?", []interface{}{currentUserID, id}},
+		{"UPDATE sites SET created_by = $1 WHERE created_by = $2", []interface{}{currentUserID, id}},
 		// Audit tasks keep history; null out the user reference.
-		{"UPDATE audit_tasks SET triggered_by = NULL WHERE triggered_by = ?", []interface{}{id}},
+		{"UPDATE audit_tasks SET triggered_by = NULL WHERE triggered_by = $1", []interface{}{id}},
 		// Reports belong to the user — delete them rather than leaving orphans.
-		{"DELETE FROM daily_reports WHERE user_id = ?", []interface{}{id}},
+		{"DELETE FROM daily_reports WHERE user_id = $1", []interface{}{id}},
 		// Shared backlink pool: preserve data, null-out the creator reference.
-		{"UPDATE extlink_pool SET created_by = 0 WHERE created_by = ?", []interface{}{id}},
+		{"UPDATE extlink_pool SET created_by = 0 WHERE created_by = $1", []interface{}{id}},
 		// #51: Cascade-clean per-user platform config / credentials tables.
-		{"DELETE FROM user_oauth_config WHERE user_id = ?", []interface{}{id}},
-		{"DELETE FROM user_oauth_tokens WHERE user_id = ?", []interface{}{id}},
-		{"DELETE FROM user_telegram WHERE user_id = ?", []interface{}{id}},
-		{"DELETE FROM user_bing WHERE user_id = ?", []interface{}{id}},
+		{"DELETE FROM user_oauth_config WHERE user_id = $1", []interface{}{id}},
+		{"DELETE FROM user_oauth_tokens WHERE user_id = $1", []interface{}{id}},
+		{"DELETE FROM user_telegram WHERE user_id = $1", []interface{}{id}},
+		{"DELETE FROM user_bing WHERE user_id = $1", []interface{}{id}},
 		// Finally, delete the user.
-		{"DELETE FROM users WHERE id = ?", []interface{}{id}},
+		{"DELETE FROM users WHERE id = $1", []interface{}{id}},
 	}
 	for _, s := range steps {
 		if _, err := tx.Exec(s.q, s.args...); err != nil {

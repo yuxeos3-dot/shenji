@@ -84,7 +84,7 @@ func MigrateGlobalToPersonalConfig() {
 		}
 		if _, err := tx.Exec(
 			`INSERT INTO user_oauth_config (user_id, service, client_id, client_secret, redirect_uri)
-			 VALUES (?, 'gsc', ?, ?, ?)
+			 VALUES ($1, 'gsc', $2, $3, $4)
 			 ON CONFLICT(user_id, service) DO UPDATE SET
 			   client_id = excluded.client_id,
 			   client_secret = CASE WHEN excluded.client_secret != '' THEN excluded.client_secret ELSE user_oauth_config.client_secret END,
@@ -101,7 +101,7 @@ func MigrateGlobalToPersonalConfig() {
 			}
 			if _, err := tx.Exec(
 				`INSERT INTO user_oauth_config (user_id, service, client_id, client_secret, redirect_uri)
-				 VALUES (?, 'ga', ?, ?, ?)
+				 VALUES ($1, 'ga', $2, $3, $4)
 				 ON CONFLICT(user_id, service) DO UPDATE SET
 				   client_id = excluded.client_id,
 				   client_secret = CASE WHEN excluded.client_secret != '' THEN excluded.client_secret ELSE user_oauth_config.client_secret END,
@@ -125,7 +125,7 @@ func MigrateGlobalToPersonalConfig() {
 		}
 		if _, err := tx.Exec(
 			`INSERT INTO user_oauth_config (user_id, service, client_id, client_secret, redirect_uri)
-			 VALUES (?, 'yandex', ?, ?, ?)
+			 VALUES ($1, 'yandex', $2, $3, $4)
 			 ON CONFLICT(user_id, service) DO UPDATE SET
 			   client_id = excluded.client_id,
 			   client_secret = CASE WHEN excluded.client_secret != '' THEN excluded.client_secret ELSE user_oauth_config.client_secret END,
@@ -141,7 +141,7 @@ func MigrateGlobalToPersonalConfig() {
 
 	// ─── OAuth access tokens ────────────────────────────────────────────
 	// CRITICAL: read all rows fully + close BEFORE issuing any write. On
-	// modernc.org/sqlite with MaxOpenConns=1 the single connection is
+	// pgx with MaxOpenConns=1 the single connection is
 	// pinned to the Rows iterator; issuing db.DB.Exec inside the rows.Next
 	// loop deadlocks forever (Exec waits for conn, Rows never releases
 	// until Close). Drain into a slice, Close, then INSERT.
@@ -177,7 +177,7 @@ func MigrateGlobalToPersonalConfig() {
 		}
 		if _, err := tx.Exec(
 			`INSERT INTO user_oauth_tokens (user_id, service, access_token, refresh_token, expires_at)
-			 VALUES (?, ?, ?, ?, ?)
+			 VALUES ($1, $2, $3, $4, $5)
 			 ON CONFLICT(user_id, service) DO UPDATE SET
 			   access_token = excluded.access_token,
 			   refresh_token = excluded.refresh_token,
@@ -200,7 +200,7 @@ func MigrateGlobalToPersonalConfig() {
 			enc = v
 		}
 		if _, err := tx.Exec(
-			`INSERT INTO user_telegram (user_id, bot_token, chat_id) VALUES (?, ?, ?)
+			`INSERT INTO user_telegram (user_id, bot_token, chat_id) VALUES ($1, $2, $3)
 			 ON CONFLICT(user_id) DO UPDATE SET
 			   bot_token = excluded.bot_token,
 			   chat_id = excluded.chat_id,
@@ -221,7 +221,7 @@ func MigrateGlobalToPersonalConfig() {
 			enc = v
 		}
 		if _, err := tx.Exec(
-			`INSERT INTO user_bing (user_id, api_key) VALUES (?, ?)
+			`INSERT INTO user_bing (user_id, api_key) VALUES ($1, $2)
 			 ON CONFLICT(user_id) DO UPDATE SET
 			   api_key = excluded.api_key,
 			   updated_at = CURRENT_TIMESTAMP`,
@@ -239,7 +239,7 @@ func MigrateGlobalToPersonalConfig() {
 		if v, err := EncryptToken(key); err == nil {
 			enc = v
 		}
-		if _, err := tx.Exec(`UPDATE users SET frw_apikey = ? WHERE id = ?`, enc, target); err != nil {
+		if _, err := tx.Exec(`UPDATE users SET frw_apikey = $1 WHERE id = $2`, enc, target); err != nil {
 			log.Printf("[personal-migration] frw: %v", err)
 		} else {
 			migrated++
@@ -257,7 +257,7 @@ func MigrateGlobalToPersonalConfig() {
 		"ai_api_key", "ai_api_url", "ai_model",
 	}
 	for _, k := range obsoleteKeys {
-		if _, err := tx.Exec(`DELETE FROM settings WHERE key = ?`, k); err != nil {
+		if _, err := tx.Exec(`DELETE FROM settings WHERE key = $1`, k); err != nil {
 			log.Printf("[personal-migration] delete setting %s: %v", k, err)
 		}
 	}
@@ -292,7 +292,7 @@ func resolveMigrationTargetUser() int64 {
 	}
 	var id int64
 	err := db.DB.QueryRow(
-		`SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1`, email,
+		`SELECT id FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`, email,
 	).Scan(&id)
 	if err == nil && id > 0 {
 		log.Printf("[personal-migration] target: %s (id=%d)", email, id)

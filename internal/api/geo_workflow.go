@@ -99,7 +99,7 @@ func loadGeoJob(jobID int64) (*geoWorkflowJob, error) {
 		       COALESCE(final_meta_desc,''), COALESCE(final_faq,'[]'),
 		       COALESCE(ai_model,''), COALESCE(error_msg,''), COALESCE(article_id,0),
 		       created_at, updated_at
-		FROM geo_workflow_jobs WHERE id = ?`, jobID).Scan(
+		FROM geo_workflow_jobs WHERE id = $1`, jobID).Scan(
 		&j.ID, &j.UserID, &j.SiteID, &j.ContentType, &j.TitleID,
 		&j.Keyword, &j.TitleText, &j.WordCount, &j.WritingAngle, &j.KnowledgeID,
 		&j.DetailType, &j.Language, &j.Style, &j.OutputFormat,
@@ -119,16 +119,16 @@ func loadGeoJob(jobID int64) (*geoWorkflowJob, error) {
 // setJobStep writes progress into the job so polling UI sees it.
 func setJobStep(jobID int64, step int, label, status string) {
 	db.DB.Exec(`UPDATE geo_workflow_jobs
-		SET current_step = ?, step_label = ?, status = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?`, step, label, status, jobID)
+		SET current_step = $1, step_label = $2, status = $3, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $4`, step, label, status, jobID)
 }
 
 // failJob marks a job failed with an error message.
 func failJob(jobID int64, msg string) {
 	log.Printf("[geo-workflow] job %d failed: %s", jobID, msg)
 	db.DB.Exec(`UPDATE geo_workflow_jobs
-		SET status='failed', error_msg=?, step_label=?, updated_at=CURRENT_TIMESTAMP
-		WHERE id=?`, msg, "❌ "+msg, jobID)
+		SET status='failed', error_msg=$1, step_label=$2, updated_at=CURRENT_TIMESTAMP
+		WHERE id=$3`, msg, "❌ "+msg, jobID)
 }
 
 // loadSitePages returns the site's registered pages as "name|url" lines.
@@ -137,7 +137,7 @@ func failJob(jobID int64, msg string) {
 // hundreds of pages — the AI only needs a representative sample.
 func loadSitePages(siteID int64) []struct{ Name, URL string } {
 	rows, err := db.DB.Query(
-		`SELECT name, url FROM site_pages WHERE site_id = ? ORDER BY id LIMIT 12`,
+		`SELECT name, url FROM site_pages WHERE site_id = $1 ORDER BY id LIMIT 12`,
 		siteID)
 	if err != nil {
 		return nil
@@ -212,7 +212,7 @@ func GeoStartKeywordWorkflow(c *gin.Context) {
 	if req.TitleID > 0 {
 		var title, kw string
 		if err := db.DB.QueryRow(
-			`SELECT title, COALESCE(keyword,'') FROM geo_titles WHERE id = ?`, req.TitleID,
+			`SELECT title, COALESCE(keyword,'') FROM geo_titles WHERE id = $1`, req.TitleID,
 		).Scan(&title, &kw); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "关键词不存在"})
 			return
@@ -302,30 +302,24 @@ func GeoStartKeywordWorkflow(c *gin.Context) {
 	}
 
 	uid := c.GetInt64("user_id")
-	res, err := db.DB.Exec(
+	var jobID int64
+	err := db.DB.QueryRow(
 		`INSERT INTO geo_workflow_jobs
 		 (user_id, site_id, content_type, title_id, keyword, title_text,
 		  word_count, writing_angle, knowledge_id,
 		  detail_type, language, style, output_format,
 		  paragraph_struct, extra_requirements, reference_url, custom_prompt,
 		  status, step_label)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '⏳ 等待启动')`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'pending', '⏳ 等待启动') RETURNING id`,
 		uid, req.SiteID, req.ContentType, req.TitleID, req.Keyword, req.TitleText,
 		req.WordCount, req.WritingAngle, req.KnowledgeID,
 		req.DetailType, req.Language, req.Style, req.OutputFormat,
 		req.ParagraphStruct, req.ExtraRequirements, req.ReferenceURL, req.CustomPrompt,
-	)
+	).Scan(&jobID)
 	if err != nil {
 		<-geoWorkflowSem // release on DB error
 		log.Printf("[geo-workflow] insert job: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "创建任务失败"})
-		return
-	}
-	jobID, err := res.LastInsertId()
-	if err != nil {
-		<-geoWorkflowSem
-		log.Printf("[geo-workflow] LastInsertId: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "任务 ID 获取失败"})
 		return
 	}
 
@@ -433,26 +427,26 @@ func GeoApplyWorkflowJob(c *gin.Context) {
 		kwField = job.Keyword // keep simple; meta_title is separate column
 	}
 
-	res, err := db.DB.Exec(
+	var articleID int64
+	err := db.DB.QueryRow(
 		`INSERT INTO geo_articles
 		 (task_id, title_id, site_id, title, content, excerpt, keywords,
 		  meta_title, meta_description, ai_model, word_count, status, review_status, content_type)
-		 VALUES (0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'pending', ?)`,
+		 VALUES (0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft', 'pending', $11) RETURNING id`,
 		job.TitleID, job.SiteID, title, content, excerpt, kwField,
 		metaTitle, metaDesc, job.AIModel, wc, job.ContentType,
-	)
+	).Scan(&articleID)
 	if err != nil {
 		log.Printf("[geo-workflow] apply insert: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存文章失败"})
 		return
 	}
-	articleID, _ := res.LastInsertId()
 
 	// Mark source keyword as used (if any) + tag job with article id.
 	if job.TitleID > 0 {
-		db.DB.Exec(`UPDATE geo_titles SET is_used=1, used_at=CURRENT_TIMESTAMP WHERE id=?`, job.TitleID)
+		db.DB.Exec(`UPDATE geo_titles SET is_used=1, used_at=CURRENT_TIMESTAMP WHERE id=$1`, job.TitleID)
 	}
-	db.DB.Exec(`UPDATE geo_workflow_jobs SET article_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+	db.DB.Exec(`UPDATE geo_workflow_jobs SET article_id=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2`,
 		articleID, id)
 
 	WriteAuditLog(c, "geo_workflow_apply", "geo_article",
@@ -484,7 +478,7 @@ func GeoDiscardWorkflowJob(c *gin.Context) {
 	}
 	// If the job has already been applied to an article, the article
 	// stays — user has to delete that separately. Just drop the job.
-	if _, err := db.DB.Exec(`DELETE FROM geo_workflow_jobs WHERE id = ?`, id); err != nil {
+	if _, err := db.DB.Exec(`DELETE FROM geo_workflow_jobs WHERE id = $1`, id); err != nil {
 		log.Printf("[geo-workflow] discard %d: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "删除失败"})
 		return
@@ -514,15 +508,15 @@ func GeoListWorkflowJobs(c *gin.Context) {
 	if c.Query("all") == "1" && role == "admin" {
 		q += "1=1"
 	} else {
-		q += "user_id = ?"
+		q += fmt.Sprintf("user_id = $%d", len(args)+1)
 		args = append(args, uid)
 	}
 	if v := c.Query("site_id"); v != "" {
-		q += " AND site_id = ?"
+		q += fmt.Sprintf(" AND site_id = $%d", len(args)+1)
 		args = append(args, v)
 	}
 	if v := c.Query("content_type"); v != "" {
-		q += " AND content_type = ?"
+		q += fmt.Sprintf(" AND content_type = $%d", len(args)+1)
 		args = append(args, v)
 	}
 	q += " ORDER BY id DESC LIMIT 50"
@@ -621,8 +615,8 @@ func runKeywordWorkflow(jobID, userID int64, req StartKeywordWorkflowRequest) {
 		draftForDB = draftForDB[:300*1024] + "\n...[已截断]"
 	}
 	db.DB.Exec(`UPDATE geo_workflow_jobs
-		SET draft = ?, ai_model = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?`, draftForDB, model, jobID)
+		SET draft = $1, ai_model = $2, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $3`, draftForDB, model, jobID)
 
 	// ───── Step 2: TDK + FAQ extraction ────────────────────────────────
 	setJobStep(jobID, 2, "🔎 正在提取 SEO 元数据（标题 / 描述 / FAQ）...", "running")
@@ -654,9 +648,9 @@ func runKeywordWorkflow(jobID, userID int64, req StartKeywordWorkflowRequest) {
 
 	db.DB.Exec(`UPDATE geo_workflow_jobs
 		SET status = 'done', current_step = 2, step_label = '✅ 完成，等待审核应用',
-		    final_content = ?, final_meta_title = ?, final_meta_desc = ?, final_faq = ?,
+		    final_content = $1, final_meta_title = $2, final_meta_desc = $3, final_faq = $4,
 		    updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?`, draft, mt, md, faqJSON, jobID)
+		WHERE id = $5`, draft, mt, md, faqJSON, jobID)
 }
 
 // finishJobWithFallback completes a job with safe meta defaults when
@@ -673,14 +667,14 @@ func finishJobWithFallback(jobID int64, draft, keyword, title string) {
 	db.DB.Exec(`UPDATE geo_workflow_jobs
 		SET status = 'done', current_step = 2,
 		    step_label = '⚠️ 完成（SEO 元数据使用默认值，建议手动编辑）',
-		    final_content = ?, final_meta_title = ?, final_meta_desc = ?, final_faq = '[]',
+		    final_content = $1, final_meta_title = $2, final_meta_desc = $3, final_faq = '[]',
 		    updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?`, draft, mt, md, jobID)
+		WHERE id = $4`, draft, mt, md, jobID)
 }
 
 // ─── Wizard defaults endpoint ──────────────────────────────────────────────
 
-// GeoGetDefaults GET /api/v1/geo/defaults?content_type=geo|extlink
+// GeoGetDefaults GET /api/v1/geo/defaults$1content_type=geo|extlink
 //
 // Returns the built-in default prompt template + recommended params
 // so the wizard can pre-fill step 2/3. The frontend can render this
