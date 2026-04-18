@@ -32,6 +32,9 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	// #37: Normalize email to lowercase before all DB operations.
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+
 	// Account-level lockout check — prevents brute force from rotating IPs.
 	if locked, retry := IsAccountLocked(req.Email); locked {
 		c.JSON(http.StatusTooManyRequests, gin.H{
@@ -94,9 +97,6 @@ func Login(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"data": gin.H{
-			// Token is returned in the body for backwards-compat with any
-			// non-browser API client; browsers should prefer the cookie.
-			"token":      token,
 			"csrf_token": csrf,
 			"user": gin.H{
 				"id":    id,
