@@ -121,7 +121,7 @@ func CreateSite(c *gin.Context) {
 		req.URLPagesJSON, req.AuditScheduleEnabled, req.AuditIntervalHours, req.AuditDailyHour, userID,
 	)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "创建失败，域名可能已存在"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "你已有一个该域名的站点"})
 		return
 	}
 
