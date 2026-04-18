@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"seo-system/internal/db"
+	"seo-system/internal/httpx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,7 +36,7 @@ func bingFetch(apiKey, endpoint string, params map[string]string) (json.RawMessa
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := httpx.Outbound(20 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"seo-system/internal/db"
+	"seo-system/internal/httpx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -140,7 +141,7 @@ func callRewriteAI(prompt string) (interface{}, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := httpx.Outbound(120 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"seo-system/internal/db"
+	"seo-system/internal/httpx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -108,7 +109,7 @@ func gaAdminGET(token, url string) (json.RawMessage, error) {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := httpx.Outbound(30 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

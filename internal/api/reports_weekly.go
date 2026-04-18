@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"seo-system/internal/db"
+	"seo-system/internal/httpx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -419,7 +420,7 @@ func summarizeWeekWithAI(start, end, concatenated string) (string, error) {
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := httpx.Outbound(120 * time.Second)
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return "", err

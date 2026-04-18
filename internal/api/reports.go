@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"seo-system/internal/db"
+	"seo-system/internal/httpx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -328,7 +329,7 @@ Agent自动化应用（必须有）：
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 90 * time.Second}
+	client := httpx.Outbound(90 * time.Second)
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return "", err

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"seo-system/internal/db"
+	"seo-system/internal/httpx"
 	"seo-system/internal/secure"
 
 	"github.com/gin-gonic/gin"
@@ -139,7 +140,7 @@ func testAISlot(slot AISlot) error {
 	req, _ := http.NewRequest("POST", slot.APIURL+"/chat/completions", bytes.NewReader(bj))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+slot.APIKey)
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := httpx.Outbound(15 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -239,7 +240,7 @@ func callAISlot(apiURL, apiKey, model, prompt string, maxTokens int) (string, er
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := httpx.Outbound(120 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err

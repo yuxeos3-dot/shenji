@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"seo-system/internal/db"
+	"seo-system/internal/httpx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -360,7 +361,7 @@ func polishEvaluationWithAI(reportType, draft string) (string, error) {
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := httpx.Outbound(60 * time.Second)
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return "", err

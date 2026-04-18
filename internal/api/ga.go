@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"seo-system/internal/db"
+	"seo-system/internal/httpx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -80,7 +81,7 @@ func ga4Fetch(token, propertyID string, body map[string]interface{}) (json.RawMe
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := httpx.Outbound(30 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

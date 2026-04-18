@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"seo-system/internal/db"
+	"seo-system/internal/httpx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -400,7 +401,7 @@ func summarizeMonthWithAI(year, month int, concatenated string) (string, error) 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 180 * time.Second} // months need more time
+	client := httpx.Outbound(180 * time.Second) // months need more time
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return "", err

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"seo-system/internal/crawler"
+	"seo-system/internal/httpx"
 	"seo-system/internal/db"
 )
 
@@ -573,7 +574,7 @@ func CallAIChapters(prompt string) ([]V6Chapter, string, string, error) {
 		return nil, "", model, fmt.Errorf("AI chapters 请求体序列化失败: %w", err)
 	}
 
-	client := &http.Client{Timeout: 300 * time.Second}
+	client := httpx.Outbound(300 * time.Second)
 	result, err := postAIWithRetry(client, apiURL, apiKey, jsonBody, "ai-chapters")
 	if err != nil {
 		return nil, "", model, err
@@ -1131,7 +1132,7 @@ func CallAI(prompt string) (*AnalysisResult, string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 300 * time.Second} // 5min for deep audit
+	client := httpx.Outbound(300 * time.Second) // 5min for deep audit
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, model, fmt.Errorf("AI请求失败: %w", err)
@@ -1443,7 +1444,7 @@ func CallAIStrategy(prompt string) (*V6Chapter, string, error) {
 		return nil, model, fmt.Errorf("策略 AI 请求体序列化失败: %w", err)
 	}
 
-	client := &http.Client{Timeout: 240 * time.Second}
+	client := httpx.Outbound(240 * time.Second)
 	result, err := postAIWithRetry(client, apiURL, apiKey, jsonBody, "ai-strategy")
 	if err != nil {
 		return nil, model, fmt.Errorf("策略 AI 请求失败: %w", err)
@@ -1546,7 +1547,7 @@ func TestAIConnection() error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := httpx.Outbound(30 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("连接失败: %w", err)
