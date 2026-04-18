@@ -284,7 +284,9 @@ func Init() {
 	// raise this value.
 	DB.SetMaxOpenConns(1)
 
-	// Additional PRAGMAs (idempotent).
+	// Additional PRAGMAs (idempotent). These reinforce the DSN params
+	// and ensure WAL mode, synchronous=NORMAL, busy_timeout=5000 are
+	// active even if the driver ignores underscore-prefixed DSN hints.
 	for _, p := range []string{
 		"PRAGMA journal_mode=WAL;",
 		"PRAGMA synchronous=NORMAL;",
@@ -294,6 +296,11 @@ func Init() {
 		if _, err := DB.Exec(p); err != nil {
 			log.Printf("PRAGMA failed (%s): %v", p, err)
 		}
+	}
+	// Verify WAL mode is active (some drivers silently ignore DSN params).
+	var journalMode string
+	if err := DB.QueryRow("PRAGMA journal_mode").Scan(&journalMode); err == nil {
+		log.Printf("SQLite journal_mode=%s", journalMode)
 	}
 
 	if _, err := DB.Exec(schema); err != nil {
