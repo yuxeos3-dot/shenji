@@ -228,14 +228,17 @@ func requireCreatorOrAdmin(c *gin.Context, t *coordTask, action string) bool {
 	return false
 }
 
-// requireAssigneeOrAdmin blocks actions that only the assigned developer
-// (or an admin) may perform: submit, ask. Writes a 403 otherwise.
-func requireAssigneeOrAdmin(c *gin.Context, t *coordTask, action string) bool {
+// requireAssignee blocks actions that only the assigned developer may
+// perform: submit ("开发完毕"), ask ("提问"). Strict — no admin bypass.
+// An admin who needs to act as the developer must reassign the task to
+// themselves first; this avoids the footgun where admin-as-creator
+// ends up self-submitting their own task.
+func requireAssignee(c *gin.Context, t *coordTask, action string) bool {
 	uid := c.GetInt64("user_id")
-	if t.AssigneeID == uid || isAdmin(c) {
+	if t.AssigneeID == uid {
 		return true
 	}
-	c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "仅任务开发者或管理员可" + action})
+	c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "仅任务开发者可" + action + "（管理员如需代操作，请先把任务重新分配给自己）"})
 	return false
 }
 
@@ -644,9 +647,10 @@ func SubmitCoordTask(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "只有「开发中」或「待回复」的任务才能标记为修改完毕"})
 		return
 	}
-	// Only the developer on the hook (or admin) can declare the work done.
-	// The creator waiting on the other side must not be able to self-submit.
-	if !requireAssigneeOrAdmin(c, t, "提交修改完毕") {
+	// Only the developer on the hook can declare the work done. An admin
+	// who happens to be the creator must NOT be able to self-submit —
+	// that would collapse the 开发 / 审核 separation.
+	if !requireAssignee(c, t, "提交修改完毕") {
 		return
 	}
 
@@ -748,11 +752,11 @@ func AskCoordTask(c *gin.Context) {
 		return
 	}
 
-	// #35: Only the assignee (or admin) may ask a question.
+	// #35: Only the assignee may ask a question. No admin bypass —
+	// questions are a developer's tool to unblock themselves, not a
+	// generic comment. Admin can still use 评论 to drop a note.
 	uid, uname := currentUser(c)
-	role, _ := c.Get("role")
-	if t.AssigneeID != uid && role != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "只有任务的开发者或管理员才能发起提问"})
+	if !requireAssignee(c, t, "发起提问") {
 		return
 	}
 

@@ -499,15 +499,20 @@ const developers = ref([])
 const loading = ref(false)
 const sending = ref(false)
 
-// Role-based button visibility. Admin always sees every button (escape
-// hatch when a colleague is out). Otherwise the ball is with exactly
-// one role at a time: creator OR assignee. These refresh automatically
-// after every loadTask() because they depend on task.value.
+// Role-based button visibility. Who *this* task is assigned to matters,
+// not the user's global admin flag — an admin who created a task should
+// NOT be able to click "开发完毕" themselves, that's the developer's job.
+//
+// Admin override survives on creator-side actions only (assign / verify /
+// reject / edit / delete), so a genuine ops problem — e.g. the original
+// creator left the company and a task is stuck — can still be unblocked.
+// For developer-side actions (submit / ask), admin must reassign the task
+// to themselves first; there's no silent bypass.
 const isAdminUser = computed(() => userStore.isAdmin())
 const isCreator = computed(() => !!task.value && userStore.user?.id === task.value.created_by)
 const isAssignee = computed(() => !!task.value && userStore.user?.id === task.value.assignee_id)
 const canCreatorAct = computed(() => isAdminUser.value || isCreator.value)
-const canAssigneeAct = computed(() => isAdminUser.value || isAssignee.value)
+const canAssigneeAct = computed(() => isAssignee.value)
 
 const editingNote = ref(false)
 const noteDraft = ref('')
