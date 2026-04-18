@@ -27,6 +27,7 @@ package api
 import (
 	"database/sql"
 	"log"
+	"os"
 
 	"seo-system/internal/db"
 )
@@ -261,27 +262,23 @@ func MigrateGlobalToPersonalConfig() {
 	log.Printf("[personal-migration] DONE — migrated %d global credential(s) to user id=%d", migrated, target)
 }
 
-// resolveMigrationTargetUser returns 沈万三's user id, or the first admin
-// if that account doesn't exist. The function deliberately hard-codes the
-// email rather than reading it from env — this only runs once ever, and
-// the correct target is part of the launch agreement.
+// resolveMigrationTargetUser reads MIGRATION_TARGET_EMAIL from environment.
+// If not set, migration is skipped — no hardcoded fallbacks.
 func resolveMigrationTargetUser() int64 {
+	email := os.Getenv("MIGRATION_TARGET_EMAIL")
+	if email == "" {
+		log.Println("[personal-migration] MIGRATION_TARGET_EMAIL not set; skipping migration")
+		return 0
+	}
 	var id int64
 	err := db.DB.QueryRow(
-		`SELECT id FROM users WHERE LOWER(email) = 'shenwanshan@gmail.com' LIMIT 1`,
+		`SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1`, email,
 	).Scan(&id)
 	if err == nil && id > 0 {
-		log.Printf("[personal-migration] target: 沈万三 (id=%d)", id)
+		log.Printf("[personal-migration] target: %s (id=%d)", email, id)
 		return id
 	}
-	// Fallback: first admin.
-	err = db.DB.QueryRow(
-		`SELECT id FROM users WHERE role = 'admin' ORDER BY id ASC LIMIT 1`,
-	).Scan(&id)
-	if err == nil && id > 0 {
-		log.Printf("[personal-migration] fallback target: first admin (id=%d)", id)
-		return id
-	}
+	log.Printf("[personal-migration] MIGRATION_TARGET_EMAIL=%s not found in users table", email)
 	return 0
 }
 
