@@ -629,12 +629,19 @@ func AskCoordTask(c *gin.Context) {
 	if !ok {
 		return
 	}
+
+	// #35: Only the assignee (or admin) may ask a question.
+	uid, uname := currentUser(c)
+	role, _ := c.Get("role")
+	if t.AssigneeID != uid && role != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "只有任务的开发者或管理员才能发起提问"})
+		return
+	}
+
 	if t.Status != coordStatusInProgress {
 		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "只有「开发中」的任务才能发起提问"})
 		return
 	}
-
-	uid, uname := currentUser(c)
 	_, err := db.DB.Exec(
 		`UPDATE coordination_tasks SET status = ?
 		 WHERE id = ? AND status = ?`,
@@ -668,12 +675,19 @@ func AnswerCoordTask(c *gin.Context) {
 	if !ok {
 		return
 	}
+
+	// #35: Only the task creator (or admin) may answer.
+	uid, uname := currentUser(c)
+	role, _ := c.Get("role")
+	if t.CreatedBy != uid && role != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "只有任务创建者或管理员才能回复"})
+		return
+	}
+
 	if t.Status != coordStatusAwaitingAnswer {
 		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "只有「待回复」的任务才能回复"})
 		return
 	}
-
-	uid, uname := currentUser(c)
 	_, err := db.DB.Exec(
 		`UPDATE coordination_tasks SET status = ?
 		 WHERE id = ? AND status = ?`,
