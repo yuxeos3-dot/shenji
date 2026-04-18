@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	"seo-system/internal/db"
 
@@ -23,11 +24,57 @@ func WriteAuditLog(c *gin.Context, action, targetType, targetID, detail string) 
 	)
 }
 
-// ListAuditLogs returns the most recent 200 audit log entries (admin only).
+// ListAuditLogs returns paginated, filterable audit log entries (admin only).
+// Query params: page (default 1), per_page (default 50, max 200),
+// start_date, end_date (YYYY-MM-DD), user_id, action.
 func ListAuditLogs(c *gin.Context) {
-	rows, err := db.DB.Query(
-		`SELECT id, user_id, user_email, action, target_type, target_id, detail, ip, created_at
-		 FROM audit_logs ORDER BY id DESC LIMIT 200`)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "50"))
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 50
+	}
+	if perPage > 200 {
+		perPage = 200
+	}
+	offset := (page - 1) * perPage
+
+	// Build WHERE clause from optional filters.
+	where := "1=1"
+	args := []interface{}{}
+
+	if uid := c.Query("user_id"); uid != "" {
+		where += " AND user_id = ?"
+		args = append(args, uid)
+	}
+	if act := c.Query("action"); act != "" {
+		where += " AND action = ?"
+		args = append(args, act)
+	}
+	if sd := c.Query("start_date"); sd != "" {
+		where += " AND created_at >= ?"
+		args = append(args, sd)
+	}
+	if ed := c.Query("end_date"); ed != "" {
+		where += " AND created_at <= ?"
+		args = append(args, ed+" 23:59:59")
+	}
+
+	// Total count for pagination.
+	var total int64
+	countSQL := "SELECT COUNT(*) FROM audit_logs WHERE " + where
+	if err := db.DB.QueryRow(countSQL, args...).Scan(&total); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
+		return
+	}
+
+	// Fetch page.
+	querySQL := "SELECT id, user_id, user_email, action, target_type, target_id, detail, ip, created_at FROM audit_logs WHERE " +
+		where + " ORDER BY id DESC LIMIT ? OFFSET ?"
+	queryArgs := append(args, perPage, offset)
+	rows, err := db.DB.Query(querySQL, queryArgs...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
 		return
@@ -50,5 +97,11 @@ func ListAuditLogs(c *gin.Context) {
 	if logs == nil {
 		logs = []gin.H{}
 	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": logs})
+	c.JSON(http.StatusOK, gin.H{
+		"code":     0,
+		"data":     logs,
+		"total":    total,
+		"page":     page,
+		"per_page": perPage,
+	})
 }
