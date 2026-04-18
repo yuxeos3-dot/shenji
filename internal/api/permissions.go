@@ -15,6 +15,26 @@ import (
 // ─── Permission tree (Magento-style ACL) ─────────────────────────────────────
 // Each permission has a code, label, and optional children. Admin has ALL
 // permissions implicitly. For member users, only checked permissions apply.
+//
+// #40 Enforcement note — permission tree vs route-level guards:
+//
+// The following tree sections are enforced by AdminRequired() middleware at
+// the route group level in main.go, NOT by RequirePermission(). Their tree
+// entries exist so the frontend can render them in the admin permission UI,
+// but the actual gate is the admin-only middleware:
+//
+//   users.*       → routes under /v1/users use AdminRequired()
+//   org.*         → routes under /v1/org   use AdminRequired()
+//   settings.*    → routes under /v1/settings use AdminRequired()
+//
+// Additionally these specific routes use AdminRequired() directly:
+//   reports.evaluate → POST/DELETE /v1/evaluations use AdminRequired()
+//   (audit-logs)     → /v1/audit-logs uses AdminRequired() (no tree entry)
+//   (cache)          → /v1/cache uses AdminRequired() (no tree entry)
+//
+// All other tree entries are checked via RequirePermission() on their
+// respective routes. If a new permission is added to the tree, a matching
+// RequirePermission() call must be added to the route definition.
 
 type PermNode struct {
 	Code     string     `json:"code"`
@@ -102,9 +122,12 @@ var PermissionTree = []PermNode{
 		{Code: "reports.monthly.view", Label: "查看月报"},
 		{Code: "reports.monthly.write", Label: "写 / 生成 / 提交月报"},
 		{Code: "reports.monthly.polish", Label: "月报 AI 润色"},
-		// Evaluation (admin-only, kept in tree for visibility)
+		// Evaluation (admin-only, kept in tree for visibility).
+		// NOTE: enforced by AdminRequired() on evaluation routes, not RequirePermission().
 		{Code: "reports.evaluate", Label: "评价下级汇报（仅管理员）"},
 	}},
+	// NOTE: users.* enforced by AdminRequired() in main.go, not RequirePermission().
+	// Kept in tree for frontend visibility / admin-panel rendering.
 	{Code: "users", Label: "用户管理（仅管理员）", Children: []PermNode{
 		{Code: "users.view", Label: "查看用户列表"},
 		{Code: "users.create", Label: "创建用户"},
@@ -112,10 +135,12 @@ var PermissionTree = []PermNode{
 		{Code: "users.delete", Label: "删除用户"},
 		{Code: "users.permissions", Label: "设置用户权限"},
 	}},
+	// NOTE: org.* enforced by AdminRequired() in main.go, not RequirePermission().
 	{Code: "org", Label: "组织结构（仅管理员）", Children: []PermNode{
 		{Code: "org.view", Label: "查看部门 / 组"},
 		{Code: "org.manage", Label: "管理部门 / 组"},
 	}},
+	// NOTE: settings.* enforced by AdminRequired() in main.go, not RequirePermission().
 	{Code: "settings", Label: "系统设置（仅管理员）", Children: []PermNode{
 		{Code: "settings.view", Label: "查看系统设置"},
 		{Code: "settings.edit", Label: "修改系统设置"},
