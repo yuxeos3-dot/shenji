@@ -81,11 +81,6 @@ const intervalHours = ref(24)
 const dailyHour = ref(9)
 const savingSched = ref(false)
 
-// Determine if any audit is running to enable fast polling
-const hasRunning = computed(() =>
-  audits.value.some(a => a.status === 'running' || a.status === 'pending')
-)
-
 const { data: siteData, refetch: refetchSite } = useQuery({
   queryKey: ['site', siteId],
   queryFn: async () => {
@@ -93,7 +88,6 @@ const { data: siteData, refetch: refetchSite } = useQuery({
     return res.data
   },
   enabled: computed(() => !!siteId.value),
-  refetchInterval: computed(() => hasRunning.value ? 3000 : false),
 })
 
 const { data: auditsData, refetch: refetchAudits } = useQuery({
@@ -103,8 +97,12 @@ const { data: auditsData, refetch: refetchAudits } = useQuery({
     return res.data
   },
   enabled: computed(() => !!siteId.value),
-  refetchInterval: computed(() => hasRunning.value ? 3000 : false),
 })
+
+// Determine if any audit is running to enable fast polling
+const hasRunning = computed(() =>
+  (auditsData.value || []).some(a => a.status === 'running' || a.status === 'pending')
+)
 
 const { data: pagesData, refetch: refetchPages } = useQuery({
   queryKey: ['sitePages', siteId],
