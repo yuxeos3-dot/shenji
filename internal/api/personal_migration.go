@@ -56,6 +56,19 @@ func MigrateGlobalToPersonalConfig() {
 		return
 	}
 
+	// Wrap the entire migration in a transaction for atomicity.
+	tx, txErr := db.DB.Begin()
+	if txErr != nil {
+		log.Printf("[personal-migration] failed to begin transaction: %v", txErr)
+		return
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			tx.Rollback()
+			panic(p) // re-panic after rollback
+		}
+	}()
+
 	migrated := 0
 
 	// ─── OAuth app credentials (GSC + GA share one; Yandex separate) ───
@@ -69,7 +82,7 @@ func MigrateGlobalToPersonalConfig() {
 				encSecret = v
 			}
 		}
-		if _, err := db.DB.Exec(
+		if _, err := tx.Exec(
 			`INSERT INTO user_oauth_config (user_id, service, client_id, client_secret, redirect_uri)
 			 VALUES (?, 'gsc', ?, ?, ?)
 			 ON CONFLICT(user_id, service) DO UPDATE SET
@@ -86,7 +99,7 @@ func MigrateGlobalToPersonalConfig() {
 			if gaRU != "" {
 				gaRU = replaceServicePath(gaRU, "/gsc/", "/ga/")
 			}
-			if _, err := db.DB.Exec(
+			if _, err := tx.Exec(
 				`INSERT INTO user_oauth_config (user_id, service, client_id, client_secret, redirect_uri)
 				 VALUES (?, 'ga', ?, ?, ?)
 				 ON CONFLICT(user_id, service) DO UPDATE SET
@@ -110,7 +123,7 @@ func MigrateGlobalToPersonalConfig() {
 				encSecret = v
 			}
 		}
-		if _, err := db.DB.Exec(
+		if _, err := tx.Exec(
 			`INSERT INTO user_oauth_config (user_id, service, client_id, client_secret, redirect_uri)
 			 VALUES (?, 'yandex', ?, ?, ?)
 			 ON CONFLICT(user_id, service) DO UPDATE SET
@@ -162,7 +175,7 @@ func MigrateGlobalToPersonalConfig() {
 		if r.expiresAt.Valid {
 			expiresVal = r.expiresAt.Time
 		}
-		if _, err := db.DB.Exec(
+		if _, err := tx.Exec(
 			`INSERT INTO user_oauth_tokens (user_id, service, access_token, refresh_token, expires_at)
 			 VALUES (?, ?, ?, ?, ?)
 			 ON CONFLICT(user_id, service) DO UPDATE SET
@@ -186,7 +199,7 @@ func MigrateGlobalToPersonalConfig() {
 		if v, err := EncryptToken(tok); err == nil {
 			enc = v
 		}
-		if _, err := db.DB.Exec(
+		if _, err := tx.Exec(
 			`INSERT INTO user_telegram (user_id, bot_token, chat_id) VALUES (?, ?, ?)
 			 ON CONFLICT(user_id) DO UPDATE SET
 			   bot_token = excluded.bot_token,
@@ -207,7 +220,7 @@ func MigrateGlobalToPersonalConfig() {
 		if v, err := EncryptToken(key); err == nil {
 			enc = v
 		}
-		if _, err := db.DB.Exec(
+		if _, err := tx.Exec(
 			`INSERT INTO user_bing (user_id, api_key) VALUES (?, ?)
 			 ON CONFLICT(user_id) DO UPDATE SET
 			   api_key = excluded.api_key,
@@ -226,7 +239,7 @@ func MigrateGlobalToPersonalConfig() {
 		if v, err := EncryptToken(key); err == nil {
 			enc = v
 		}
-		if _, err := db.DB.Exec(`UPDATE users SET frw_apikey = ? WHERE id = ?`, enc, target); err != nil {
+		if _, err := tx.Exec(`UPDATE users SET frw_apikey = ? WHERE id = ?`, enc, target); err != nil {
 			log.Printf("[personal-migration] frw: %v", err)
 		} else {
 			migrated++
@@ -244,19 +257,26 @@ func MigrateGlobalToPersonalConfig() {
 		"ai_api_key", "ai_api_url", "ai_model",
 	}
 	for _, k := range obsoleteKeys {
-		if _, err := db.DB.Exec(`DELETE FROM settings WHERE key = ?`, k); err != nil {
+		if _, err := tx.Exec(`DELETE FROM settings WHERE key = ?`, k); err != nil {
 			log.Printf("[personal-migration] delete setting %s: %v", k, err)
 		}
 	}
-	if _, err := db.DB.Exec(`DELETE FROM oauth_tokens`); err != nil {
+	if _, err := tx.Exec(`DELETE FROM oauth_tokens`); err != nil {
 		log.Printf("[personal-migration] delete oauth_tokens: %v", err)
 	}
 
-	if _, err := db.DB.Exec(
+	if _, err := tx.Exec(
 		`INSERT INTO settings(key, value) VALUES('perm_migrated_personal_v1','1')
 		 ON CONFLICT(key) DO UPDATE SET value='1'`,
 	); err != nil {
+		tx.Rollback()
 		log.Printf("[personal-migration] set flag: %v", err)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("[personal-migration] commit failed: %v", err)
+		return
 	}
 
 	log.Printf("[personal-migration] DONE — migrated %d global credential(s) to user id=%d", migrated, target)
