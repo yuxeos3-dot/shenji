@@ -176,14 +176,13 @@ const groups = [
     ],
   },
   {
-    // 系统管理 group. Non-admin members only see 个人中心 here; admins see
-    // the remaining management knobs. 用户管理 / 用户数据 moved into their
-    // own top-level group above.
+    // 系统管理 group. Settings is visible to all users (contains personal
+    // credential tabs); admin-only tabs inside Settings are gated in the
+    // component itself. Cache management remains admin-only.
     key: 'system', icon: '⚙️', label: '系统管理',
     items: [
-      { path: '/personal-center',  icon: '🧑', label: '个人中心' },
+      { path: '/settings',         icon: '⚙️', label: '系统设置' },
       { path: '/cache-management', icon: '💾', label: '缓存管理',   adminOnly: true },
-      { path: '/settings',         icon: '⚙️', label: '系统设置',   adminOnly: true },
     ],
   },
 ]
@@ -279,7 +278,6 @@ const pageTitles = {
   '/global-data': '全局数据总览',
   '/cache-management': '缓存管理',
   '/settings': '系统设置',
-  '/personal-center': '个人中心',
 }
 const pageTitle = computed(() => {
   for (const [path, title] of Object.entries(pageTitles)) {

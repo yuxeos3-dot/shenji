@@ -32,7 +32,6 @@ const routes: RouteRecordRaw[] = [
       { path: 'reports/monthly/new', name: 'NewMonthlyReport', component: () => import('../views/NewMonthlyReport.vue') },
       { path: 'reports/monthly/:id', name: 'MonthlyReportDetail', component: () => import('../views/MonthlyReportDetail.vue') },
       { path: 'settings', name: 'Settings', component: () => import('../views/Settings.vue') },
-      { path: 'personal-center', name: 'PersonalCenter', component: () => import('../views/PersonalCenter.vue') },
       { path: 'users', name: 'Users', component: () => import('../views/Users.vue') },
       { path: 'users-monitor', name: 'UserMonitor', component: () => import('../views/UserMonitor.vue') },
       { path: 'global-data', name: 'GlobalData', component: () => import('../views/GlobalData.vue') },
