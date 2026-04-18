@@ -85,12 +85,15 @@ func CSRFProtect() gin.HandlerFunc {
 			return
 		}
 
-		// Bearer-only clients (no auth_token cookie) aren't CSRF-vulnerable.
-		if _, err := c.Cookie(AuthCookieName); err != nil {
-			if strings.HasPrefix(c.GetHeader("Authorization"), "Bearer ") {
-				c.Next()
-				return
-			}
+		// Bearer-only clients (no auth_token cookie) aren't CSRF-vulnerable:
+		// the browser won't attach Authorization headers cross-origin without
+		// CORS approval. Only skip CSRF when Bearer is present AND no cookie.
+		cookie, cookieErr := c.Cookie(AuthCookieName)
+		hasCookie := cookieErr == nil && cookie != ""
+		hasBearer := strings.HasPrefix(c.GetHeader("Authorization"), "Bearer ")
+		if hasBearer && !hasCookie {
+			c.Next()
+			return
 		}
 
 		header := c.GetHeader(CSRFHeaderName)
