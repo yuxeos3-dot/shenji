@@ -1,9 +1,7 @@
 package db
 
 import (
-	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"log"
 	"os"
 	"strings"
@@ -857,10 +855,10 @@ func Init() {
 	log.Println("Database initialized successfully")
 }
 
-// seedDefaultAdmin creates an admin account on first run. The password is taken
-// from ADMIN_INIT_PASSWORD if set; otherwise a strong random password is
-// generated and printed to the log exactly once. The operator must log in with
-// it and change the password immediately.
+// seedDefaultAdmin creates an admin account on first run. Both
+// ADMIN_INIT_EMAIL and ADMIN_INIT_PASSWORD must be set via environment
+// variables; the server refuses to start if either is missing.
+// The password is never printed to logs.
 func seedDefaultAdmin() {
 	var count int
 	if err := DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
@@ -870,19 +868,11 @@ func seedDefaultAdmin() {
 		return
 	}
 
+	email := os.Getenv("ADMIN_INIT_EMAIL")
 	password := os.Getenv("ADMIN_INIT_PASSWORD")
-	generated := false
-	if password == "" {
-		// Generate a random password that definitely satisfies the policy
-		// (>=12 chars, >=1 upper, >=1 lower, >=1 digit). Starting with a
-		// fixed "Aa1" prefix + 20 random chars keeps it memorable-free
-		// while guaranteeing complexity.
-		buf := make([]byte, 20)
-		if _, err := rand.Read(buf); err != nil {
-			log.Fatalf("Failed to generate admin password: %v", err)
-		}
-		password = "Aa1" + base64.RawURLEncoding.EncodeToString(buf)
-		generated = true
+	if email == "" || password == "" {
+		log.Fatal("First run requires ADMIN_INIT_EMAIL and ADMIN_INIT_PASSWORD environment variables. " +
+			"Example: ADMIN_INIT_EMAIL=you@example.com ADMIN_INIT_PASSWORD=secret ./server")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
@@ -892,22 +882,13 @@ func seedDefaultAdmin() {
 
 	_, err = DB.Exec(
 		"INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
-		"Admin", "admin@seo-system.local", string(hash), "admin",
+		"Admin", email, string(hash), "admin",
 	)
 	if err != nil {
 		log.Fatalf("Failed to create default admin: %v", err)
 	}
 
-	if generated {
-		log.Println("╔════════════════════════════════════════════════════════════════════╗")
-		log.Println("║ FIRST-RUN ADMIN ACCOUNT CREATED                                    ║")
-		log.Println("║ Email:    admin@seo-system.local                                   ║")
-		log.Printf("║ Password: %-56s ║", password)
-		log.Println("║ (This password will NOT be shown again — change it on first login) ║")
-		log.Println("╚════════════════════════════════════════════════════════════════════╝")
-	} else {
-		log.Println("Default admin created (password from ADMIN_INIT_PASSWORD env)")
-	}
+	log.Printf("Default admin created (email: %s)", email)
 }
 
 func seedDefaultSettings() {
