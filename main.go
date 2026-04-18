@@ -242,8 +242,8 @@ func main() {
 		// own sites + their site_pages. Lives under /site-bundle/* (not
 		// /sites/*) so it doesn't collide with the /sites/:id parameter
 		// route, which gin's tree-based router rejects at registration.
-		v1.GET("/site-bundle/export", api.RequirePermission("sites.view"), api.ExportSites)
-		v1.POST("/site-bundle/import", api.RequirePermission("sites.create"), api.ImportSites)
+		v1.GET("/site-bundle/export", api.RequirePermission("sites.export"), api.ExportSites)
+		v1.POST("/site-bundle/import", api.RequirePermission("sites.import"), api.ImportSites)
 
 		// Audit (rate-limited: 5/min per user)
 		v1.POST("/sites/:id/audit", api.RequirePermission("sites.audit"), middleware.UserRateLimit(5), api.TriggerAudit)
@@ -285,7 +285,7 @@ func main() {
 		// GSC
 		v1.GET("/oauth/gsc", api.GetGSCAuthURL)
 		v1.POST("/oauth/gsc/token", api.SaveGSCToken)
-		v1.POST("/gsc/store-keywords", api.StoreSiteKeywords) // push keywords from browser
+		v1.POST("/gsc/store-keywords", api.RequirePermission("data.sync_gsc"), api.StoreSiteKeywords) // push keywords from browser
 		v1.POST("/sites/:id/gsc/sync", api.RequirePermission("data.sync_gsc"), api.SyncGSCData)
 		v1.GET("/sites/:id/gsc", api.RequirePermission("data.view"), api.GetGSCData)
 
@@ -367,7 +367,7 @@ func main() {
 		v1.DELETE("/evaluations/:id", middleware.AdminRequired(), api.DeleteEvaluation)
 
 		// Bing Webmaster
-		v1.POST("/sites/:id/bing/sync", api.RequirePermission("data.sync_gsc"), api.SyncBingData)
+		v1.POST("/sites/:id/bing/sync", api.RequirePermission("data.sync_bing"), api.SyncBingData)
 		v1.GET("/sites/:id/bing", api.RequirePermission("data.view"), api.GetBingData)
 
 		// Bing Dashboard
@@ -378,7 +378,7 @@ func main() {
 		// Push Management
 		v1.GET("/sites/:id/push/logs", api.RequirePermission("push.view"), api.ListPushLogs)
 		v1.POST("/sites/:id/push/sitemap", api.RequirePermission("push.submit"), api.SubmitSitemap)
-		v1.POST("/push/sitemap-all", api.RequirePermission("push.submit"), api.SubmitSitemapAll)
+		v1.POST("/push/sitemap-all", api.RequirePermission("push.submit_all"), api.SubmitSitemapAll)
 		v1.POST("/sites/:id/push/urls", api.RequirePermission("push.submit"), middleware.UserRateLimit(10), api.SubmitURLs)
 		v1.GET("/sites/:id/push/schedules", api.RequirePermission("push.view"), api.ListPushSchedules)
 		v1.POST("/sites/:id/push/schedules", api.RequirePermission("push.schedule"), api.SavePushSchedule)
@@ -418,7 +418,7 @@ func main() {
 			coord.POST("/tasks", api.RequirePermission("coord.create"), api.CreateCoordTask)
 			coord.GET("/tasks/:id", api.RequirePermission("coord.view"), api.GetCoordTask)
 			coord.PUT("/tasks/:id", api.RequirePermission("coord.edit"), api.UpdateCoordTask)
-			coord.DELETE("/tasks/:id", api.RequirePermission("coord.edit"), api.DeleteCoordTask)
+			coord.DELETE("/tasks/:id", api.RequirePermission("coord.delete"), api.DeleteCoordTask)
 			coord.POST("/tasks/:id/assign", api.RequirePermission("coord.assign"), api.AssignCoordTask)
 			coord.POST("/tasks/:id/submit", api.RequirePermission("coord.submit"), api.SubmitCoordTask)
 			coord.POST("/tasks/:id/verify", api.RequirePermission("coord.verify"), api.VerifyCoordTask)
@@ -432,13 +432,13 @@ func main() {
 			// Creator "📣 发送给开发" — ad-hoc push to the assignee without
 			// changing task state. Uses coord.comment since it's just a
 			// timeline note plus a Telegram ping.
-			coord.POST("/tasks/:id/ping-dev", api.RequirePermission("coord.comment"), api.PingDevCoordTask)
+			coord.POST("/tasks/:id/ping-dev", api.RequirePermission("coord.ping_dev"), api.PingDevCoordTask)
 			// Attachment upload is tied to the task id (so we know what
 			// it belongs to). Viewing a single file is addressed by
 			// attachment id — same coord.view gate.
-			coord.POST("/tasks/:id/attachments", api.RequirePermission("coord.comment"), api.UploadCoordAttachment)
+			coord.POST("/tasks/:id/attachments", api.RequirePermission("coord.attachment"), api.UploadCoordAttachment)
 			coord.GET("/attachments/:id/file", api.RequirePermission("coord.view"), api.ServeCoordAttachment)
-			coord.DELETE("/attachments/:id", api.RequirePermission("coord.comment"), api.DeleteCoordAttachment)
+			coord.DELETE("/attachments/:id", api.RequirePermission("coord.attachment"), api.DeleteCoordAttachment)
 
 			// Pre-audit (待验收). Separate permission codes for each
 			// distinct admin action: managing the test-page list,
@@ -524,7 +524,7 @@ func main() {
 			frwG.POST("/generations", api.RequirePermission("ai_gen.submit"), middleware.UserRateLimit(10), api.SubmitFRWGeneration)
 			frwG.GET("/generations/:id", api.RequirePermission("ai_gen.view"), api.GetFRWGeneration)
 			frwG.POST("/generations/:id/publish", api.RequirePermission("ai_gen.publish"), api.PublishFRWGeneration)
-			frwG.DELETE("/generations/:id", api.RequirePermission("ai_gen.submit"), api.DeleteFRWGeneration)
+			frwG.DELETE("/generations/:id", api.RequirePermission("ai_gen.delete"), api.DeleteFRWGeneration)
 		}
 	}
 

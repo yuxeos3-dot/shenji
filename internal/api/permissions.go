@@ -52,6 +52,7 @@ var PermissionTree = []PermNode{
 		{Code: "data.sync_gsc", Label: "同步 GSC 数据"},
 		{Code: "data.sync_ga", Label: "同步 GA 数据"},
 		{Code: "data.sync_yandex", Label: "同步 Yandex 数据"},
+		{Code: "data.sync_bing", Label: "同步 Bing 数据"},
 	}},
 	{Code: "sites", Label: "站点管理", Children: []PermNode{
 		{Code: "sites.view", Label: "查看站点列表"},
@@ -59,6 +60,8 @@ var PermissionTree = []PermNode{
 		{Code: "sites.edit", Label: "编辑站点"},
 		{Code: "sites.delete", Label: "删除站点"},
 		{Code: "sites.pages", Label: "管理页面（增/删/抓取源码）"},
+		{Code: "sites.export", Label: "导出站点配置（bundle JSON）"},
+		{Code: "sites.import", Label: "导入站点配置（bundle JSON）"},
 		{Code: "sites.audit", Label: "触发审计"},
 		{Code: "sites.audit_view", Label: "查看审计报告"},
 		{Code: "sites.audit_delete", Label: "删除审计记录"},
@@ -77,6 +80,7 @@ var PermissionTree = []PermNode{
 		{Code: "ai_gen.view", Label: "查看生成任务列表"},
 		{Code: "ai_gen.submit", Label: "提交新生成任务（消耗 FRW 额度）"},
 		{Code: "ai_gen.publish", Label: "发布 / 下载结果到本地"},
+		{Code: "ai_gen.delete", Label: "删除生成任务"},
 	}},
 	{Code: "deadlinks", Label: "死链检查", Children: []PermNode{
 		{Code: "deadlinks.view", Label: "查看死链结果"},
@@ -98,15 +102,19 @@ var PermissionTree = []PermNode{
 	}},
 	{Code: "push", Label: "推送管理", Children: []PermNode{
 		{Code: "push.view", Label: "查看推送日志 / 计划"},
-		{Code: "push.submit", Label: "手动推送 Sitemap / URL"},
+		{Code: "push.submit", Label: "手动推送 Sitemap / URL（单站点）"},
+		{Code: "push.submit_all", Label: "全站批量推送 Sitemap（所有站点）"},
 		{Code: "push.schedule", Label: "管理推送计划"},
 	}},
 	{Code: "coord", Label: "协同管理", Children: []PermNode{
 		{Code: "coord.view", Label: "查看协同任务"},
 		{Code: "coord.create", Label: "从审计报告创建任务"},
-		{Code: "coord.edit", Label: "编辑 / 删除任务"},
+		{Code: "coord.edit", Label: "编辑任务（标题 / 问题描述）"},
+		{Code: "coord.delete", Label: "删除任务"},
 		{Code: "coord.assign", Label: "分配给开发（启动）"},
-		{Code: "coord.comment", Label: "添加备注 / 附件 / 提问回复"},
+		{Code: "coord.comment", Label: "添加备注 / 提问回复"},
+		{Code: "coord.ping_dev", Label: "📣 发送给开发（推送通知）"},
+		{Code: "coord.attachment", Label: "上传 / 删除附件"},
 		{Code: "coord.submit", Label: "标记修改完毕（开发）"},
 		{Code: "coord.test_pages", Label: "管理测试服页面（添加 / 抓取源码）"},
 		{Code: "coord.pre_audit", Label: "运行 AI 预审核"},
@@ -158,27 +166,28 @@ var PermissionTree = []PermNode{
 // stored permission list from the old flat codes to the new granular
 // codes. Called from main() after DB.Init().
 //
-// Mapping:
+// Two migration passes run in sequence, each gated by its own flag so
+// they're independent and each idempotent:
 //
-//	reports.view    → reports.daily.view + reports.weekly.view + reports.monthly.view
-//	reports.write   → reports.daily.write + reports.weekly.write + reports.monthly.write
-//	reports.polish  → reports.daily.polish + reports.weekly.polish + reports.monthly.polish
-//	reports.export  → reports.daily.export
-//	geo.tasks_run   → geo.workflow (batch generation removed; migrate old
-//	                  task-runner perm to the new per-keyword wizard perm)
-//	geo.prompts / geo.knowledge / geo.tasks → dropped (stripped from lists)
-//	coord.verify    → coord.verify + coord.pre_audit + coord.reject + coord.test_pages
-//	                  (if a user could verify before, they need the whole
-//	                  verify-phase toolbox now that it's split)
+//   v3 (initial granular split): flat reports.* / geo.tasks / coord.verify
+//       → per-frequency reports / geo.workflow / full verify-phase toolkit.
 //
-// Idempotent: already-migrated users (those whose list contains any of the
-// new codes) are not re-processed; also dedup on write. Safe to leave in
-// place across restarts.
+//   v4 (pre-launch细化 round, 2026-04): tree grew new split codes
+//       (coord.delete, coord.ping_dev, coord.attachment, ai_gen.delete,
+//       push.submit_all, sites.export, sites.import, data.sync_bing).
+//       Users who had the corresponding "parent" perm under the old tree
+//       get the new split perms added so nothing silently breaks on upgrade.
 //
-// We set a settings flag `perm_migrated_v3` on success so subsequent boots
-// skip the scan entirely. The flag lookup is one tiny SQL call; if it's
-// set we return immediately.
+// Idempotent: each pass writes a settings flag; subsequent boots skip.
+// Safe to leave in place across restarts.
 func MigrateLegacyPermissions() {
+	migrateLegacyPermissionsV3()
+	migrateLegacyPermissionsV4()
+}
+
+// migrateLegacyPermissionsV3 is the original flat-code → granular-code
+// rewrite. See package comment for mapping rules.
+func migrateLegacyPermissionsV3() {
 	// Skip if already done.
 	var done string
 	db.DB.QueryRow(`SELECT COALESCE(value,'') FROM settings WHERE key='perm_migrated_v3'`).Scan(&done)
@@ -276,6 +285,101 @@ func MigrateLegacyPermissions() {
 		ON CONFLICT(key) DO UPDATE SET value='1'`)
 	if migrated > 0 {
 		log.Printf("[perm-migration] migrated %d user(s) to v2 permission codes", migrated)
+	}
+}
+
+// migrateLegacyPermissionsV4 grants the new split permissions to users
+// who had the corresponding parent perm before the split. The intent is
+// "no regression on upgrade" — anyone who could delete tasks yesterday
+// via coord.edit should still be able to delete today via the new
+// coord.delete, without an admin re-editing every user profile.
+//
+// Additions (new code → inherited from which existing parent):
+//
+//	coord.delete       ← coord.edit   (DELETE used to share the edit perm)
+//	coord.ping_dev     ← coord.comment(comment covered all conversational ops)
+//	coord.attachment   ← coord.comment(same rationale)
+//	ai_gen.delete      ← ai_gen.submit(delete used to share the submit perm)
+//	push.submit_all    ← push.submit  (cross-site batch used to share single-site perm)
+//	sites.export       ← sites.view   (export reads the list you can already see)
+//	sites.import       ← sites.create (import creates sites you could already create)
+//	data.sync_bing     ← data.sync_gsc(Bing sync inherited the GSC sync perm)
+//
+// Runs once, keyed by `perm_migrated_v4`. No undo path — roll forward only.
+func migrateLegacyPermissionsV4() {
+	var done string
+	db.DB.QueryRow(`SELECT COALESCE(value,'') FROM settings WHERE key='perm_migrated_v4'`).Scan(&done)
+	if done == "1" {
+		return
+	}
+
+	// Mapping: parent perm → list of new perms to add when the user has the parent.
+	inheritance := map[string][]string{
+		"coord.edit":    {"coord.delete"},
+		"coord.comment": {"coord.ping_dev", "coord.attachment"},
+		"ai_gen.submit": {"ai_gen.delete"},
+		"push.submit":   {"push.submit_all"},
+		"sites.view":    {"sites.export"},
+		"sites.create":  {"sites.import"},
+		"data.sync_gsc": {"data.sync_bing"},
+	}
+
+	rows, err := db.DB.Query(`SELECT id, COALESCE(permissions,'') FROM users WHERE permissions IS NOT NULL AND permissions <> ''`)
+	if err != nil {
+		log.Printf("[perm-migration-v4] list users: %v", err)
+		return
+	}
+	type u struct {
+		id    int64
+		perms string
+	}
+	var toUpdate []u
+	for rows.Next() {
+		var x u
+		if err := rows.Scan(&x.id, &x.perms); err != nil {
+			continue
+		}
+		toUpdate = append(toUpdate, x)
+	}
+	rows.Close()
+
+	migrated := 0
+	for _, x := range toUpdate {
+		var list []string
+		if err := json.Unmarshal([]byte(x.perms), &list); err != nil {
+			continue
+		}
+		have := map[string]bool{}
+		for _, c := range list {
+			have[c] = true
+		}
+		changed := false
+		for parent, adds := range inheritance {
+			if !have[parent] {
+				continue
+			}
+			for _, a := range adds {
+				if !have[a] {
+					have[a] = true
+					list = append(list, a)
+					changed = true
+				}
+			}
+		}
+		if !changed {
+			continue
+		}
+		js, _ := json.Marshal(list)
+		if _, err := db.DB.Exec(`UPDATE users SET permissions = $1 WHERE id = $2`, string(js), x.id); err != nil {
+			log.Printf("[perm-migration-v4] user %d update: %v", x.id, err)
+			continue
+		}
+		migrated++
+	}
+	db.DB.Exec(`INSERT INTO settings(key, value) VALUES('perm_migrated_v4','1')
+		ON CONFLICT(key) DO UPDATE SET value='1'`)
+	if migrated > 0 {
+		log.Printf("[perm-migration-v4] added split perms to %d user(s)", migrated)
 	}
 }
 
