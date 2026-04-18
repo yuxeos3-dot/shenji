@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"seo-system/internal/db"
@@ -137,7 +138,7 @@ func testAISlot(slot AISlot) error {
 		"max_tokens": 5,
 	}
 	bj, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", slot.APIURL+"/chat/completions", bytes.NewReader(bj))
+	req, _ := http.NewRequest("POST", strings.TrimRight(slot.APIURL, "/")+"/chat/completions", bytes.NewReader(bj))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+slot.APIKey)
 	client := httpx.Outbound(15 * time.Second)
@@ -234,7 +235,7 @@ func callAISlot(apiURL, apiKey, model, prompt string, maxTokens int) (string, er
 	if err != nil {
 		return "", fmt.Errorf("AI 请求体序列化失败: %w", err)
 	}
-	req, err := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(bj))
+	req, err := http.NewRequest("POST", strings.TrimRight(apiURL, "/")+"/chat/completions", bytes.NewReader(bj))
 	if err != nil {
 		return "", fmt.Errorf("AI 请求构造失败: %w", err)
 	}

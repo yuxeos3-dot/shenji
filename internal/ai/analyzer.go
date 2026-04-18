@@ -459,7 +459,7 @@ func postAIWithRetry(httpClient *http.Client, apiURL, apiKey string, body []byte
 	const maxAttempts = 3
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		req, err := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(body))
+		req, err := http.NewRequest("POST", strings.TrimRight(apiURL, "/")+"/chat/completions", bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
@@ -1125,7 +1125,7 @@ func CallAI(prompt string) (*AnalysisResult, string, error) {
 		return nil, model, fmt.Errorf("构建请求失败: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(jsonBody))
+	req, err := http.NewRequest("POST", strings.TrimRight(apiURL, "/")+"/chat/completions", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, model, fmt.Errorf("创建请求失败: %w", err)
 	}
@@ -1540,7 +1540,7 @@ func TestAIConnection() error {
 	if err != nil {
 		return fmt.Errorf("请求体序列化失败: %w", err)
 	}
-	req, err := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(jsonBody))
+	req, err := http.NewRequest("POST", strings.TrimRight(apiURL, "/")+"/chat/completions", bytes.NewReader(jsonBody))
 	if err != nil {
 		return fmt.Errorf("构造请求失败: %w", err)
 	}

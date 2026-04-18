@@ -325,7 +325,7 @@ Agent自动化应用（必须有）：
 		"temperature": 0.3,
 	}
 	bj, _ := json.Marshal(body)
-	httpReq, _ := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(bj))
+	httpReq, _ := http.NewRequest("POST", strings.TrimRight(apiURL, "/")+"/chat/completions", bytes.NewReader(bj))
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 

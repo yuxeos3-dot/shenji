@@ -134,7 +134,7 @@ func callRewriteAI(prompt string) (interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("rewrite 请求体序列化失败: %w", err)
 	}
-	req, err := http.NewRequest("POST", apiURL+"/chat/completions", bytes.NewReader(jsonBody))
+	req, err := http.NewRequest("POST", strings.TrimRight(apiURL, "/")+"/chat/completions", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("rewrite 构造请求失败: %w", err)
 	}
