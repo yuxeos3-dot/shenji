@@ -19,6 +19,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -146,7 +147,12 @@ func GSCOverview(c *gin.Context) {
 	// Step 1: list sites
 	rawSites, err := gscFetch(token, gscAPI+"/sites", "GET", nil)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "error": "获取站点列表失败: " + err.Error()})
+		// Log server-side too so ops can grep journalctl for the real
+		// Google error body when a user reports a 502. err.Error()
+		// carries the HTTP status + the Google JSON payload (scope
+		// mismatch / invalid_grant / quota exhausted etc.).
+		log.Printf("[gsc-overview] /sites list failed user=%d: %v", c.GetInt64("user_id"), err)
+		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "error": "获取 GSC 站点列表失败：" + err.Error()})
 		return
 	}
 	var sitesResp struct {
