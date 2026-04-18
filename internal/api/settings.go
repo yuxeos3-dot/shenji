@@ -9,6 +9,7 @@ import (
 
 	"seo-system/internal/ai"
 	"seo-system/internal/db"
+	"seo-system/internal/middleware"
 	"seo-system/internal/telegram"
 
 	"github.com/gin-gonic/gin"
@@ -163,6 +164,12 @@ func SaveSettings(c *gin.Context) {
 			// `system_title`. Log the failure and move on.
 			log.Printf("[settings] SetSetting(%q) failed: %v", key, err)
 			failed = append(failed, key)
+		}
+		// Eagerly invalidate the in-process IP whitelist cache whenever the
+		// setting is saved so the new list takes effect on the next request
+		// instead of waiting for the TTL to expire.
+		if key == "ip_whitelist" {
+			middleware.InvalidateIPWhitelistCache()
 		}
 	}
 
