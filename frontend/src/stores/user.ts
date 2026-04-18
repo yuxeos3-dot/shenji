@@ -23,6 +23,12 @@ export const useUserStore = defineStore('user', () => {
     authed.value = true
     // Clear legacy bearer token — the cookie is now the source of truth.
     localStorage.removeItem('token')
+    // Product rule: every fresh login lands the user on a fully-collapsed
+    // sidebar, regardless of what they had expanded in their previous
+    // session (or what the previous user on this browser had expanded).
+    // Layout.vue seeds collapsed=allGroups when no saved state exists, so
+    // clearing the key is enough to restore the clean default.
+    localStorage.removeItem('xunzhan:nav-collapsed-v3')
     return res
   }
 
@@ -42,6 +48,9 @@ export const useUserStore = defineStore('user', () => {
     user.value = null
     authed.value = false
     localStorage.removeItem('token')
+    // Also drop the nav preference so the next person to log in on this
+    // browser starts from the same clean collapsed state.
+    localStorage.removeItem('xunzhan:nav-collapsed-v3')
   }
 
   const isAdmin = (): boolean => user.value?.role === 'admin'

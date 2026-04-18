@@ -214,10 +214,12 @@ const visibleGroups = computed(() => {
 // collapsed; ensureCurrentGroupOpen() will then pop open whichever
 // group contains the current route so the user always sees their
 // current location.
-// Bumped to v2 alongside the "no auto-expand + collapsed-by-default"
-// decision; existing users (who had every group expanded by habit)
-// reset to the clean collapsed state on next load.
-const COLLAPSE_KEY = 'xunzhan:nav-collapsed-v2'
+// Bumped to v3 (2026-04): every fresh load now seeds "all collapsed"
+// for both login/logout transitions (see userStore.login/logout — they
+// remove this key so a new session starts clean) and for existing
+// sessions carrying an old v2 preference. Within a session, persistence
+// still works — user expands a group, refreshes, the group stays open.
+const COLLAPSE_KEY = 'xunzhan:nav-collapsed-v3'
 const collapsed = ref(new Set())
 const hasSaved = (() => {
   try { return localStorage.getItem(COLLAPSE_KEY) != null } catch { return false }
