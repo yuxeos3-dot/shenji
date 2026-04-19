@@ -68,8 +68,12 @@ type coordTask struct {
 	Status          string  `json:"status"`
 	CreatedBy       int64   `json:"created_by"`
 	CreatorName     string  `json:"creator_name,omitempty"`
+	CreatorDept     string  `json:"creator_dept,omitempty"`
+	CreatorGroup    string  `json:"creator_group,omitempty"`
 	AssigneeID      int64   `json:"assignee_id"`
 	AssigneeName    string  `json:"assignee_name,omitempty"`
+	AssigneeDept    string  `json:"assignee_dept,omitempty"`
+	AssigneeGroup   string  `json:"assignee_group,omitempty"`
 	CreatedAt       string  `json:"created_at"`
 	StartedAt       *string `json:"started_at"`
 	SubmittedAt     *string `json:"submitted_at"`
@@ -87,6 +91,8 @@ type coordEvent struct {
 	ToStatus   string `json:"to_status"`
 	ActorID    int64  `json:"actor_id"`
 	ActorName  string `json:"actor_name"`
+	ActorDept  string `json:"actor_dept,omitempty"`
+	ActorGroup string `json:"actor_group,omitempty"`
 	Note       string `json:"note"`
 	CreatedAt  string `json:"created_at"`
 }
@@ -127,15 +133,20 @@ func loadCoordTask(id int64) (*coordTask, error) {
 		SELECT t.id, t.site_id, COALESCE(s.name,''), COALESCE(s.domain,''),
 		       t.audit_task_id, t.issue_id, t.issue_title, t.issue_severity,
 		       t.issue_module, t.issue_chapter, t.issue_snapshot, t.note,
-		       t.status, t.created_by, COALESCE(u1.name,''),
-		       t.assignee_id, COALESCE(u2.name,''),
+		       t.status,
+		       t.created_by, COALESCE(u1.name,''), COALESCE(d1.name,''), COALESCE(g1.name,''),
+		       t.assignee_id, COALESCE(u2.name,''), COALESCE(d2.name,''), COALESCE(g2.name,''),
 		       t.created_at, t.started_at, t.submitted_at, t.verified_at,
 		       COALESCE(t.pre_audit_verdict,''), COALESCE(t.pre_audit_result,''),
 		       t.pre_audit_at
 		FROM coordination_tasks t
 		LEFT JOIN sites s ON s.id = t.site_id
 		LEFT JOIN users u1 ON u1.id = t.created_by
+		LEFT JOIN departments d1 ON d1.id = u1.department_id
+		LEFT JOIN dept_groups g1 ON g1.id = u1.group_id
 		LEFT JOIN users u2 ON u2.id = t.assignee_id
+		LEFT JOIN departments d2 ON d2.id = u2.department_id
+		LEFT JOIN dept_groups g2 ON g2.id = u2.group_id
 		WHERE t.id = $1`
 	var t coordTask
 	var started, submitted, verified, preAuditAt sql.NullString
@@ -143,8 +154,9 @@ func loadCoordTask(id int64) (*coordTask, error) {
 		&t.ID, &t.SiteID, &t.SiteName, &t.SiteDomain,
 		&t.AuditTaskID, &t.IssueID, &t.IssueTitle, &t.IssueSeverity,
 		&t.IssueModule, &t.IssueChapter, &t.IssueSnapshot, &t.Note,
-		&t.Status, &t.CreatedBy, &t.CreatorName,
-		&t.AssigneeID, &t.AssigneeName,
+		&t.Status,
+		&t.CreatedBy, &t.CreatorName, &t.CreatorDept, &t.CreatorGroup,
+		&t.AssigneeID, &t.AssigneeName, &t.AssigneeDept, &t.AssigneeGroup,
 		&t.CreatedAt, &started, &submitted, &verified,
 		&t.PreAuditVerdict, &t.PreAuditResult, &preAuditAt,
 	)
@@ -433,14 +445,19 @@ func ListCoordTasks(c *gin.Context) {
 		SELECT t.id, t.site_id, COALESCE(s.name,''), COALESCE(s.domain,''),
 		       t.audit_task_id, t.issue_id, t.issue_title, t.issue_severity,
 		       t.issue_module, t.issue_chapter, t.issue_snapshot, t.note,
-		       t.status, t.created_by, COALESCE(u1.name,''),
-		       t.assignee_id, COALESCE(u2.name,''),
+		       t.status,
+		       t.created_by, COALESCE(u1.name,''), COALESCE(d1.name,''), COALESCE(g1.name,''),
+		       t.assignee_id, COALESCE(u2.name,''), COALESCE(d2.name,''), COALESCE(g2.name,''),
 		       t.created_at, t.started_at, t.submitted_at, t.verified_at,
 		       COALESCE(t.pre_audit_verdict,'')
 		FROM coordination_tasks t
 		LEFT JOIN sites s ON s.id = t.site_id
 		LEFT JOIN users u1 ON u1.id = t.created_by
+		LEFT JOIN departments d1 ON d1.id = u1.department_id
+		LEFT JOIN dept_groups g1 ON g1.id = u1.group_id
 		LEFT JOIN users u2 ON u2.id = t.assignee_id
+		LEFT JOIN departments d2 ON d2.id = u2.department_id
+		LEFT JOIN dept_groups g2 ON g2.id = u2.group_id
 		WHERE ` + strings.Join(where, " AND ") + `
 		ORDER BY
 			CASE t.status
@@ -470,8 +487,9 @@ func ListCoordTasks(c *gin.Context) {
 			&t.ID, &t.SiteID, &t.SiteName, &t.SiteDomain,
 			&t.AuditTaskID, &t.IssueID, &t.IssueTitle, &t.IssueSeverity,
 			&t.IssueModule, &t.IssueChapter, &t.IssueSnapshot, &t.Note,
-			&t.Status, &t.CreatedBy, &t.CreatorName,
-			&t.AssigneeID, &t.AssigneeName,
+			&t.Status,
+			&t.CreatedBy, &t.CreatorName, &t.CreatorDept, &t.CreatorGroup,
+			&t.AssigneeID, &t.AssigneeName, &t.AssigneeDept, &t.AssigneeGroup,
 			&t.CreatedAt, &started, &submitted, &verified,
 			&t.PreAuditVerdict,
 		); err != nil {
@@ -515,20 +533,28 @@ func GetCoordTask(c *gin.Context) {
 		return
 	}
 
-	// Timeline
+	// Timeline — JOIN users + departments + dept_groups so each event
+	// carries the actor's dept/group at read time. We resolve it live
+	// rather than snapshot at write time so that post-hoc org changes
+	// (re-org'ing a department) are reflected accurately on re-view.
 	events := []coordEvent{}
 	rows, err := db.DB.Query(
-		`SELECT id, task_id, event_type, from_status, to_status,
-		        actor_id, actor_name, note, created_at
-		 FROM coordination_events
-		 WHERE task_id = $1
-		 ORDER BY created_at ASC, id ASC`, id)
+		`SELECT e.id, e.task_id, e.event_type, e.from_status, e.to_status,
+		        e.actor_id, e.actor_name,
+		        COALESCE(d.name,''), COALESCE(g.name,''),
+		        e.note, e.created_at
+		 FROM coordination_events e
+		 LEFT JOIN users u ON u.id = e.actor_id
+		 LEFT JOIN departments d ON d.id = u.department_id
+		 LEFT JOIN dept_groups g ON g.id = u.group_id
+		 WHERE e.task_id = $1
+		 ORDER BY e.created_at ASC, e.id ASC`, id)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var e coordEvent
 			if err := rows.Scan(&e.ID, &e.TaskID, &e.EventType, &e.FromStatus, &e.ToStatus,
-				&e.ActorID, &e.ActorName, &e.Note, &e.CreatedAt); err == nil {
+				&e.ActorID, &e.ActorName, &e.ActorDept, &e.ActorGroup, &e.Note, &e.CreatedAt); err == nil {
 				events = append(events, e)
 			}
 		}

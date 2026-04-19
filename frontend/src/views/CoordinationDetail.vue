@@ -32,11 +32,21 @@
           </div>
           <div class="meta-item">
             <div class="meta-label">创建人</div>
-            <div class="meta-val">{{ task.creator_name || '—' }}</div>
+            <div class="meta-val">
+              {{ task.creator_name || '—' }}
+              <span v-if="task.creator_dept || task.creator_group" class="meta-sub">
+                {{ [task.creator_dept, task.creator_group].filter(Boolean).join(' · ') }}
+              </span>
+            </div>
           </div>
           <div class="meta-item">
             <div class="meta-label">开发</div>
-            <div class="meta-val">{{ task.assignee_name || '（未分配）' }}</div>
+            <div class="meta-val">
+              {{ task.assignee_name || '（未分配）' }}
+              <span v-if="task.assignee_dept || task.assignee_group" class="meta-sub">
+                {{ [task.assignee_dept, task.assignee_group].filter(Boolean).join(' · ') }}
+              </span>
+            </div>
           </div>
           <div class="meta-item">
             <div class="meta-label">来源审计</div>
@@ -438,7 +448,12 @@
             <div class="tl-body">
               <div class="tl-head">
                 <span class="tl-type">{{ eventLabel(ev.event_type) }}</span>
-                <span class="tl-actor">{{ ev.actor_name || '系统' }}</span>
+                <span class="tl-actor">
+                  {{ ev.actor_name || '系统' }}
+                  <span v-if="ev.actor_dept || ev.actor_group" class="tl-actor-meta">
+                    ({{ [ev.actor_dept, ev.actor_group].filter(Boolean).join(' · ') }})
+                  </span>
+                </span>
                 <span class="tl-time">{{ fmtTime(ev.created_at) }}</span>
               </div>
               <div v-if="ev.from_status !== ev.to_status" class="tl-transition">
@@ -472,7 +487,7 @@
           <el-option
             v-for="u in developers"
             :key="u.id"
-            :label="`${u.name} (${u.email})`"
+            :label="formatDeveloperLabel(u)"
             :value="u.id"
           />
         </el-select>
@@ -790,6 +805,17 @@ async function loadDevelopers() {
   } catch {
     developers.value = []
   }
+}
+
+// "张坤 · 运营部 · SEO一组" — prefer the team context over email since
+// ops needs to see "which team" before picking an assignee. Fall back
+// to name alone if no dept is configured.
+function formatDeveloperLabel(u) {
+  if (!u) return ''
+  const parts = [u.name]
+  if (u.department_name) parts.push(u.department_name)
+  if (u.group_name) parts.push(u.group_name)
+  return parts.filter(Boolean).join(' · ')
 }
 
 function startEditNote() {
@@ -1179,6 +1205,7 @@ onMounted(async () => {
 .tl-head { display:flex; gap:10px; align-items:center; font-size:13px; flex-wrap:wrap; }
 .tl-type { font-weight:800; color:var(--ink); }
 .tl-actor { font-weight:700; color:var(--sun-deep); font-size:12px; padding:2px 8px; background:var(--sun-light); border-radius:10px; }
+.tl-actor-meta { font-weight:500; color:var(--ink-soft); font-size:11px; margin-left:2px; }
 .tl-time { font-size:11.5px; color:var(--ink-hint); font-family:'JetBrains Mono',monospace; margin-left:auto; }
 .tl-transition { font-size:11.5px; color:var(--ink-soft); margin-top:4px; font-family:'JetBrains Mono',monospace; }
 .tl-note { font-size:13px; color:var(--ink-mid); margin-top:6px; padding:8px 12px; background:var(--surface-2); border-radius:6px; white-space:pre-wrap; line-height:1.6; }
