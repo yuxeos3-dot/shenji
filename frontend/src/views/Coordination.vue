@@ -28,12 +28,42 @@
       </div>
     </div>
 
-    <!-- Filter / site picker -->
+    <!-- Filter / site picker. Admin gets an extra row with team
+         filters (部门 / 组 / 姓名搜索) so a manager can slice tasks
+         by "whose team" rather than "which site". Members don't see
+         team filters — they only see their own sites anyway. -->
     <div class="panel filter-bar">
       <span class="filter-label">站点</span>
       <el-select v-model="filter.site_id" placeholder="全部站点" clearable style="width:260px" @change="reload">
         <el-option v-for="s in sites" :key="s.id" :label="s.name + ' (' + s.domain + ')'" :value="s.id" />
       </el-select>
+
+      <template v-if="userStore.isAdmin()">
+        <span class="filter-label" style="margin-left:16px">部门</span>
+        <el-select v-model="filter.department_id" placeholder="全部部门" clearable style="width:160px" @change="onDeptChange">
+          <el-option v-for="d in departments" :key="d.id" :label="d.name" :value="d.id" />
+        </el-select>
+        <span class="filter-label">组</span>
+        <el-select
+          v-model="filter.group_id"
+          placeholder="全部组"
+          clearable
+          :disabled="!filter.department_id"
+          style="width:140px"
+          @change="reload">
+          <el-option v-for="g in filteredGroups" :key="g.id" :label="g.name" :value="g.id" />
+        </el-select>
+        <span class="filter-label">姓名</span>
+        <el-input
+          v-model="filter.user_search"
+          placeholder="搜索创建人或开发者"
+          clearable
+          style="width:180px"
+          @keyup.enter="reload"
+          @clear="reload"
+        />
+      </template>
+
       <button class="btn btn-sm refresh-btn" @click="reload" :disabled="loading">{{ loading ? '加载中...' : '↻ 刷新' }}</button>
     </div>
 
@@ -98,13 +128,36 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../api'
+import { useUserStore } from '../stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
 const sites = ref([])
 const tasks = ref([])
 const stats = ref({ pending: 0, in_progress: 0, under_review: 0, done: 0 })
 const loading = ref(false)
-const filter = ref({ site_id: null, status: '' })
+// Admin team filters: 部门 / 组 / 姓名. Members don't see these inputs
+// so the extra fields stay null and backend treats them as absent.
+const filter = ref({
+  site_id: null,
+  status: '',
+  department_id: null,
+  group_id: null,
+  user_search: '',
+})
+
+const departments = ref([])
+const groups = ref([])
+const filteredGroups = computed(() =>
+  groups.value.filter(g => !filter.value.department_id || g.department_id === filter.value.department_id)
+)
+
+function onDeptChange() {
+  // Clear group selection when department changes so an orphan
+  // (group from a different dept) can't linger in the query.
+  filter.value.group_id = null
+  reload()
+}
 const page = ref(1)
 const perPage = 100
 const total = ref(0)
@@ -177,6 +230,13 @@ async function reload() {
     const params = { page: page.value, per_page: perPage }
     if (filter.value.site_id) params.site_id = filter.value.site_id
     if (filter.value.status) params.status = filter.value.status
+    // Team filters only meaningful for admin — the <template v-if="isAdmin">
+    // above is the UI guard, but we also skip sending them when they're
+    // falsy so a member's request stays clean.
+    if (filter.value.department_id) params.department_id = filter.value.department_id
+    if (filter.value.group_id) params.group_id = filter.value.group_id
+    const q = String(filter.value.user_search || '').trim()
+    if (q) params.user_search = q
     const [tRes, sRes] = await Promise.all([
       api.coordListTasks(params),
       api.coordStats(filter.value.site_id ? { site_id: filter.value.site_id } : {}),
@@ -201,6 +261,19 @@ onMounted(async () => {
     const res = await api.listSites()
     sites.value = res.data || []
   } catch { /* ignore */ }
+  // Admin-only team filters need dept + group lookups to populate the
+  // select dropdowns. Members never render those controls so skip the
+  // round-trip entirely.
+  if (userStore.isAdmin()) {
+    try {
+      const [dRes, gRes] = await Promise.all([
+        api.listDepartments(),
+        api.listGroups(),
+      ])
+      departments.value = dRes.data || []
+      groups.value = gRes.data || []
+    } catch { /* ignore — filters just stay empty */ }
+  }
   await reload()
 })
 </script>

@@ -11,9 +11,19 @@
       <div class="filter-row">
         <template v-if="userStore.isAdmin()">
           <span class="filter-label">成员</span>
-          <el-select v-model="filterUser" placeholder="自己的汇报" clearable size="small" style="width:160px" @change="load">
+          <el-select v-model="filterUser" placeholder="全部成员" clearable size="small" style="width:160px" @change="load">
             <el-option v-for="u in users" :key="u.id" :label="u.name + (u.department_name ? ' · ' + u.department_name : '')" :value="u.id" />
           </el-select>
+          <span class="filter-label" style="margin-left:8px">部门</span>
+          <el-select v-model="filterDept" placeholder="全部部门" clearable size="small" style="width:130px" @change="onDeptChange">
+            <el-option v-for="d in departments" :key="d.id" :label="d.name" :value="d.id" />
+          </el-select>
+          <span class="filter-label">组</span>
+          <el-select v-model="filterGroup" placeholder="全部组" clearable size="small" :disabled="!filterDept" style="width:120px" @change="load">
+            <el-option v-for="g in filteredGroups" :key="g.id" :label="g.name" :value="g.id" />
+          </el-select>
+          <span class="filter-label">姓名</span>
+          <el-input v-model="filterSearch" placeholder="搜索姓名" clearable size="small" style="width:150px" @keyup.enter="load" @clear="load" />
         </template>
       </div>
       <button class="btn btn-primary" @click="$router.push('/reports/weekly/new')">➕ 生成新周汇报</button>
@@ -70,7 +80,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useUserStore } from '../stores/user'
 import api from '../api'
 
@@ -78,6 +88,21 @@ const userStore = useUserStore()
 const reports = ref([])
 const users = ref([])
 const filterUser = ref(null)
+// Admin team filters: 部门 / 组 / 姓名. For admin, we route through the
+// listAllWeeklyReports endpoint (has these filter params); non-admin
+// keeps using listWeeklyReports which is scoped to the caller.
+const filterDept = ref(null)
+const filterGroup = ref(null)
+const filterSearch = ref('')
+const departments = ref([])
+const groups = ref([])
+const filteredGroups = computed(() =>
+  groups.value.filter(g => !filterDept.value || g.department_id === filterDept.value)
+)
+function onDeptChange() {
+  filterGroup.value = null
+  load()
+}
 const loading = ref(false)
 
 function srcCount(r) {
@@ -93,11 +118,26 @@ async function load() {
   loading.value = true
   try {
     const params = {}
-    if (userStore.isAdmin() && filterUser.value) {
-      params.user_id = filterUser.value
+    if (userStore.isAdmin()) {
+      // Admin: route through /reports/weekly/all so dept/group/search
+      // are honored server-side. user_id filter still works (lives on
+      // both endpoints), and with no filters set it returns every
+      // user's reports — matching the 汇报管理 mental model.
+      if (filterUser.value) params.user_id = filterUser.value
+      if (filterDept.value) params.department_id = filterDept.value
+      if (filterGroup.value) params.group_id = filterGroup.value
+      const q = String(filterSearch.value || '').trim()
+      if (q) params.user_search = q
+      // When a specific user_id is set, stick with the single-user
+      // endpoint for a more focused response; otherwise go team-wide.
+      const res = filterUser.value
+        ? await api.listWeeklyReports(params)
+        : await api.listAllWeeklyReports(params)
+      reports.value = res.data || []
+    } else {
+      const res = await api.listWeeklyReports({})
+      reports.value = res.data || []
     }
-    const res = await api.listWeeklyReports(params)
-    reports.value = res.data || []
   } catch (e) {
     console.error(e)
   } finally {
@@ -108,6 +148,11 @@ async function load() {
 onMounted(async () => {
   if (userStore.isAdmin()) {
     try { users.value = (await api.listUsers()).data || [] } catch { /* ignore */ }
+    try {
+      const [dRes, gRes] = await Promise.all([api.listDepartments(), api.listGroups()])
+      departments.value = dRes.data || []
+      groups.value = gRes.data || []
+    } catch { /* filters just stay empty */ }
   }
   await load()
 })

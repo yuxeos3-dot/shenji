@@ -387,6 +387,34 @@ func ListCoordTasks(c *gin.Context) {
 		where = append(where, fmt.Sprintf("t.assignee_id = $%d", len(args)+1))
 		args = append(args, a)
 	}
+	// Admin 协同管理 page filters: by 部门 / 组 / 姓名搜索. These scope
+	// by the ASSIGNEE's user profile — a 部门经理 wants "show me every
+	// task assigned to my people", not every task my team members created.
+	// Creator-side matching is handled by user_search (OR) so typing
+	// someone's name surfaces tasks they're involved in either role.
+	if d := c.Query("department_id"); d != "" {
+		where = append(where, fmt.Sprintf(
+			"t.assignee_id IN (SELECT id FROM users WHERE department_id::text = $%d)", len(args)+1))
+		args = append(args, d)
+	}
+	if g := c.Query("group_id"); g != "" {
+		where = append(where, fmt.Sprintf(
+			"t.assignee_id IN (SELECT id FROM users WHERE group_id::text = $%d)", len(args)+1))
+		args = append(args, g)
+	}
+	if q := strings.TrimSpace(c.Query("user_search")); q != "" {
+		// Match on either creator or assignee: "show me tasks 李信 is
+		// involved in" regardless of which side he's on. Use subqueries
+		// rather than alias-referencing u1/u2 directly — the COUNT(*)
+		// query below doesn't JOIN users, so the WHERE must be
+		// standalone-evaluable against coordination_tasks alone.
+		needle := "%" + strings.ToLower(q) + "%"
+		where = append(where, fmt.Sprintf(
+			"(t.created_by IN (SELECT id FROM users WHERE LOWER(COALESCE(name,'')) LIKE $%d)"+
+				" OR t.assignee_id IN (SELECT id FROM users WHERE LOWER(COALESCE(name,'')) LIKE $%d))",
+			len(args)+1, len(args)+2))
+		args = append(args, needle, needle)
+	}
 	// Admin 用户监控 page passes ?involved_user_id=N to list every task
 	// the given user is involved in — either as creator OR assignee.
 	// Only honored for admins; non-admins can't filter across other

@@ -11,12 +11,24 @@
       <div class="filter-row">
         <span class="filter-label">日期筛选</span>
         <el-date-picker v-model="filterDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" @change="loadReports" clearable size="small" />
-        <!-- 管理员才显示：按成员筛选 -->
+        <!-- Admin gets team filters (部门 / 组 / 姓名搜索) + direct
+             成员 picker. Non-admins see only their own reports so these
+             don't appear. -->
         <template v-if="userStore.isAdmin()">
           <span class="filter-label" style="margin-left:8px">成员</span>
           <el-select v-model="filterUser" placeholder="全部成员" clearable size="small" style="width:140px" @change="loadReports">
             <el-option v-for="u in users" :key="u.id" :label="u.name" :value="u.id" />
           </el-select>
+          <span class="filter-label" style="margin-left:8px">部门</span>
+          <el-select v-model="filterDept" placeholder="全部部门" clearable size="small" style="width:130px" @change="onDeptChange">
+            <el-option v-for="d in departments" :key="d.id" :label="d.name" :value="d.id" />
+          </el-select>
+          <span class="filter-label">组</span>
+          <el-select v-model="filterGroup" placeholder="全部组" clearable size="small" :disabled="!filterDept" style="width:120px" @change="loadReports">
+            <el-option v-for="g in filteredGroups" :key="g.id" :label="g.name" :value="g.id" />
+          </el-select>
+          <span class="filter-label">姓名</span>
+          <el-input v-model="filterSearch" placeholder="搜索姓名" clearable size="small" style="width:150px" @keyup.enter="loadReports" @clear="loadReports" />
         </template>
       </div>
       <button class="btn btn-primary" @click="$router.push('/reports/write')">📝 写汇报</button>
@@ -68,7 +80,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useUserStore } from '../stores/user'
 import api from '../api'
 import EvaluationsPanel from '../components/EvaluationsPanel.vue'
@@ -78,6 +90,19 @@ const reports = ref([])
 const filterDate = ref('')
 const filterUser = ref(null)
 const users = ref([])
+// Admin team filters: 部门 / 组 / 姓名搜索. Members never render these.
+const filterDept = ref(null)
+const filterGroup = ref(null)
+const filterSearch = ref('')
+const departments = ref([])
+const groups = ref([])
+const filteredGroups = computed(() =>
+  groups.value.filter(g => !filterDept.value || g.department_id === filterDept.value)
+)
+function onDeptChange() {
+  filterGroup.value = null
+  loadReports()
+}
 const showDetail = ref(false)
 const sel = ref(null)
 
@@ -86,6 +111,10 @@ async function loadReports() {
     const params = {}
     if (filterDate.value) params.date = filterDate.value
     if (filterUser.value) params.user_id = filterUser.value
+    if (filterDept.value) params.department_id = filterDept.value
+    if (filterGroup.value) params.group_id = filterGroup.value
+    const q = String(filterSearch.value || '').trim()
+    if (q) params.user_search = q
     const res = await api.listReports(params)
     reports.value = res.data
   } catch (e) { console.error(e) }
@@ -97,6 +126,11 @@ function parseTasks(v) { if (!v) return []; try { const a = typeof v === 'string
 onMounted(async () => {
   if (userStore.isAdmin()) {
     try { users.value = (await api.listUsers()).data } catch (e) { console.error(e) }
+    try {
+      const [dRes, gRes] = await Promise.all([api.listDepartments(), api.listGroups()])
+      departments.value = dRes.data || []
+      groups.value = gRes.data || []
+    } catch (e) { console.error(e) }
   }
   loadReports()
 })

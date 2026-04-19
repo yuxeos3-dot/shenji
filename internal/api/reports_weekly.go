@@ -185,6 +185,10 @@ func AdminListAllWeeklyReports(c *gin.Context) {
 		where = append(where, fmt.Sprintf("w.week_start = $%d", len(args)+1))
 		args = append(args, v)
 	}
+	if q := strings.TrimSpace(c.Query("user_search")); q != "" {
+		where = append(where, fmt.Sprintf("LOWER(COALESCE(u.name,'')) LIKE $%d", len(args)+1))
+		args = append(args, "%"+strings.ToLower(q)+"%")
+	}
 
 	q := `
 		SELECT w.id, w.user_id, COALESCE(u.name, ''),

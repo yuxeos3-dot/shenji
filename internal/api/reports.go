@@ -39,10 +39,27 @@ func ListReports(c *gin.Context) {
 		// Non-admin: force filter to own reports only
 		query += fmt.Sprintf(" AND r.user_id = $%d", len(args)+1)
 		args = append(args, currentUserID)
-	} else if userIDFilter != "" {
-		// Admin filtered by specific user
-		query += fmt.Sprintf(" AND r.user_id = $%d", len(args)+1)
-		args = append(args, userIDFilter)
+	} else {
+		if userIDFilter != "" {
+			// Admin filtered by specific user
+			query += fmt.Sprintf(" AND r.user_id = $%d", len(args)+1)
+			args = append(args, userIDFilter)
+		}
+		// Admin-only team filters: 部门 / 组 / 姓名搜索. The SELECT
+		// already JOINs users, but the COUNT-less code path here runs
+		// the one query that *does* have the JOIN, so u.* is valid.
+		if d := c.Query("department_id"); d != "" {
+			query += fmt.Sprintf(" AND u.department_id::text = $%d", len(args)+1)
+			args = append(args, d)
+		}
+		if g := c.Query("group_id"); g != "" {
+			query += fmt.Sprintf(" AND u.group_id::text = $%d", len(args)+1)
+			args = append(args, g)
+		}
+		if q := strings.TrimSpace(c.Query("user_search")); q != "" {
+			query += fmt.Sprintf(" AND LOWER(COALESCE(u.name,'')) LIKE $%d", len(args)+1)
+			args = append(args, "%"+strings.ToLower(q)+"%")
+		}
 	}
 
 	if date != "" {
