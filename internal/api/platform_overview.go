@@ -341,7 +341,10 @@ func yandexCardsForUser(userID int64, sd, ed string) ([]map[string]interface{}, 
 
 			raw, err := yandexFetch(token, path)
 			if err != nil {
-				card["error"] = err.Error()
+				// Translate HOST_NOT_LOADED / NOT_VERIFIED / etc. into a
+				// short CN message. Mirrors the per-user YandexOverview path;
+				// see friendlyYandexError() in yandex_dashboard.go.
+				card["error"] = friendlyYandexError(err.Error())
 				mu.Lock()
 				cards = append(cards, card)
 				mu.Unlock()
