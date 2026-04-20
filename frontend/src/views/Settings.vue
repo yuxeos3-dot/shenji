@@ -145,24 +145,17 @@
       <el-tab-pane label="🎨 FRW (AI 图片 / 视频)" name="frw">
         <div class="tab-body">
           <p class="tab-desc">
-            FRW API Key + 浏览器 Bearer Token 都由每个用户自己配置，没有全局回退。
+            粘贴从 FRW 平台管理员获取的对接 KEY 即可，系统会自动识别 user_id 并复用为 Bearer token。
           </p>
           <div class="field-row">
             <label>FRW API Key</label>
             <el-input v-model="frwForm.apikey" type="password" autocomplete="new-password"
-              :placeholder="frw.bound ? '●●●●●● (已配置)' : '粘贴 apikey'" />
-          </div>
-          <div class="field-row">
-            <label>Bearer Token（从 frw.aiaiartist 浏览器控制台复制，几小时会失效）</label>
-            <el-input v-model="frwForm.token" type="password" autocomplete="new-password" placeholder="eyJh..." />
-          </div>
-          <div class="field-row">
-            <label>FRW User ID</label>
-            <el-input v-model="frwForm.user_id" placeholder="FRW 里的用户数字 ID" />
+              :placeholder="frw.bound ? '●●●●●● (已配置)' : '粘贴 FRW 对接 KEY (JWT 格式)'" />
           </div>
           <div class="row-actions">
             <el-button type="primary" @click="saveFRW" :loading="saving.frw">💾 保存</el-button>
           </div>
+          <p v-if="frw.bound" class="state-ok">✅ 已配置</p>
         </div>
       </el-tab-pane>
     
@@ -426,7 +419,7 @@ const bingForm = ref({ api_key: '' })
 
 // FRW
 const frw = ref({ bound: false })
-const frwForm = ref({ apikey: '', token: '', user_id: '' })
+const frwForm = ref({ apikey: '' })
 
 // Loading flags
 const saving = ref({ ai: false, gsc: false, ga: false, yandex: false, tg: false, bing: false, frw: false })
@@ -498,9 +491,7 @@ async function loadBing() {
 async function loadFRW() {
   try {
     const apiKeyRes = await api.getMyFrwApiKey()
-    const cfgRes = await api.getMyFRWConfig()
-    frw.value.bound = !!apiKeyRes.data?.bound || !!cfgRes.data?.has_apikey
-    frwForm.value.user_id = cfgRes.data?.user_id || ''
+    frw.value.bound = !!apiKeyRes.data?.bound
   } catch (e) { console.error(e) }
 }
 
@@ -607,21 +598,15 @@ async function saveBing() {
 }
 
 async function saveFRW() {
+  if (!frwForm.value.apikey) {
+    ElMessage.warning('请先粘贴 FRW API Key')
+    return
+  }
   saving.value.frw = true
   try {
-    // Save apikey via dedicated encrypted endpoint
-    if (frwForm.value.apikey) {
-      await api.saveMyFrwApiKey({ api_key: frwForm.value.apikey })
-    }
-    // Save bearer + user_id via the existing /frw/config endpoint
-    await api.saveMyFRWConfig({
-      apikey: '', // apikey already handled above; pass empty so we don't overwrite with ****
-      token: frwForm.value.token,
-      user_id: frwForm.value.user_id,
-    })
+    await api.saveMyFrwApiKey({ api_key: frwForm.value.apikey })
     ElMessage.success('已保存')
     frwForm.value.apikey = ''
-    frwForm.value.token = ''
     await loadFRW()
   } catch (e) {
     ElMessage.error(e?.response?.data?.error || '保存失败')

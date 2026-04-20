@@ -155,11 +155,15 @@ func (c *Client) Submit(mode, prompt, sourceURL string) (*SubmitResult, error) {
 	if !ok {
 		return nil, fmt.Errorf("不支持的生成模式: %s", mode)
 	}
-	if c.Token == "" || c.UserID == "" {
-		return nil, fmt.Errorf("FRW 尚未配置, 请到个人中心填写 Bearer token + user id")
-	}
 	if c.APIKey == "" {
-		return nil, fmt.Errorf("FRW apikey 未配置, 请联系管理员在系统设置中填写")
+		return nil, fmt.Errorf("FRW 尚未配置, 请到个人中心粘贴 FRW API Key")
+	}
+	if c.Token == "" || c.UserID == "" {
+		// With the single-field onboarding flow, Token / UserID are
+		// derived from APIKey (JWT). Reaching here means APIKey was
+		// saved but decoding its payload couldn't yield a user_id —
+		// typically because it isn't a standard JWT.
+		return nil, fmt.Errorf("FRW API Key 格式不是标准 JWT, 无法自动解析 user_id — 请确认密钥是 FRW 平台发放的对接 KEY; 如格式特殊, 联系管理员")
 	}
 
 	gen := map[string]interface{}{

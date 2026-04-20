@@ -45,6 +45,14 @@ type frwConfig struct {
 // loadFRWConfig reads the user's FRW config: apikey from the dedicated
 // users.frw_apikey column (encrypted), bearer + user id from
 // users.frw_config. No global fallback.
+//
+// Single-field onboarding fallback: if the user saved only an apikey
+// (the modern UI only asks for one field) and did NOT fill bearer /
+// user_id, assume the apikey is the FRW 对接 KEY (a JWT) and derive:
+//   - Token = APIKey (same JWT doubles as Authorization: Bearer)
+//   - UserID = JWT payload's user_id (or sub)
+// Legacy users who had explicitly-saved token / user_id keep using them
+// unchanged; derived values only fill in when the stored field is empty.
 func loadFRWConfig(userID int64) frwConfig {
 	var raw string
 	db.DB.QueryRow("SELECT COALESCE(frw_config,'') FROM users WHERE id=$1", userID).Scan(&raw)
@@ -57,6 +65,18 @@ func loadFRWConfig(userID int64) frwConfig {
 	// and should refuse to call FRW rather than using a shared key.
 	if v := LoadUserFrwApiKey(userID); v != "" {
 		cfg.APIKey = v
+	}
+	// Single-field onboarding: derive Token / UserID from APIKey (JWT)
+	// whenever they're missing. See function doc above.
+	if cfg.APIKey != "" {
+		if cfg.Token == "" {
+			cfg.Token = cfg.APIKey
+		}
+		if cfg.UserID == "" {
+			if uid := frw.DecodeJWTUserID(cfg.APIKey); uid != "" {
+				cfg.UserID = uid
+			}
+		}
 	}
 	return cfg
 }
