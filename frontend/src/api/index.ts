@@ -216,21 +216,28 @@ const api = {
 
   // ── Dashboard (data-management page): account-level overview + per-site
   // detail, date-range aware. No DB persistence — live view from upstream.
-  dashGSCListSites: () => instance.get('/v1/gsc/sites'),
-  dashGSCOverview: (params: Record<string, any>) => instance.get('/v1/gsc/overview', { params }),
-  dashGSCSiteDetail: (params: Record<string, any>) => instance.get('/v1/gsc/site-detail', { params }),
+  //
+  // _silent: true 让 axios 响应拦截器在这里 *不* 弹全局 ElMessage.error
+  // toast。原因：一个用户常见的是绑了 GSC 但没绑 Yandex/Bing（反之亦然），
+  // overview 请求会在未绑平台上返回 400；页面本身已经有 error.value
+  // 状态会在卡片区域内联显示"❌ 未授权..."等提示，不需要屏幕顶部
+  // 再叠 4 个 toast 遮挡侧边栏 / 主内容区的点击。之前"有时点不动"
+  // 就是叠的 ElMessage 罩层尚未 dismiss。
+  dashGSCListSites: () => instance.get('/v1/gsc/sites', { _silent: true } as any),
+  dashGSCOverview: (params: Record<string, any>) => instance.get('/v1/gsc/overview', { params, _silent: true } as any),
+  dashGSCSiteDetail: (params: Record<string, any>) => instance.get('/v1/gsc/site-detail', { params, _silent: true } as any),
 
-  dashGAListProperties: () => instance.get('/v1/ga4/properties'),
-  dashGAOverview: (params: Record<string, any>) => instance.get('/v1/ga4/overview', { params }),
-  dashGAPropertyDetail: (params: Record<string, any>) => instance.get('/v1/ga4/property-detail', { params }),
+  dashGAListProperties: () => instance.get('/v1/ga4/properties', { _silent: true } as any),
+  dashGAOverview: (params: Record<string, any>) => instance.get('/v1/ga4/overview', { params, _silent: true } as any),
+  dashGAPropertyDetail: (params: Record<string, any>) => instance.get('/v1/ga4/property-detail', { params, _silent: true } as any),
 
-  dashYandexListHosts: () => instance.get('/v1/yandex/hosts'),
-  dashYandexOverview: (params: Record<string, any>) => instance.get('/v1/yandex/overview', { params }),
-  dashYandexHostDetail: (params: Record<string, any>) => instance.get('/v1/yandex/host-detail', { params }),
+  dashYandexListHosts: () => instance.get('/v1/yandex/hosts', { _silent: true } as any),
+  dashYandexOverview: (params: Record<string, any>) => instance.get('/v1/yandex/overview', { params, _silent: true } as any),
+  dashYandexHostDetail: (params: Record<string, any>) => instance.get('/v1/yandex/host-detail', { params, _silent: true } as any),
 
-  dashBingListSites: () => instance.get('/v1/bing/sites'),
-  dashBingOverview: (params: Record<string, any>) => instance.get('/v1/bing/overview', { params }),
-  dashBingSiteDetail: (params: Record<string, any>) => instance.get('/v1/bing/site-detail', { params }),
+  dashBingListSites: () => instance.get('/v1/bing/sites', { _silent: true } as any),
+  dashBingOverview: (params: Record<string, any>) => instance.get('/v1/bing/overview', { params, _silent: true } as any),
+  dashBingSiteDetail: (params: Record<string, any>) => instance.get('/v1/bing/site-detail', { params, _silent: true } as any),
 
   // Reports
   listReports: (params?: Record<string, any>) => instance.get('/v1/reports', { params }),
