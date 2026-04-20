@@ -66,7 +66,7 @@ function safeRedirect(fullPath: string): string {
   if (!fullPath || fullPath === '/') return ''
   if (!fullPath.startsWith('/')) return ''
   if (fullPath.startsWith('//')) return ''
-  if (fullPath.startsWith('/\')) return ''
+  if (fullPath.startsWith('/\\')) return ''
   if (/^\s*(javascript|data|vbscript):/i.test(fullPath)) return ''
   return fullPath
 }
