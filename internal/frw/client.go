@@ -138,14 +138,84 @@ type SubmitResult struct {
 	EstimatedTime int     `json:"estimated_time"`
 }
 
+// submitEnvelope holds the outer {success, data, ...} wrapper. data is
+// decoded as RawMessage so we can apply lenient field-name matching
+// ourselves — FRW has returned variants like `taskID` (camelCase) and
+// `task_id` (snake_case) in the same API across deploys, and the
+// status / progress fields occasionally come back as strings instead
+// of numbers. A strict struct unmarshal blows up on the first
+// type mismatch; a map walk skips problem fields per-row instead.
 type submitEnvelope struct {
-	Success bool         `json:"success"`
-	Code    int          `json:"code"`
-	Message string       `json:"message"`
-	Data    SubmitResult `json:"data"`
+	Success bool            `json:"success"`
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data"`
 	Error   *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
+}
+
+// parseSubmitData walks the RawMessage data object as a generic map,
+// pulling task_id / taskID / id (in that preference order) and
+// numeric fields via asFloat-style coercion. Anything missing just
+// stays zero-valued on the result.
+func parseSubmitData(raw json.RawMessage) (*SubmitResult, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, false
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, false
+	}
+	r := &SubmitResult{}
+	// task_id preferred names, in order: task_id, taskID, id.
+	for _, k := range []string{"task_id", "taskID", "id"} {
+		if v, ok := m[k].(string); ok && v != "" {
+			r.TaskID = v
+			break
+		}
+	}
+	// Numeric fields — tolerate number-as-string ("0" instead of 0).
+	if v, ok := numericAny(m["status"]); ok {
+		r.Status = int(v)
+	}
+	if v, ok := numericAny(m["progress"]); ok {
+		r.Progress = v
+	}
+	if v, ok := numericAny(m["estimated_time"]); ok {
+		r.EstimatedTime = int(v)
+	} else if v, ok := numericAny(m["estimatedTime"]); ok {
+		r.EstimatedTime = int(v)
+	}
+	return r, r.TaskID != ""
+}
+
+// numericAny accepts float64 / string / json.Number / int and returns
+// a float64. Returns (0, false) for anything else.
+func numericAny(v interface{}) (float64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case int:
+		return float64(x), true
+	case int64:
+		return float64(x), true
+	case json.Number:
+		f, err := x.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return f, true
+	case string:
+		if x == "" {
+			return 0, false
+		}
+		var f float64
+		if _, err := fmt.Sscanf(x, "%f", &f); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
 }
 
 // Submit sends a generation task. mode must be one of Presets keys.
@@ -220,10 +290,11 @@ func (c *Client) Submit(mode, prompt, sourceURL string) (*SubmitResult, error) {
 		}
 		return nil, fmt.Errorf("FRW submit 失败: %s", msg)
 	}
-	if env.Data.TaskID == "" {
+	result, ok := parseSubmitData(env.Data)
+	if !ok {
 		return nil, fmt.Errorf("FRW submit 未返回 task_id, 原始响应: %s", truncate(string(raw), 200))
 	}
-	return &env.Data, nil
+	return result, nil
 }
 
 // QueryResult mirrors what we care about from /query. The upstream
@@ -287,7 +358,78 @@ func (c *Client) Query(taskID string) (*QueryResult, error) {
 		return &QueryResult{TaskID: taskID, Status: 0}, nil
 	}
 
+	// Third fallback: neither strict-struct shape matched. Parse data
+	// as generic and lift whatever fields exist under any name variant.
+	// Guards against FRW shipping yet another field naming change that
+	// used to black-hole Query into "格式异常".
+	var envGeneric struct {
+		Success bool            `json:"success"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &envGeneric); err == nil && envGeneric.Success && len(envGeneric.Data) > 0 {
+		if r, ok := parseQueryDataGeneric(envGeneric.Data, taskID); ok {
+			return r, nil
+		}
+		return &QueryResult{TaskID: taskID, Status: 0}, nil
+	}
+
 	return nil, fmt.Errorf("FRW query 响应格式异常: %s", truncate(string(raw), 200))
+}
+
+// parseQueryDataGeneric reads a Query /data/ payload regardless of
+// whether it's shipped as a map (keyed by task id) or a list. Each
+// entry is walked as a generic map so camelCase (taskID) / snake_case
+// (task_id) / id field-name drift doesn't matter, and numeric fields
+// accept both numbers and numeric strings.
+func parseQueryDataGeneric(raw json.RawMessage, taskID string) (*QueryResult, bool) {
+	// Try map shape first: { "task_id": { ... } }
+	var asMap map[string]interface{}
+	if err := json.Unmarshal(raw, &asMap); err == nil {
+		if row, ok := asMap[taskID].(map[string]interface{}); ok {
+			return pickQueryFields(row, taskID), true
+		}
+	}
+	// Fall through to list shape: [ { "task_id": ..., ... }, ... ]
+	var asList []interface{}
+	if err := json.Unmarshal(raw, &asList); err == nil {
+		for _, item := range asList {
+			row, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			id, _ := row["task_id"].(string)
+			if id == "" {
+				id, _ = row["taskID"].(string)
+			}
+			if id == "" {
+				id, _ = row["id"].(string)
+			}
+			if id == taskID {
+				return pickQueryFields(row, taskID), true
+			}
+		}
+	}
+	return nil, false
+}
+
+func pickQueryFields(row map[string]interface{}, taskID string) *QueryResult {
+	r := &QueryResult{TaskID: taskID}
+	if v, ok := numericAny(row["status"]); ok {
+		r.Status = int(v)
+	}
+	if v, ok := numericAny(row["progress"]); ok {
+		r.Progress = v
+	}
+	for _, k := range []string{"out_data", "outData", "output", "url"} {
+		if v, ok := row[k].(string); ok && v != "" {
+			r.OutData = v
+			break
+		}
+	}
+	if v, ok := row["message"].(string); ok {
+		r.Message = v
+	}
+	return r
 }
 
 // Download fetches the final output URL (image/video) into memory.
