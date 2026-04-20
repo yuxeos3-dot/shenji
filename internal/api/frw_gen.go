@@ -168,14 +168,40 @@ func stripMask(v, old string) string {
 
 func ListFRWGenerations(c *gin.Context) {
 	userID := c.GetInt64("user_id")
-	kind := c.Query("kind") // "image" | "video"; empty = both
-	q := "SELECT id, kind, mode, prompt, source_url, frw_task_id, status, progress, result_url, local_path, error_msg, created_at FROM ai_generations WHERE user_id=$1"
+	kind := c.Query("kind")
+	mode := c.Query("mode")
+	statusQ := c.Query("status")
+	search := c.Query("search")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "50"))
+	if page < 1 { page = 1 }
+	if perPage < 1 { perPage = 50 }
+	if perPage > 200 { perPage = 200 }
+
+	where := "WHERE user_id=$1"
 	args := []interface{}{userID}
+	idx := 2
 	if kind == "image" || kind == "video" {
-		q += fmt.Sprintf(" AND kind=$%d", len(args)+1)
-		args = append(args, kind)
+		where += fmt.Sprintf(" AND kind=$%d", idx); args = append(args, kind); idx++
 	}
-	q += " ORDER BY id DESC LIMIT 200"
+	if mode != "" {
+		where += fmt.Sprintf(" AND mode=$%d", idx); args = append(args, mode); idx++
+	}
+	if statusQ != "" {
+		st, _ := strconv.Atoi(statusQ)
+		where += fmt.Sprintf(" AND status=$%d", idx); args = append(args, st); idx++
+	}
+	if search != "" {
+		where += fmt.Sprintf(" AND prompt ILIKE $%d", idx); args = append(args, "%"+search+"%"); idx++
+	}
+
+	var total int
+	db.DB.QueryRow("SELECT COUNT(*) FROM ai_generations "+where, args...).Scan(&total)
+	var published int
+	db.DB.QueryRow("SELECT COUNT(*) FROM ai_generations "+where+" AND local_path <> ''", args...).Scan(&published)
+
+	offset := (page - 1) * perPage
+	q := fmt.Sprintf("SELECT id, kind, mode, prompt, source_url, frw_task_id, status, progress, result_url, local_path, error_msg, created_at FROM ai_generations %s ORDER BY id DESC LIMIT %d OFFSET %d", where, perPage, offset)
 	rows, err := db.DB.Query(q, args...)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": err.Error()})
@@ -193,24 +219,14 @@ func ListFRWGenerations(c *gin.Context) {
 			continue
 		}
 		out = append(out, gin.H{
-			"id":          id,
-			"kind":        kd,
-			"mode":        md,
-			"prompt":      pr,
-			"source_url":  sr,
-			"frw_task_id": tid,
-			"status":      st,
-			"progress":    pg,
-			"result_url":  ru,
-			"local_path":  lp,
-			"error_msg":   em,
-			"created_at":  ct,
+			"id": id, "kind": kd, "mode": md, "prompt": pr,
+			"source_url": sr, "frw_task_id": tid, "status": st,
+			"progress": pg, "result_url": ru, "local_path": lp,
+			"error_msg": em, "created_at": ct,
 		})
 	}
-	c.JSON(200, gin.H{"code": 0, "data": out})
+	c.JSON(200, gin.H{"code": 0, "data": gin.H{"items": out, "total": total, "published": published, "page": page, "per_page": perPage}})
 }
-
-// ─── POST /frw/generations ───────────────────────────────────────────────
 
 func SubmitFRWGeneration(c *gin.Context) {
 	userID := c.GetInt64("user_id")
@@ -479,4 +495,50 @@ func DeleteFRWGeneration(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"code": 0, "data": "已删除"})
+}
+
+// UploadFRWMedia handles local file uploads for image/video assets.
+func UploadFRWMedia(c *gin.Context) {
+	userID := c.GetInt64("user_id")
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(400, gin.H{"code": -1, "error": "请选择要上传的文件"})
+		return
+	}
+	prompt := c.PostForm("prompt")
+
+	ct := file.Header.Get("Content-Type")
+	kind := "image"
+	if strings.HasPrefix(ct, "video/") {
+		kind = "video"
+	}
+
+	var genID int64
+	err = db.DB.QueryRow(
+		`INSERT INTO ai_generations (user_id, kind, mode, prompt, status, progress, created_at, updated_at)
+		 VALUES ($1, $2, 'upload', $3, 2, 1.0, NOW(), NOW()) RETURNING id`,
+		userID, kind, prompt,
+	).Scan(&genID)
+	if err != nil {
+		c.JSON(500, gin.H{"code": -1, "error": "保存记录失败: " + err.Error()})
+		return
+	}
+
+	ext := filepath.Ext(file.Filename)
+	if ext == "" { ext = ".bin" }
+	filename := fmt.Sprintf("u%d_gen%d%s", userID, genID, ext)
+	dir := filepath.Join("data", "frw", kind)
+	os.MkdirAll(dir, 0755)
+	dst := filepath.Join(dir, filename)
+
+	if err := c.SaveUploadedFile(file, dst); err != nil {
+		db.DB.Exec("DELETE FROM ai_generations WHERE id=$1", genID)
+		c.JSON(500, gin.H{"code": -1, "error": "保存文件失败: " + err.Error()})
+		return
+	}
+
+	localPath := fmt.Sprintf("/api/v1/data/frw/%s/%s", kind, filename)
+	db.DB.Exec("UPDATE ai_generations SET local_path=$1, result_url=$2 WHERE id=$3", localPath, localPath, genID)
+
+	c.JSON(200, gin.H{"code": 0, "data": gin.H{"id": genID, "local_path": localPath, "filename": filename}})
 }

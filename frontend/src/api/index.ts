@@ -405,6 +405,11 @@ const api = {
   getFRWGeneration: (id: Id) => instance.get(`/v1/frw/generations/${id}`),
   publishFRWGeneration: (id: Id) => instance.post(`/v1/frw/generations/${id}/publish`, {}),
   deleteFRWGeneration: (id: Id) => instance.delete(`/v1/frw/generations/${id}`),
+n  // Upload local file as media asset
+  uploadFRWMedia: (formData: FormData) =>
+    instance.post("/v1/frw/upload", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
 
   // Push Management
   listPushLogs: (siteId: Id, params?: Record<string, any>) =>
