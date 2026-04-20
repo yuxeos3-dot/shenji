@@ -935,11 +935,11 @@ async function confirmReject() {
 
 async function loadDevelopers() {
   try {
-    const res = await api.listUsers()
-    // Show everyone who could plausibly be assigned: admins + members. We
-    // don't filter by role specifically because sometimes a team lead is
-    // an admin who still does dev work. The picker is searchable (filterable)
-    // so long lists are fine.
+    // Use the member-safe team directory rather than /v1/users (admin-only).
+    // Coord workflow runs entirely in member-land — creator, assignee,
+    // and reviewers can all be regular users — so a non-admin clicking
+    // 「分配给开发」 must be able to load the candidate list themselves.
+    const res = await api.listTeamMembers()
     developers.value = res.data || []
   } catch {
     developers.value = []

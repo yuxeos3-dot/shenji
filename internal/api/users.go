@@ -89,6 +89,47 @@ func ListUsers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": users})
 }
 
+// ListTeamMembers returns a minimal "company directory" — just enough
+// for non-admin members to populate assignee / reviewer pickers in the
+// coordination workflow without exposing email, role, telegram_id, or
+// last_login (which would be a lateral information disclosure across
+// teammates). Active members only (excludes pending self-registrations).
+//
+// Anyone authenticated can call it; the data is the same names you'd see
+// on a coord task assignee/creator field anyway, plus department/group
+// for picker labels.
+func ListTeamMembers(c *gin.Context) {
+	rows, err := db.DB.Query(`
+		SELECT u.id, u.name,
+		       COALESCE(d.name, ''), COALESCE(g.name, '')
+		FROM users u
+		LEFT JOIN departments d ON d.id = u.department_id
+		LEFT JOIN dept_groups g ON g.id = u.group_id
+		WHERE COALESCE(u.register_status, 'approved') = 'approved'
+		ORDER BY u.name`)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
+		return
+	}
+	defer rows.Close()
+
+	out := []gin.H{}
+	for rows.Next() {
+		var id int64
+		var name, deptName, groupName string
+		if err := rows.Scan(&id, &name, &deptName, &groupName); err != nil {
+			continue
+		}
+		out = append(out, gin.H{
+			"id":              id,
+			"name":            name,
+			"department_name": deptName,
+			"group_name":      groupName,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": out})
+}
+
 func CreateUser(c *gin.Context) {
 	var req CreateUserRequest
 	// Use manual binding so we can emit per-field errors. Default Gin

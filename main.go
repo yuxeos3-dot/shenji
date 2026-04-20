@@ -174,6 +174,11 @@ func main() {
 	v1 := r.Group("/api/v1")
 	v1.Use(middleware.AuthRequired(), middleware.CSRFProtect())
 	{
+		// Member-safe team directory: id+name+dept+group only. Used by
+		// the coord assign / reviewer pickers so non-admin members can
+		// see candidate names without leaking email / role / telegram.
+		v1.GET("/team/members", api.ListTeamMembers)
+
 		// Auth
 		v1.POST("/auth/logout", api.Logout)
 		v1.POST("/auth/change-password", middleware.UserRateLimit(10), api.ChangePassword)
