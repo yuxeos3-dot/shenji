@@ -174,6 +174,11 @@ func main() {
 	v1 := r.Group("/api/v1")
 	v1.Use(middleware.AuthRequired(), middleware.CSRFProtect())
 	{
+		// Member-safe team directory: id+name+dept+group only. Used by
+		// the coord assign / reviewer pickers so non-admin members can
+		// see candidate names without leaking email / role / telegram.
+		v1.GET("/team/members", api.ListTeamMembers)
+
 		// Auth
 		v1.POST("/auth/logout", api.Logout)
 		v1.POST("/auth/change-password", middleware.UserRateLimit(10), api.ChangePassword)
@@ -466,6 +471,11 @@ func main() {
 			coord.PUT("/tasks/:id", api.RequirePermission("coord.edit"), api.UpdateCoordTask)
 			coord.DELETE("/tasks/:id", api.RequirePermission("coord.delete"), api.DeleteCoordTask)
 			coord.POST("/tasks/:id/assign", api.RequirePermission("coord.assign"), api.AssignCoordTask)
+			// 组长 / 经理审核：prevent new staff from forwarding non-issues
+			// to developers. Reviewers are chosen on the assign dialog; the
+			// decision endpoint is gated by coord.review so only people with
+			// that permission can approve/reject.
+			coord.POST("/tasks/:id/review", api.RequirePermission("coord.review"), api.SubmitCoordReviewerDecision)
 			coord.POST("/tasks/:id/submit", api.RequirePermission("coord.submit"), api.SubmitCoordTask)
 			coord.POST("/tasks/:id/verify", api.RequirePermission("coord.verify"), api.VerifyCoordTask)
 			coord.POST("/tasks/:id/comments", api.RequirePermission("coord.comment"), api.AddCoordComment)

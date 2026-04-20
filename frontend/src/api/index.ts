@@ -111,6 +111,9 @@ const api = {
 
   // Users
   listUsers: () => instance.get('/v1/users'),
+  // Member-safe team directory — id + name + dept + group, no email or role.
+  // Used by the coord assignee / reviewer pickers from a member context.
+  listTeamMembers: () => instance.get('/v1/team/members'),
   createUser: (data: Record<string, any>, config?: Record<string, any>) => instance.post('/v1/users', data, config),
   updateUser: (id: Id, data: Record<string, any>, config?: Record<string, any>) => instance.put(`/v1/users/${id}`, data, config),
   deleteUser: (id: Id) => instance.delete(`/v1/users/${id}`),
@@ -349,6 +352,8 @@ const api = {
   coordUpdateTask: (id: Id, data: Record<string, any>) => instance.put(`/v1/coord/tasks/${id}`, data),
   coordDeleteTask: (id: Id) => instance.delete(`/v1/coord/tasks/${id}`),
   coordAssignTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/assign`, data),
+  // 组长 / 经理审核 — approve or reject a pending_review task.
+  coordReviewDecision: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/review`, data),
   coordSubmitTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/submit`, data),
   coordVerifyTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/verify`, data),
   coordAddComment: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/comments`, data),
