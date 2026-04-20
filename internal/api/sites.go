@@ -44,11 +44,13 @@ func ListSites(c *gin.Context) {
 	query := `
 		SELECT s.id, s.domain, s.name, s.gsc_site_url, s.ga_property_id, s.yandex_host_id,
 		       s.status, s.created_at, COALESCE(s.created_by,0),
-		       COALESCE(u.name,''),
+		       COALESCE(u.name,''), COALESCE(d.name,''), COALESCE(g.name,''),
 		       (SELECT status FROM audit_tasks WHERE site_id = s.id ORDER BY id DESC LIMIT 1) as last_audit_status,
 		       (SELECT created_at FROM audit_tasks WHERE site_id = s.id ORDER BY id DESC LIMIT 1) as last_audit_time
 		FROM sites s
-		LEFT JOIN users u ON u.id = s.created_by`
+		LEFT JOIN users u ON u.id = s.created_by
+		LEFT JOIN departments d ON d.id = u.department_id
+		LEFT JOIN dept_groups g ON g.id = u.group_id`
 
 	var args []interface{}
 	if !isAdmin {
@@ -70,9 +72,11 @@ func ListSites(c *gin.Context) {
 	var sites []gin.H
 	for rows.Next() {
 		var id, createdBy int64
-		var domain, name, gscURL, gaID, yandexID, status, createdAt, ownerName string
+		var domain, name, gscURL, gaID, yandexID, status, createdAt, ownerName, deptName, groupName string
 		var lastAuditStatus, lastAuditTime *string
-		if err := rows.Scan(&id, &domain, &name, &gscURL, &gaID, &yandexID, &status, &createdAt, &createdBy, &ownerName, &lastAuditStatus, &lastAuditTime); err != nil {
+		if err := rows.Scan(&id, &domain, &name, &gscURL, &gaID, &yandexID, &status, &createdAt,
+			&createdBy, &ownerName, &deptName, &groupName,
+			&lastAuditStatus, &lastAuditTime); err != nil {
 			continue
 		}
 		sites = append(sites, gin.H{
@@ -86,6 +90,8 @@ func ListSites(c *gin.Context) {
 			"created_at":        createdAt,
 			"created_by":        createdBy,
 			"owner_name":        ownerName,
+			"department_name":   deptName,
+			"group_name":        groupName,
 			"last_audit_status": lastAuditStatus,
 			"last_audit_time":   lastAuditTime,
 		})

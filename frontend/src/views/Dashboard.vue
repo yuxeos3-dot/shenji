@@ -39,14 +39,20 @@
           <router-link to="/sites" class="btn-link">查看全部 →</router-link>
         </div>
         <table class="table">
-          <thead><tr><th>站点</th><th>状态</th><th>时间</th></tr></thead>
+          <thead><tr><th>站点</th><th>归属</th><th>状态</th><th>时间</th></tr></thead>
           <tbody>
             <tr v-for="s in sites.filter(s => s.last_audit_status)" :key="s.id">
               <td style="font-weight:700">{{ s.name }}</td>
+              <td class="owner-cell">
+                <span class="owner-name">{{ s.owner_name || '—' }}</span>
+                <span v-if="s.department_name || s.group_name" class="owner-meta">
+                  {{ [s.department_name, s.group_name].filter(Boolean).join(' · ') }}
+                </span>
+              </td>
               <td><span class="badge" :class="s.last_audit_status==='done'?'badge-ok':s.last_audit_status==='running'?'badge-warn':'badge-err'">{{ s.last_audit_status }}</span></td>
               <td style="color:var(--ink-soft);font-size:12px">{{ s.last_audit_time || '-' }}</td>
             </tr>
-            <tr v-if="!sites.filter(s => s.last_audit_status).length"><td colspan="3" style="text-align:center;color:var(--ink-hint);padding:30px">暂无审计记录</td></tr>
+            <tr v-if="!sites.filter(s => s.last_audit_status).length"><td colspan="4" style="text-align:center;color:var(--ink-hint);padding:30px">暂无审计记录</td></tr>
           </tbody>
         </table>
       </div>
@@ -54,7 +60,14 @@
       <div class="panel" style="flex:1">
         <div class="panel-header"><h2>站点健康</h2></div>
         <div v-for="site in sites" :key="site.id" class="health-item" @click="$router.push(`/sites/${site.id}`)">
-          <span class="health-name">{{ site.name }}</span>
+          <div class="health-left">
+            <span class="health-name">{{ site.name }}</span>
+            <span v-if="site.owner_name || site.department_name" class="health-owner">
+              {{ site.owner_name || '—' }}<span v-if="site.department_name || site.group_name" class="health-team">
+                · {{ [site.department_name, site.group_name].filter(Boolean).join(' / ') }}
+              </span>
+            </span>
+          </div>
           <span class="badge" :class="site.last_audit_status==='done'?'badge-ok':site.last_audit_status==='error'?'badge-err':'badge-muted'">
             {{ site.last_audit_status || '未审计' }}
           </span>
@@ -164,7 +177,13 @@ const stats = computed(() => {
 }
 .health-item:hover { padding-left: 6px; }
 .health-item:last-child { border-bottom: none; }
+.health-left { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .health-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+.health-owner { font-size: 11px; color: var(--ink-soft); font-weight: 500; }
+.health-team { color: var(--ink-hint); }
+.owner-cell { font-size: 12px; }
+.owner-name { font-weight: 700; color: var(--ink-mid); }
+.owner-meta { display: block; font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
 
 .online-panel { margin-bottom: 18px; }
 .online-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22C55E; margin-right: 6px; animation: pulse-dot 1.5s infinite; }
