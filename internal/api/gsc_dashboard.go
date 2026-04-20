@@ -224,6 +224,18 @@ func GSCOverview(c *gin.Context) {
 	}
 	wg.Wait()
 
+	// Filter out sites the current user has hidden via × on the overview
+	// page. Defense in depth — the frontend also filters client-side.
+	hidden := loadPlatformHides(c.GetInt64("user_id"), "gsc")
+	filtered := make([]siteCard, 0, len(cards))
+	for _, cd := range cards {
+		if hidden[cd.SiteURL] {
+			continue
+		}
+		filtered = append(filtered, cd)
+	}
+	cards = filtered
+
 	// Step 3: return per-site cards only. Per user decision: no
 	// aggregate total strip — each site's numbers speak for themselves.
 

@@ -69,6 +69,12 @@
           :class="['site-card', !c.has_data && 'site-card-empty', c.error && 'site-card-err']"
           @click="openDetail(c)"
         >
+          <!-- × 隐藏站点按钮：右上角，只对当前用户生效（用户级过滤）。 -->
+          <button
+            class="card-hide-btn"
+            title="从数据总览隐藏该站点"
+            @click.stop="hideCard(c)"
+          >×</button>
           <div class="card-head">
             <div class="card-title">{{ c.display_name || c.site_url || c.host_id || c.property_id }}</div>
             <span v-if="c.verified === false" class="card-tag tag-warn">未验证</span>
@@ -240,7 +246,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 
 // ── Platforms ────────────────────────────────────────────────────────────
@@ -368,6 +374,41 @@ async function refreshCurrent(bypassCache = false) {
   }
   if (view.value === 'overview') await loadOverview()
   else await loadDetail(detail.siteKey, detail.siteName)
+}
+
+// Platform-level site key resolution — each platform puts the "which site
+// is this" id in a different field. Keep in sync with the backend's
+// loadPlatformHides() mapping.
+function platformSiteKey(c: any): string {
+  switch (platform.value) {
+    case 'gsc':    return c.site_url || ''
+    case 'ga4':    return c.property_id || ''
+    case 'bing':   return c.site_url || ''
+    case 'yandex': return c.host_id || ''
+  }
+  return ''
+}
+
+// × on a card → confirm → API call → drop locally from the grid. No
+// full refetch so the user doesn't re-pay the expensive provider call.
+async function hideCard(c: any) {
+  const key = platformSiteKey(c)
+  if (!key) return
+  const label = c.display_name || key
+  try {
+    await ElMessageBox.confirm(
+      `将「${label}」从「${platformLabel.value}」总览中隐藏？可在其他用户看到，只影响你自己的视图。`,
+      '隐藏站点',
+      { type: 'warning', confirmButtonText: '隐藏', cancelButtonText: '取消' }
+    )
+  } catch { return }
+  try {
+    await api.hidePlatformSite(platform.value, key)
+    overview.cards = overview.cards.filter(x => platformSiteKey(x) !== key)
+    // Drop the cached overview too so a refetch doesn't re-add this card.
+    cache.delete(cacheKey(''))
+    ElMessage.success('已隐藏')
+  } catch { /* interceptor */ }
 }
 
 async function loadOverview() {
@@ -715,7 +756,10 @@ onMounted(() => { loadOverview() })
 
 .view-overview { padding-top:4px; }
 .card-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
-.site-card { background:var(--surface); border:1.5px solid var(--border-light); border-radius:var(--r); padding:16px 18px; cursor:pointer; transition:all .15s; box-shadow:var(--s1); }
+.site-card { position:relative; background:var(--surface); border:1.5px solid var(--border-light); border-radius:var(--r); padding:16px 18px; cursor:pointer; transition:all .15s; box-shadow:var(--s1); }
+.card-hide-btn { position:absolute; top:6px; right:8px; width:24px; height:24px; border:none; background:transparent; color:var(--ink-hint); font-size:18px; line-height:1; font-weight:700; border-radius:6px; cursor:pointer; opacity:0; transition:all .15s; z-index:2; }
+.site-card:hover .card-hide-btn { opacity:.75; }
+.card-hide-btn:hover { opacity:1 !important; background:#FEE2E2; color:#B91C1C; }
 .site-card:hover { border-color:var(--sun); box-shadow:var(--s-amber); transform:translateY(-1px); }
 .site-card-empty { opacity:.75; }
 .site-card-empty:hover { opacity:.95; }

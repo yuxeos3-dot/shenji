@@ -238,6 +238,17 @@ func GAOverview(c *gin.Context) {
 	}
 	wg.Wait()
 
+	// Filter out properties the user has hidden via × on the overview.
+	hidden := loadPlatformHides(c.GetInt64("user_id"), "ga4")
+	filtered := make([]card, 0, len(cards))
+	for _, cd := range cards {
+		if hidden[cd.PropertyID] {
+			continue
+		}
+		filtered = append(filtered, cd)
+	}
+	cards = filtered
+
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
 		"start_date":     sd,
 		"end_date":       ed,

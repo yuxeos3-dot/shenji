@@ -718,6 +718,19 @@ func Init() {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_coord_reviewers_task ON coord_task_reviewers(task_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_coord_reviewers_reviewer ON coord_task_reviewers(reviewer_id, decision)`,
+		// 数据平台站点隐藏 — 用户在 GSC / GA4 / Bing / Yandex 总览页点
+		// × 隐藏不想看的站点，只影响当前用户的视图。site_key 对不同平
+		// 台含义不同：GSC 是 site_url，GA4 是 property_id，Bing 是
+		// site_url，Yandex 是 host_id。
+		`CREATE TABLE IF NOT EXISTS user_platform_hides (
+			id         SERIAL PRIMARY KEY,
+			user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			platform   TEXT NOT NULL,
+			site_key   TEXT NOT NULL,
+			hidden_at  TIMESTAMPTZ DEFAULT NOW(),
+			UNIQUE(user_id, platform, site_key)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_platform_hides ON user_platform_hides(user_id, platform)`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {

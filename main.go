@@ -179,6 +179,12 @@ func main() {
 		// see candidate names without leaking email / role / telegram.
 		v1.GET("/team/members", api.ListTeamMembers)
 
+		// Per-user 数据平台 site-hide list (GSC / GA4 / Bing / Yandex
+		// overview × button). Any logged-in user can manage their own.
+		v1.GET("/platform-hides", api.ListPlatformHides)
+		v1.POST("/platform-hides", api.AddPlatformHide)
+		v1.DELETE("/platform-hides", api.RemovePlatformHide)
+
 		// Auth
 		v1.POST("/auth/logout", api.Logout)
 		v1.POST("/auth/change-password", middleware.UserRateLimit(10), api.ChangePassword)

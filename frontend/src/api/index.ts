@@ -114,6 +114,15 @@ const api = {
   // Member-safe team directory — id + name + dept + group, no email or role.
   // Used by the coord assignee / reviewer pickers from a member context.
   listTeamMembers: () => instance.get('/v1/team/members'),
+
+  // Per-user data-platform site-hide list. The × button on GSC / GA4 /
+  // Bing / Yandex overview cards calls hidePlatformSite; the list is
+  // fetched once on overview mount and applied as a client-side filter.
+  listPlatformHides: () => instance.get('/v1/platform-hides'),
+  hidePlatformSite: (platform: string, site_key: string) =>
+    instance.post('/v1/platform-hides', { platform, site_key }),
+  unhidePlatformSite: (platform: string, site_key: string) =>
+    instance.delete('/v1/platform-hides', { data: { platform, site_key } }),
   createUser: (data: Record<string, any>, config?: Record<string, any>) => instance.post('/v1/users', data, config),
   updateUser: (id: Id, data: Record<string, any>, config?: Record<string, any>) => instance.put(`/v1/users/${id}`, data, config),
   deleteUser: (id: Id) => instance.delete(`/v1/users/${id}`),

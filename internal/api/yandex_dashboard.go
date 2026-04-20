@@ -159,12 +159,58 @@ func YandexOverview(c *gin.Context) {
 	}
 	wg.Wait()
 
+	// Translate Yandex API error payloads to friendlier Chinese messages
+	// before filtering — the user mostly sees HOST_NOT_LOADED for a newly
+	// verified host that Webmaster hasn't indexed yet.
+	for i := range cards {
+		if cards[i].Error != "" {
+			cards[i].Error = friendlyYandexError(cards[i].Error)
+		}
+	}
+
+	// Filter out hosts the user has hidden via × on the overview.
+	hidden := loadPlatformHides(c.GetInt64("user_id"), "yandex")
+	filtered := make([]card, 0, len(cards))
+	for _, cd := range cards {
+		if hidden[cd.HostID] {
+			continue
+		}
+		filtered = append(filtered, cd)
+	}
+	cards = filtered
+
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
 		"start_date": sd,
 		"end_date":   ed,
 		"host_count": len(cards),
 		"cards":      cards,
 	}})
+}
+
+// friendlyYandexError maps common Yandex Webmaster error codes to a
+// short Chinese explanation. Falls back to the raw error string when we
+// don't recognise the code.
+//
+//	HOST_NOT_LOADED — host verified but Webmaster still indexing (1-3 天)
+//	HOST_NOT_VERIFIED — host exists but verification step incomplete
+//	ACCESS_DENIED — token expired / lacking scope
+//	NOT_FOUND — host/path no longer exists
+func friendlyYandexError(raw string) string {
+	// Raw is usually "HTTP 404: {...json...}" — look for the code substring
+	// rather than parsing JSON, because Yandex occasionally returns HTML.
+	switch {
+	case strings.Contains(raw, "HOST_NOT_LOADED"):
+		return "Yandex Webmaster 正在加载该站点数据，通常验证后 1-3 天内完成。可稍后再查"
+	case strings.Contains(raw, "HOST_NOT_VERIFIED"):
+		return "该站点尚未在 Yandex Webmaster 完成验证，请到 Yandex 后台验证后再查"
+	case strings.Contains(raw, "ACCESS_DENIED"):
+		return "Yandex 访问凭证已失效，请到「系统管理 → 数据平台」重新授权"
+	case strings.Contains(raw, "NOT_FOUND"):
+		return "该站点在 Yandex Webmaster 中已不存在"
+	case strings.Contains(raw, "quota") || strings.Contains(raw, "RATE_LIMIT"):
+		return "Yandex API 配额已用完，请稍后再查"
+	}
+	return raw
 }
 
 // sumYandexIndicators walks the history payload and totals the TOTAL_CLICKS
