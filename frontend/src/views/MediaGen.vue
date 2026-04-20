@@ -1,418 +1,296 @@
 <template>
-<div class="media-gen-page">
-  <div class="page-top"><h1>{{ title }}</h1></div>
+<div class="media-gen">
+  <div class="mg-header">
+    <h1 class="mg-title">{{ kind === 'image' ? '🎨 AI 图片工坊' : '🎬 AI 视频工坊' }}</h1>
+    <div class="mg-subtitle">{{ kind === 'image' ? '文生图 · 图生图 — AI 一键创作高质量图片' : '文生视频 · 图生视频 — AI 驱动的视频创作引擎' }}</div>
+  </div>
 
-  <el-tabs v-model="activeTab" type="border-card">
-    <!-- Task list (两种 mode 混合展示, 点新建时再选 mode) -->
-    <el-tab-pane :label="`📋 ${kindLabel}任务`" name="list">
-      <div class="tab-bar">
-        <el-button type="primary" @click="openCreateDialog('text2' + kind)">
-          + 新建 文生{{ kindShort }}
-        </el-button>
-        <el-button type="success" @click="openCreateDialog('img2' + kind)">
-          + 新建 图生{{ kindShort }}
-        </el-button>
-        <el-button link @click="loadList" :loading="loading">🔄 刷新</el-button>
-        <span v-if="pollingCount > 0" class="polling-hint">
-          · {{ pollingCount }} 个任务生成中，自动刷新
-        </span>
-      </div>
+  <div class="mg-layout">
+    <aside class="mg-sidebar">
+      <div class="sidebar-inner">
+        <div class="sb-section">
+          <label class="sb-label">生成模式</label>
+          <div class="mode-btns">
+            <button :class="['mode-btn', { active: selectedMode === textMode }]" @click="selectMode(textMode)">
+              <span class="mode-icon">{{ kind === 'image' ? '✏️' : '📝' }}</span>
+              <span>文生{{ kindShort }}</span>
+            </button>
+            <button :class="['mode-btn', { active: selectedMode === imgMode }]" @click="selectMode(imgMode)">
+              <span class="mode-icon">🖼️</span>
+              <span>图生{{ kindShort }}</span>
+            </button>
+          </div>
+        </div>
 
-      <div v-if="!list.length && !loading" class="empty-hint panel">
-        <div>还没有任务。点击上方按钮开始生成第一个{{ kindLabel }}。</div>
-        <div v-if="!config.has_token" style="margin-top:10px;color:var(--warn)">
-          ⚠ 尚未配置 FRW 凭据，请切换到「我的 FRW 配置」填写 Bearer token 和 User ID。
+        <div class="sb-section">
+          <label class="sb-label">Prompt 描述</label>
+          <div class="prompt-wrap">
+            <textarea v-model="promptText" class="prompt-input" :rows="6" :placeholder="promptPlaceholder"></textarea>
+            <span class="prompt-count">{{ promptText.length }}</span>
+          </div>
+        </div>
+
+        <div v-if="needsSourceImage" class="sb-section">
+          <label class="sb-label">参考图片 URL</label>
+          <input v-model="sourceUrl" class="ref-input" placeholder="https://... 公网可访问的图片链接" />
+          <div v-if="sourceUrl" class="ref-preview">
+            <img :src="sourceUrl" @error="refImgError = true" @load="refImgError = false" />
+            <div v-if="refImgError" class="ref-err">图片加载失败</div>
+          </div>
+        </div>
+
+        <button class="generate-btn" @click="doSubmit" :disabled="submitting || !promptText.trim()">
+          <span v-if="submitting" class="gen-spinner"></span>
+          {{ submitting ? '提交中...' : '🚀 开始生成' }}
+        </button>
+
+        <div v-if="activeTasks.length" class="active-tasks">
+          <div class="sb-label">进行中 ({{ activeTasks.length }})</div>
+          <div v-for="t in activeTasks" :key="t.id" class="active-item">
+            <div class="active-prompt">{{ t.prompt }}</div>
+            <el-progress :percentage="Math.round((t.progress || 0) * 100)" :stroke-width="4" :show-text="false" color="var(--sun)" />
+            <div class="active-status">{{ statusLabel(t.status) }}</div>
+          </div>
         </div>
       </div>
+    </aside>
 
-      <div v-else class="gen-grid">
-        <div v-for="g in list" :key="g.id" class="gen-card panel">
-          <div class="gen-preview">
-            <!-- Image -->
-            <template v-if="kind === 'image'">
-              <img v-if="g.status === 2 && g.result_url"
-                   :src="g.local_path || g.result_url"
-                   @click="previewUrl = g.local_path || g.result_url"
-                   class="preview-img" />
-              <div v-else-if="g.status === -1 || g.status === 4" class="preview-failed">❌ 失败</div>
-              <div v-else class="preview-loading">
-                <el-progress :percentage="Math.round((g.progress || 0) * 100)" :stroke-width="6" />
-                <div class="progress-label">{{ statusLabel(g.status) }}...</div>
-              </div>
+    <main class="mg-gallery">
+      <div class="gallery-top">
+        <span class="gallery-count">{{ list.length }} 个作品</span>
+        <button class="refresh-btn" @click="loadList" :disabled="loading">{{ loading ? '加载中...' : '🔄 刷新' }}</button>
+      </div>
+
+      <div v-if="!list.length && !loading" class="gallery-empty">
+        <div class="empty-icon">{{ kind === 'image' ? '🎨' : '🎬' }}</div>
+        <div class="empty-text">还没有作品</div>
+        <div class="empty-hint">在左侧输入 Prompt，开始你的第一次创作</div>
+      </div>
+
+      <div v-else class="gallery-grid" v-loading="loading">
+        <div v-for="g in list" :key="g.id" class="gallery-card">
+          <div class="card-preview" :class="{ 'is-video': kind === 'video' }">
+            <template v-if="g.status === 2 && kind === 'image'">
+              <img :src="g.local_path || g.result_url" class="card-img" @click="previewItem = g" />
             </template>
-
-            <!-- Video -->
+            <template v-else-if="g.status === 2 && kind === 'video'">
+              <video :src="g.local_path || g.result_url" class="card-video" controls preload="metadata" />
+            </template>
+            <template v-else-if="g.status === -1 || g.status === 4">
+              <div class="card-failed"><span class="failed-icon">❌</span><span class="failed-text">生成失败</span></div>
+            </template>
             <template v-else>
-              <video v-if="g.status === 2 && g.result_url"
-                     :src="g.local_path || g.result_url"
-                     controls preload="metadata"
-                     class="preview-video" />
-              <div v-else-if="g.status === -1 || g.status === 4" class="preview-failed">❌ 失败</div>
-              <div v-else class="preview-loading">
-                <el-progress :percentage="Math.round((g.progress || 0) * 100)" :stroke-width="6" />
-                <div class="progress-label">{{ statusLabel(g.status) }}...</div>
+              <div class="card-loading">
+                <div class="loading-ring"></div>
+                <div class="loading-pct">{{ Math.round((g.progress || 0) * 100) }}%</div>
+                <div class="loading-label">{{ statusLabel(g.status) }}</div>
               </div>
             </template>
-          </div>
-
-          <div class="gen-body">
-            <div class="gen-mode-tag" :class="`mode-${g.mode}`">{{ modeLabel(g.mode) }}</div>
-            <div class="gen-prompt" :title="g.prompt">{{ g.prompt }}</div>
-            <div v-if="g.error_msg" class="gen-err">{{ g.error_msg }}</div>
-
-            <div class="gen-meta">
-              <span class="gen-time">{{ fmtTime(g.created_at) }}</span>
-              <span v-if="g.local_path" class="gen-local-tag">已发布</span>
+            <div v-if="g.status === 2" class="card-overlay">
+              <button v-if="!g.local_path" class="ov-btn ov-publish" @click.stop="publishOne(g)">💾 发布</button>
+              <button class="ov-btn ov-copy" @click.stop="copyURL(g)">📋 复制</button>
+              <button class="ov-btn ov-delete" @click.stop="deleteOne(g)">🗑️</button>
             </div>
-
-            <div class="gen-actions">
-              <el-button v-if="g.status === 2 && !g.local_path" size="small"
-                         type="success" @click="publishOne(g)">💾 发布到本地</el-button>
-              <el-button v-if="g.status === 2" size="small" @click="copyURL(g)">复制链接</el-button>
-              <el-button size="small" type="danger" @click="deleteOne(g)">删除</el-button>
+          </div>
+          <div class="card-footer">
+            <span class="card-mode" :class="'m-' + g.mode">{{ modeLabel(g.mode) }}</span>
+            <div class="card-prompt" :title="g.prompt">{{ g.prompt }}</div>
+            <div v-if="g.error_msg" class="card-err">{{ g.error_msg }}</div>
+            <div class="card-meta">
+              <span class="card-time">{{ fmtTime(g.created_at) }}</span>
+              <span v-if="g.local_path" class="card-published">已发布</span>
             </div>
           </div>
         </div>
       </div>
+    </main>
+  </div>
 
-      <!-- Simple image lightbox -->
-      <el-dialog v-model="previewVisible" title="预览" width="80%">
-        <div style="text-align:center">
-          <img v-if="previewUrl" :src="previewUrl" style="max-width:100%;max-height:80vh" />
-        </div>
-      </el-dialog>
-    </el-tab-pane>
-
-    <!-- FRW config -->
-    <el-tab-pane label="⚙️ 我的 FRW 配置" name="config">
-      <div class="panel">
-        <h3 style="margin-top:0">FRW AI 生成凭据</h3>
-        <p class="help-text">
-          FRW 需要你在浏览器登录
-          <a href="https://frw-dreamaiai-api2.aiaiartist.com" target="_blank">frw-dreamaiai-api2.aiaiartist.com</a>
-          后，打开开发者工具（F12）的「网络」标签，触发一次生成，
-          从请求头里复制 <code>Authorization</code> 后面的 Bearer token 和 payload 里的 <code>userID</code>。
-          Token 会过期，过期后重复此流程即可。
-        </p>
-
-        <el-form label-width="150px" style="max-width:720px;margin-top:20px">
-          <el-form-item label="API Key">
-            <el-input v-model="configForm.apikey"
-                      :placeholder="config.has_apikey ? config.apikey_hint : '留空使用系统默认'"
-                      show-password />
-            <div class="form-hint">每个用户可以用自己的 apikey；留空则走管理员在系统设置中配置的全局 apikey。</div>
-          </el-form-item>
-
-          <el-form-item label="Bearer Token">
-            <el-input v-model="configForm.token" type="textarea" :rows="3"
-                      :placeholder="config.has_token ? config.token_hint : '从浏览器 devtools 复制 Bearer 后面那串'" />
-            <div class="form-hint">粘贴 <code>Bearer</code> 后面的全部内容，不要带 Bearer 前缀。</div>
-          </el-form-item>
-
-          <el-form-item label="User ID">
-            <el-input v-model="configForm.user_id" :placeholder="config.user_id || 'FRW 用户 ID'" />
-            <div class="form-hint">通常是 payload 里的 <code>userID</code> 字段。</div>
-          </el-form-item>
-
-          <el-form-item>
-            <el-button type="primary" @click="saveConfig" :loading="savingConfig">💾 保存配置</el-button>
-            <el-button @click="loadConfig">刷新</el-button>
-          </el-form-item>
-        </el-form>
-
-        <div class="config-status panel" style="margin-top:20px">
-          <div class="cs-item">
-            <span class="cs-label">API Key:</span>
-            <span :class="config.has_apikey ? 'cs-ok' : 'cs-none'">
-              {{ config.has_apikey ? `已配置 (${config.apikey_hint})` : '未配置 (将使用全局默认)' }}
-            </span>
-          </div>
-          <div class="cs-item">
-            <span class="cs-label">Bearer Token:</span>
-            <span :class="config.has_token ? 'cs-ok' : 'cs-none'">
-              {{ config.has_token ? `已配置 (${config.token_hint})` : '未配置' }}
-            </span>
-          </div>
-          <div class="cs-item">
-            <span class="cs-label">User ID:</span>
-            <span :class="config.user_id ? 'cs-ok' : 'cs-none'">
-              {{ config.user_id || '未配置' }}
-            </span>
+  <Teleport to="body">
+    <div v-if="previewItem" class="lightbox" @click="previewItem = null">
+      <div class="lightbox-inner" @click.stop>
+        <img :src="previewItem.local_path || previewItem.result_url" class="lightbox-img" />
+        <div class="lightbox-info">
+          <div class="lightbox-prompt">{{ previewItem.prompt }}</div>
+          <div class="lightbox-actions">
+            <button v-if="!previewItem.local_path" class="lb-btn" @click="publishOne(previewItem)">💾 发布到本地</button>
+            <button class="lb-btn" @click="copyURL(previewItem)">📋 复制链接</button>
+            <button class="lb-btn lb-close" @click="previewItem = null">✕ 关闭</button>
           </div>
         </div>
       </div>
-    </el-tab-pane>
-  </el-tabs>
-
-  <!-- Create / generate dialog -->
-  <el-dialog v-model="showCreate" :title="dialogTitle" width="560px" :close-on-click-modal="false">
-    <el-form label-width="100px">
-      <el-form-item label="Prompt" required>
-        <el-input v-model="createForm.prompt" type="textarea" :rows="5"
-                  placeholder="描述你想生成的内容，例如：一只橘猫在窗台晒太阳，柔和光线，写实风格" />
-      </el-form-item>
-
-      <el-form-item v-if="createForm.mode === 'img2img' || createForm.mode === 'img2video'"
-                    label="参考图 URL" required>
-        <el-input v-model="createForm.source_url" placeholder="https://..." />
-        <div class="form-hint">用于图生图/图生视频，需要是公网可访问的图片链接。</div>
-      </el-form-item>
-
-      <el-form-item label="模式">
-        <div class="mode-display">
-          <el-tag type="info">{{ modeLabel(createForm.mode) }}</el-tag>
-        </div>
-      </el-form-item>
-    </el-form>
-
-    <template #footer>
-      <el-button @click="showCreate = false">取消</el-button>
-      <el-button type="primary" @click="submitCreate" :loading="submitting">
-        🚀 开始生成
-      </el-button>
-    </template>
-  </el-dialog>
+    </div>
+  </Teleport>
 </div>
 </template>
 
 <script setup lang="ts">
-// Shared media generation page — used by both ImageGen.vue and VideoGen.vue
-// via a `kind` prop ('image' | 'video'). Polling logic is identical for
-// both; only the preset modes and preview element differ.
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 import { copyToClipboard } from '../utils/clipboard'
 
-const props = defineProps({
-  kind: { type: String, required: true }, // 'image' | 'video'
-})
+const props = defineProps({ kind: { type: String, required: true } })
 
-// Static labels keyed off kind — keep Chinese natural in buttons/titles.
-const kindLabel = computed(() => props.kind === 'image' ? '图片' : '视频')
 const kindShort = computed(() => props.kind === 'image' ? '图' : '视频')
-const title = computed(() => props.kind === 'image' ? '🎨 图片管理' : '🎬 视频管理')
+const textMode = computed(() => 'text2' + props.kind)
+const imgMode = computed(() => props.kind === 'image' ? 'img2img' : 'img2video')
+const promptPlaceholder = computed(() => props.kind === 'image'
+  ? '描述你想生成的图片，例如：一只橘猫在窗台晒太阳，柔和光线，写实风格'
+  : '描述你想生成的视频，例如：海浪拍打礁石的慢镜头，夕阳余晖，电影质感')
 
-const activeTab = ref('list')
-const list = ref([])
+const list = ref<any[]>([])
 const loading = ref(false)
-
-const config = ref({ has_apikey: false, has_token: false, user_id: '', apikey_hint: '', token_hint: '' })
-const configForm = reactive({ apikey: '', token: '', user_id: '' })
-const savingConfig = ref(false)
-
-const showCreate = ref(false)
-const createMode = ref('')
-const createForm = reactive({ mode: '', prompt: '', source_url: '' })
 const submitting = ref(false)
+const selectedMode = ref(props.kind === 'image' ? 'text2image' : 'text2video')
+const promptText = ref('')
+const sourceUrl = ref('')
+const refImgError = ref(false)
+const previewItem = ref<any>(null)
 
-const previewVisible = ref(false)
-const previewUrl = ref('')
+const needsSourceImage = computed(() => selectedMode.value === 'img2img' || selectedMode.value === 'img2video')
+const activeTasks = computed(() => list.value.filter((x: any) => x.status === 0 || x.status === 1))
 
-// Poll-in-progress list entries every 5 s while any is running.
-let pollTimer = null
-const pollingCount = computed(() => list.value.filter(x => x.status === 0 || x.status === 1).length)
+function selectMode(mode: string) { selectedMode.value = mode; sourceUrl.value = ''; refImgError.value = false }
+function modeLabel(m: string) { return ({ text2image: '文生图', img2img: '图生图', text2video: '文生视频', img2video: '图生视频' } as any)[m] || m }
+function statusLabel(s: number) { return ({ 0: '排队中', 1: '生成中', 2: '完成', [-1]: '失败', 4: '超时' } as any)[s] || '未知' }
+function fmtTime(t: string) { if (!t) return ''; return new Date(t).toLocaleString('zh-CN', { hour12: false }) }
 
-// ─── Label helpers ───────────────────────────────────────────────────────
-function modeLabel(mode) {
-  return {
-    text2image: '文生图',
-    img2img: '图生图',
-    text2video: '文生视频',
-    img2video: '图生视频',
-  }[mode] || mode
-}
-function statusLabel(s) {
-  return { 0: '等待中', 1: '生成中', 2: '完成', [-1]: '失败', 4: '超时' }[s] || '未知'
-}
-function fmtTime(t) {
-  if (!t) return ''
-  const d = new Date(t)
-  return d.toLocaleString('zh-CN', { hour12: false })
-}
-
-// ─── Dialog helpers ──────────────────────────────────────────────────────
-const dialogTitle = computed(() => `新建 ${modeLabel(createForm.mode)} 任务`)
-
-function openCreateDialog(modeRaw) {
-  // modeRaw is "text2image" / "img2image" / "text2video" / "img2video"
-  // but our preset keys use "img2img" for images. Normalize here.
-  let mode = modeRaw
-  if (mode === 'img2image') mode = 'img2img'
-  createMode.value = mode
-  createForm.mode = mode
-  createForm.prompt = ''
-  createForm.source_url = ''
-  showCreate.value = true
-}
-
-async function submitCreate() {
-  if (!createForm.prompt.trim()) { ElMessage.warning('请填写 Prompt'); return }
-  if ((createForm.mode === 'img2img' || createForm.mode === 'img2video') && !createForm.source_url.trim()) {
-    ElMessage.warning('该模式需要参考图 URL'); return
-  }
-  submitting.value = true
-  try {
-    const res = await api.submitFRWGeneration({
-      mode: createForm.mode,
-      prompt: createForm.prompt.trim(),
-      source_url: createForm.source_url.trim(),
-    })
-    ElMessage.success(`任务已提交，task_id = ${res.data.frw_task_id}`)
-    showCreate.value = false
-    await loadList()
-    startPolling()
-  } catch (e) {
-    ElMessage.error(e?.response?.data?.error || '提交失败')
-  } finally {
-    submitting.value = false
-  }
-}
-
-// ─── List + polling ──────────────────────────────────────────────────────
 async function loadList() {
   loading.value = true
-  try {
-    const res = await api.listFRWGenerations({ kind: props.kind })
-    list.value = res.data || []
-  } catch (e) {
-    console.error('加载任务失败', e)
-  } finally {
-    loading.value = false
-  }
+  try { const res = await api.listFRWGenerations({ kind: props.kind }); list.value = res.data || [] }
+  catch (e) { console.error('load failed', e) }
+  finally { loading.value = false }
 }
 
+async function doSubmit() {
+  if (!promptText.value.trim()) return
+  if (needsSourceImage.value && !sourceUrl.value.trim()) { ElMessage.warning('该模式需要参考图 URL'); return }
+  submitting.value = true
+  try {
+    await api.submitFRWGeneration({ mode: selectedMode.value, prompt: promptText.value.trim(), source_url: sourceUrl.value.trim() })
+    ElMessage.success('任务已提交'); promptText.value = ''; sourceUrl.value = ''
+    await loadList(); startPolling()
+  } catch (e: any) { ElMessage.error(e?.response?.data?.error || '提交失败') }
+  finally { submitting.value = false }
+}
+
+async function publishOne(row: any) {
+  try { const res = await api.publishFRWGeneration(row.id); row.local_path = res.data.local_path; ElMessage.success('已发布到本地') }
+  catch (e: any) { ElMessage.error(e?.response?.data?.error || '发布失败') }
+}
+
+async function copyURL(row: any) {
+  const url = row.local_path ? location.origin + row.local_path : row.result_url
+  if (await copyToClipboard(url)) ElMessage.success('链接已复制'); else ElMessage.error('复制失败')
+}
+
+async function deleteOne(row: any) {
+  try {
+    await ElMessageBox.confirm('确定删除此作品？', '确认删除', { type: 'warning' })
+    await api.deleteFRWGeneration(row.id)
+    list.value = list.value.filter((x: any) => x.id !== row.id)
+    if (previewItem.value?.id === row.id) previewItem.value = null
+    ElMessage.success('已删除')
+  } catch (e: any) { if (e !== 'cancel') ElMessage.error('删除失败') }
+}
+
+let pollTimer: ReturnType<typeof setInterval> | null = null
 function startPolling() {
   if (pollTimer) return
   pollTimer = setInterval(async () => {
-    if (pollingCount.value === 0) { stopPolling(); return }
-    // Refresh each pending task individually — cheaper than relisting
-    // when there are many finished historical rows.
-    const pending = list.value.filter(x => x.status === 0 || x.status === 1)
-    for (const row of pending) {
-      try {
-        const res = await api.getFRWGeneration(row.id)
-        Object.assign(row, res.data)
-      } catch { /* silent */ }
+    if (!activeTasks.value.length) { stopPolling(); return }
+    for (const row of activeTasks.value) {
+      try { const res = await api.getFRWGeneration(row.id); Object.assign(row, res.data) } catch {}
     }
   }, 5000)
 }
-function stopPolling() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
-}
+function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
 
-// ─── Row actions ─────────────────────────────────────────────────────────
-async function publishOne(row) {
-  try {
-    const res = await api.publishFRWGeneration(row.id)
-    row.local_path = res.data.local_path
-    ElMessage.success('已下载到本地')
-  } catch (e) {
-    ElMessage.error(e?.response?.data?.error || '发布失败')
-  }
-}
-async function copyURL(row) {
-  // navigator.clipboard is only available on HTTPS / localhost; the
-  // shared helper does an execCommand fallback so intranet HTTP deploys
-  // still get a working "copy" button instead of a silent throw.
-  const url = row.local_path ? location.origin + row.local_path : row.result_url
-  const ok = await copyToClipboard(url)
-  if (ok) {
-    ElMessage.success('链接已复制')
-  } else {
-    ElMessage.error('复制失败，请手动选中链接')
-  }
-}
-async function deleteOne(row) {
-  try {
-    await ElMessageBox.confirm(`确定删除此任务？`, '确认删除', { type: 'warning' })
-    await api.deleteFRWGeneration(row.id)
-    list.value = list.value.filter(x => x.id !== row.id)
-    ElMessage.success('已删除')
-  } catch (e) {
-    if (e !== 'cancel') ElMessage.error('删除失败')
-  }
-}
-
-// ─── Config ──────────────────────────────────────────────────────────────
-async function loadConfig() {
-  try {
-    const res = await api.getMyFRWConfig()
-    config.value = res.data
-  } catch (e) {
-    console.error(e)
-  }
-}
-async function saveConfig() {
-  savingConfig.value = true
-  try {
-    await api.saveMyFRWConfig({
-      apikey: configForm.apikey,
-      token: configForm.token,
-      user_id: configForm.user_id,
-    })
-    ElMessage.success('配置已保存')
-    configForm.apikey = ''
-    configForm.token = ''
-    configForm.user_id = ''
-    await loadConfig()
-  } catch (e) {
-    ElMessage.error(e?.response?.data?.error || '保存失败')
-  } finally {
-    savingConfig.value = false
-  }
-}
-
-onMounted(async () => {
-  await Promise.all([loadList(), loadConfig()])
-  if (pollingCount.value > 0) startPolling()
-})
+onMounted(async () => { await loadList(); if (activeTasks.value.length) startPolling() })
 onUnmounted(stopPolling)
 </script>
 
 <style scoped>
-.media-gen-page { padding: 0; }
-.page-top { margin-bottom: 18px; }
-.page-top h1 { margin: 0; font-size: 22px; font-weight: 700; color: var(--ink); }
-
-.tab-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-.polling-hint { font-size: 12px; color: var(--ink-hint); }
-
-.empty-hint { padding: 60px 30px; text-align: center; color: var(--ink-hint); font-size: 14px; line-height: 1.8; }
-
-.gen-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
-.gen-card { padding: 0; overflow: hidden; display: flex; flex-direction: column; border-radius: var(--r, 8px); }
-
-.gen-preview { aspect-ratio: 3/4; background: var(--surface-3, #f7f7f7); display: flex; align-items: center; justify-content: center; overflow: hidden; }
-.preview-img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
-.preview-video { width: 100%; height: 100%; object-fit: contain; background: #000; }
-.preview-loading { padding: 20px; text-align: center; width: 100%; }
-.progress-label { margin-top: 10px; font-size: 12px; color: var(--ink-hint); }
-.preview-failed { font-size: 16px; color: var(--err, #E53E3E); font-weight: 600; }
-
-.gen-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
-.gen-mode-tag { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 11.5px; font-weight: 700; width: fit-content; }
-.mode-text2image, .mode-text2video { background: #E0E7FF; color: #3730A3; }
-.mode-img2img, .mode-img2video { background: #FEF3C7; color: #92400E; }
-
-.gen-prompt { font-size: 13px; line-height: 1.5; color: var(--ink-mid); display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.gen-err { font-size: 12px; color: var(--err, #E53E3E); background: #FEF2F2; padding: 4px 8px; border-radius: 4px; }
-.gen-meta { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--ink-hint); font-family: 'JetBrains Mono', monospace; }
-.gen-local-tag { background: var(--success-light, #D1FAE5); color: var(--success, #059669); padding: 1px 8px; border-radius: 8px; font-size: 10.5px; font-weight: 700; }
-.gen-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
-
-.help-text { font-size: 13px; line-height: 1.7; color: var(--ink-mid); padding: 12px 16px; background: var(--surface-2, #FFF8E1); border-radius: 8px; }
-.help-text code { background: rgba(0,0,0,0.06); padding: 1px 6px; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
-.help-text a { color: var(--primary, #F97316); text-decoration: underline; }
-
-.form-hint { font-size: 11.5px; color: var(--ink-hint); line-height: 1.6; margin-top: 4px; }
-.form-hint code { background: rgba(0,0,0,0.06); padding: 0 4px; border-radius: 3px; font-family: 'JetBrains Mono', monospace; }
-
-.config-status { padding: 16px 22px; background: var(--surface-2); display: flex; flex-direction: column; gap: 8px; }
-.cs-item { font-size: 13px; display: flex; gap: 10px; }
-.cs-label { font-weight: 700; color: var(--ink-mid); min-width: 120px; }
-.cs-ok { color: var(--success, #059669); }
-.cs-none { color: var(--ink-hint); }
-
-.mode-display { padding: 4px 0; }
+.media-gen{display:flex;flex-direction:column;height:100%}
+.mg-header{margin-bottom:20px}
+.mg-title{margin:0;font-size:24px;font-weight:800;color:var(--ink)}
+.mg-subtitle{font-size:13px;color:var(--ink-soft);margin-top:4px}
+.mg-layout{display:flex;gap:20px;flex:1;min-height:0}
+.mg-sidebar{width:340px;min-width:340px;background:var(--surface);border:1.5px solid var(--border-light);border-radius:var(--r);box-shadow:var(--s1);overflow-y:auto}
+.sidebar-inner{padding:22px;display:flex;flex-direction:column;gap:20px}
+.sb-section{display:flex;flex-direction:column;gap:8px}
+.sb-label{font-size:12px;font-weight:800;color:var(--ink-mid);letter-spacing:.04em;text-transform:uppercase}
+.mode-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mode-btn{display:flex;align-items:center;justify-content:center;gap:6px;padding:12px 8px;border:1.5px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--ink-mid);font-weight:700;font-size:13px;cursor:pointer;transition:all .18s}
+.mode-btn:hover{border-color:var(--peach);background:var(--sun-light)}
+.mode-btn.active{border-color:var(--sun);background:linear-gradient(135deg,var(--sun-light),var(--sun-glow));color:var(--sun-deep);box-shadow:0 2px 8px rgba(255,140,0,.15)}
+.mode-icon{font-size:18px}
+.prompt-wrap{position:relative}
+.prompt-input{width:100%;border:1.5px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-size:14px;font-family:inherit;line-height:1.6;resize:vertical;color:var(--ink);background:var(--surface)}
+.prompt-input:focus{outline:none;border-color:var(--sun);box-shadow:0 0 0 3px rgba(255,140,0,.1)}
+.prompt-input::placeholder{color:var(--ink-hint)}
+.prompt-count{position:absolute;bottom:8px;right:10px;font-size:11px;color:var(--ink-hint);font-family:monospace}
+.ref-input{width:100%;border:1.5px solid var(--border);border-radius:var(--r-sm);padding:10px 12px;font-size:13px;color:var(--ink)}
+.ref-input:focus{outline:none;border-color:var(--sun)}
+.ref-preview{margin-top:8px;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--border-light)}
+.ref-preview img{width:100%;max-height:180px;object-fit:cover;display:block}
+.ref-err{padding:8px;font-size:12px;color:var(--err);text-align:center}
+.generate-btn{width:100%;padding:14px;border:none;border-radius:var(--r-sm);background:linear-gradient(135deg,var(--sun),var(--coral));color:#fff;font-size:16px;font-weight:800;cursor:pointer;box-shadow:var(--s-amber);transition:all .2s;display:flex;align-items:center;justify-content:center;gap:8px}
+.generate-btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 6px 24px rgba(255,140,0,.4)}
+.generate-btn:disabled{opacity:.5;cursor:not-allowed}
+.gen-spinner{width:18px;height:18px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.active-tasks{display:flex;flex-direction:column;gap:10px}
+.active-item{padding:10px 12px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--border-light)}
+.active-prompt{font-size:12px;color:var(--ink-mid);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.active-status{font-size:11px;color:var(--ink-hint);margin-top:4px}
+.mg-gallery{flex:1;min-width:0}
+.gallery-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.gallery-count{font-size:13px;font-weight:700;color:var(--ink-mid)}
+.refresh-btn{padding:6px 14px;border:1.5px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--ink-mid);font-weight:600;font-size:12px;cursor:pointer}
+.refresh-btn:hover{border-color:var(--sun);color:var(--sun-deep)}
+.gallery-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;color:var(--ink-hint);text-align:center}
+.empty-icon{font-size:64px;margin-bottom:16px;opacity:.5}
+.empty-text{font-size:18px;font-weight:700;margin-bottom:6px}
+.empty-hint{font-size:13px}
+.gallery-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
+.gallery-card{background:var(--surface);border:1.5px solid var(--border-light);border-radius:var(--r);box-shadow:var(--s1);overflow:hidden;transition:box-shadow .2s,transform .2s}
+.gallery-card:hover{box-shadow:var(--s2);transform:translateY(-2px)}
+.card-preview{position:relative;aspect-ratio:3/4;background:var(--surface-3);display:flex;align-items:center;justify-content:center;overflow:hidden}
+.card-preview.is-video{aspect-ratio:16/9}
+.card-img{width:100%;height:100%;object-fit:cover;cursor:zoom-in}
+.card-video{width:100%;height:100%;object-fit:contain;background:#000}
+.card-failed{display:flex;flex-direction:column;align-items:center;gap:6px}
+.failed-icon{font-size:28px}
+.failed-text{font-size:13px;color:var(--err);font-weight:600}
+.card-loading{display:flex;flex-direction:column;align-items:center;gap:10px}
+.loading-ring{width:48px;height:48px;border:3px solid var(--border-light);border-top-color:var(--sun);border-radius:50%;animation:spin 1s linear infinite}
+.loading-pct{font-size:20px;font-weight:800;color:var(--sun-deep)}
+.loading-label{font-size:12px;color:var(--ink-hint)}
+.card-overlay{position:absolute;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;gap:8px;opacity:0;transition:opacity .2s}
+.gallery-card:hover .card-overlay{opacity:1}
+.ov-btn{padding:8px 14px;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;backdrop-filter:blur(4px);transition:transform .15s}
+.ov-btn:hover{transform:scale(1.05)}
+.ov-publish{background:rgba(22,163,74,.9);color:#fff}
+.ov-copy{background:rgba(255,255,255,.9);color:var(--ink)}
+.ov-delete{background:rgba(220,38,38,.9);color:#fff}
+.card-footer{padding:12px 14px}
+.card-mode{display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;margin-bottom:6px}
+.m-text2image,.m-text2video{background:#E0E7FF;color:#3730A3}
+.m-img2img,.m-img2video{background:#FEF3C7;color:#92400E}
+.card-prompt{font-size:13px;line-height:1.5;color:var(--ink-mid);display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card-err{font-size:11px;color:var(--err);background:var(--err-bg);padding:4px 8px;border-radius:4px;margin-top:4px}
+.card-meta{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+.card-time{font-size:11px;color:var(--ink-hint);font-family:monospace}
+.card-published{background:var(--ok-bg);color:var(--ok);padding:1px 8px;border-radius:8px;font-size:10px;font-weight:700}
+.lightbox{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.lightbox-inner{max-width:90vw;max-height:90vh;cursor:default;display:flex;flex-direction:column;align-items:center}
+.lightbox-img{max-width:90vw;max-height:78vh;object-fit:contain;border-radius:8px}
+.lightbox-info{margin-top:16px;text-align:center}
+.lightbox-prompt{color:rgba(255,255,255,.8);font-size:14px;max-width:600px;line-height:1.6;margin-bottom:12px}
+.lightbox-actions{display:flex;gap:8px;justify-content:center}
+.lb-btn{padding:8px 18px;border:1.5px solid rgba(255,255,255,.3);border-radius:8px;background:rgba(255,255,255,.1);color:#fff;font-weight:600;font-size:13px;cursor:pointer}
+.lb-btn:hover{background:rgba(255,255,255,.2)}
+@media(max-width:900px){.mg-layout{flex-direction:column}.mg-sidebar{width:100%;min-width:unset}.gallery-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}}
 </style>
