@@ -13,6 +13,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 
 	"seo-system/internal/db"
@@ -146,7 +147,7 @@ func BingOverview(c *gin.Context) {
 				"endDate":   endDate,
 			})
 			if err != nil {
-				cd.Error = err.Error()
+				cd.Error = friendlyBingError(err.Error(), nil)
 				cards[idx] = cd
 				return
 			}
@@ -160,7 +161,10 @@ func BingOverview(c *gin.Context) {
 				} `json:"d"`
 			}
 			if err := json.Unmarshal(raw, &r); err != nil {
-				cd.Error = "解析失败"
+				// Not the expected {"d":[...]} shape — surface what Bing
+				// actually returned so the user can act on it instead of
+				// staring at a bare "解析失败".
+				cd.Error = friendlyBingError(string(raw), err)
 				cards[idx] = cd
 				return
 			}
@@ -197,6 +201,83 @@ func BingOverview(c *gin.Context) {
 		"site_count": len(cards),
 		"cards":      cards,
 	}})
+}
+
+// friendlyBingError maps a Bing Webmaster API error (either a fetch
+// error string or a raw response body that failed to parse) into a
+// short Chinese explanation for the overview card.
+//
+// Bing returns a mix of formats depending on what went wrong:
+//   - Valid JSON but empty/unverified sites → {"d": null} or {"d": []}
+//     (not actually an error, just handled upstream)
+//   - 401/403 auth issues → XML/HTML error page
+//   - Invalid site URL or no permission → {"Message": "...",
+//     "ExceptionType": "...", "ExceptionMessage": "..."}
+//   - Transient 5xx → HTML gateway page
+//
+// jsonErr is non-nil when the caller already tried to Unmarshal the
+// raw body and it failed; we fall through to pattern matching in that
+// case to pull out whatever human-readable bits we can.
+func friendlyBingError(raw string, jsonErr error) string {
+	low := strings.ToLower(raw)
+	// Trim noise but keep enough for ops to grep.
+	trimmed := raw
+	if len(trimmed) > 500 {
+		trimmed = trimmed[:500] + "…"
+	}
+
+	// Try structured decode — Bing's .NET-style error envelope.
+	var asErr struct {
+		Message          string `json:"Message"`
+		ExceptionMessage string `json:"ExceptionMessage"`
+		ExceptionType    string `json:"ExceptionType"`
+		ErrorCode        string `json:"ErrorCode"`
+	}
+	if err := json.Unmarshal([]byte(raw), &asErr); err == nil {
+		parts := []string{}
+		if asErr.Message != "" {
+			parts = append(parts, asErr.Message)
+		}
+		if asErr.ExceptionMessage != "" && asErr.ExceptionMessage != asErr.Message {
+			parts = append(parts, asErr.ExceptionMessage)
+		}
+		if asErr.ErrorCode != "" {
+			parts = append(parts, "code="+asErr.ErrorCode)
+		}
+		if len(parts) > 0 {
+			return "❌ Bing 接口错误：" + strings.Join(parts, " · ")
+		}
+	}
+
+	switch {
+	case strings.Contains(raw, "HTTP 401"), strings.Contains(low, "unauthorized"),
+		strings.Contains(low, "access denied"), strings.Contains(low, "invalid api key"):
+		return "❌ Bing API Key 无效或未授权，请到「个人中心 → Bing」检查 / 重新填入"
+	case strings.Contains(raw, "HTTP 403"), strings.Contains(low, "forbidden"):
+		return "❌ 无权访问该站点的 Bing 数据（通常是站点未在当前 API Key 对应的账号下完成验证）"
+	case strings.Contains(raw, "HTTP 404"), strings.Contains(low, "not found"):
+		return "❌ Bing 上找不到该站点（可能已被删除，或 siteUrl 拼写不一致）"
+	case strings.Contains(raw, "HTTP 429"), strings.Contains(low, "rate limit"):
+		return "❌ Bing API 触发限流（请求过多），请等几分钟后刷新"
+	case strings.Contains(raw, "HTTP 5"), strings.Contains(low, "internal server"),
+		strings.Contains(low, "bad gateway"), strings.Contains(low, "service unavailable"):
+		return "❌ Bing 后端临时不可用（5xx），稍后再试"
+	case strings.Contains(low, "<!doctype"), strings.Contains(low, "<html"):
+		// HTML page usually means WAF / auth redirect; strip tags.
+		return "❌ Bing 返回了 HTML 页面（可能是认证跳转 / 拦截），请核对 API Key 是否正确"
+	case strings.Contains(low, "timeout"), strings.Contains(low, "deadline"):
+		return "❌ 调用 Bing API 超时，稍后刷新"
+	}
+
+	// Fallback: include whatever the raw body says so the user can at
+	// least see Bing's literal text rather than a bare "解析失败".
+	if jsonErr != nil && trimmed != "" {
+		return "❌ Bing 返回格式异常（无法解析）。响应片段：" + trimmed
+	}
+	if trimmed != "" {
+		return "❌ Bing 接口错误：" + trimmed
+	}
+	return "❌ Bing 接口错误：未知错误"
 }
 
 // ─── Handler: Bing site detail ─────────────────────────────────────────────
