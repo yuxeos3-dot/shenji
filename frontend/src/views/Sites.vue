@@ -201,7 +201,33 @@
       </div>
     </template>
 
-    <!-- 添加/编辑弹窗 -->
+    <!-- 批量添加站点弹窗 — textarea 一行一条 URL|站点名称 -->
+    <el-dialog v-model="showBulkAddDialog" title="🌐 添加站点（批量）" width="560px" class="sunrise-dialog" :close-on-click-modal="false">
+      <div class="bulk-hint">
+        每行一条，格式：<code>URL|网站名称</code> 或只填 URL（自动推断站点名 + 同一粘贴里按域名去重）
+      </div>
+      <el-input
+        v-model="bulkAddText"
+        type="textarea"
+        :rows="10"
+        class="bulk-textarea"
+        placeholder="https://example.com|示例站
+https://blog.xxx.com|XXX博客
+https://another.com"
+      />
+      <div class="bulk-tip">
+        💡 数据平台（GSC / GA4 / Bing / Yandex）的站点会根据域名自动匹配，无需手动填写。
+        请确保已在「系统管理 → 数据平台」完成授权，并在对应平台里添加 + 验证过本站点。
+      </div>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button class="btn-cancel" @click="showBulkAddDialog = false">取 消</el-button>
+          <el-button class="btn-sunrise" :loading="bulkAdding" @click="doBulkAdd">导 入</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑站点弹窗（编辑时仍然走单站点详细表单） -->
     <el-dialog v-model="showDialog" :title="editId ? '✏️ 编辑站点' : '🌐 添加站点'" width="560px" class="sunrise-dialog" :close-on-click-modal="false">
       <el-form :model="form" label-width="120px" class="sunrise-form">
         <div class="form-section-title">基本信息</div>
@@ -291,6 +317,12 @@ const exporting = ref(false)
 const importText = ref('')
 const importing = ref(false)
 
+// 批量添加站点 — textarea 一行一条 URL|站点名称 或只填 URL。
+// 用独立的对话框，编辑流程沿用旧的单站点 showDialog。
+const showBulkAddDialog = ref(false)
+const bulkAddText = ref('')
+const bulkAdding = ref(false)
+
 const activeSites = computed(() => sites.value.filter(s => s.status === 'active').length)
 
 // Admin-only: group sites by their owner so two users sharing the same
@@ -343,10 +375,90 @@ function auditLabel(status) {
   if (status === 'error') return '❌ 失败'
   return status
 }
+// "+ 添加站点" 按钮入口：打开批量文本框对话框。单个编辑走 editSite()
+// 用旧的 showDialog（保留对页面 URL 分类等高级字段的编辑能力）。
 function openAddDialog() {
-  editId.value = null
-  form.value = { domain: '', name: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' }
-  showDialog.value = true
+  bulkAddText.value = ''
+  showBulkAddDialog.value = true
+}
+
+// parseBulkSites 把 textarea 的内容切成 [{domain, name}]，按域名去重。
+// 格式：每行 "URL|站点名称"；只写 URL 的话用域名主体（不含协议 / www）当名称。
+function parseBulkSites(raw) {
+  const seen = new Set()
+  const out = []
+  const errors = []
+  const lines = raw.split(/\r?\n/)
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (!line) continue
+    // 支持全角竖线 ｜ 以及半角 |
+    const parts = line.split(/[|｜]/).map(s => s.trim())
+    const domain = parts[0]
+    let name = parts[1] || ''
+    if (!domain) continue
+    if (!/^https?:\/\//i.test(domain)) {
+      errors.push(`第 ${i + 1} 行：「${domain}」必须以 http:// 或 https:// 开头`)
+      continue
+    }
+    // 去重：同一次粘贴里同一域名只取第一条。
+    const key = domain.toLowerCase().replace(/\/+$/, '')
+    if (seen.has(key)) continue
+    seen.add(key)
+    if (!name) {
+      // 从 URL 推一个默认名称：去掉协议、www、末尾斜杠。
+      try {
+        const u = new URL(domain)
+        name = u.hostname.replace(/^www\./, '')
+      } catch { name = domain }
+    }
+    out.push({ domain, name })
+  }
+  return { sites: out, errors }
+}
+
+async function doBulkAdd() {
+  const { sites: parsed, errors } = parseBulkSites(bulkAddText.value)
+  if (errors.length) {
+    ElMessage.warning(errors[0])
+    return
+  }
+  if (!parsed.length) {
+    ElMessage.warning('请至少填写一个站点')
+    return
+  }
+  bulkAdding.value = true
+  let ok = 0, dup = 0, failed = 0
+  const failMsgs = []
+  for (const s of parsed) {
+    try {
+      // 后端对字段的其余项有默认值，只传 domain + name 即可。
+      await api.createSite({ domain: s.domain, name: s.name })
+      ok++
+    } catch (e) {
+      const msg = e?.response?.data?.error || ''
+      if (/存在|已|重复|duplicate/i.test(msg)) dup++
+      else {
+        failed++
+        failMsgs.push(`${s.domain}：${msg || '未知错误'}`)
+      }
+    }
+  }
+  bulkAdding.value = false
+
+  if (ok > 0) {
+    ElMessage.success(`成功添加 ${ok} 个站点${dup ? ` · 跳过 ${dup} 个已存在` : ''}${failed ? ` · 失败 ${failed}` : ''}`)
+  } else if (dup > 0 && failed === 0) {
+    ElMessage.info(`${dup} 个站点已存在，均未重复添加`)
+  } else {
+    ElMessage.error(`未能添加任何站点${failMsgs[0] ? '：' + failMsgs[0] : ''}`)
+  }
+
+  if (ok > 0 || dup > 0) {
+    showBulkAddDialog.value = false
+    bulkAddText.value = ''
+    await loadSites()
+  }
 }
 
 async function editSite(row) {
@@ -465,6 +577,12 @@ onMounted(loadSites)
 .io-hint { font-size:13px; color:var(--ink-soft); line-height:1.7; padding:10px 14px; background:var(--surface-2); border-radius:var(--r-sm); margin-bottom:14px; }
 .io-hint strong { color:var(--ink); }
 .io-textarea :deep(.el-textarea__inner) { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; line-height:1.5; }
+
+/* 批量添加站点 */
+.bulk-hint { font-size:12.5px; color:var(--ink-soft); margin-bottom:10px; line-height:1.6; }
+.bulk-hint code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--surface-2); padding:1px 6px; border-radius:4px; color:var(--sun-deep); }
+.bulk-textarea :deep(.el-textarea__inner) { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px; line-height:1.6; }
+.bulk-tip { margin-top:12px; padding:10px 14px; background:var(--surface-2); border-radius:8px; font-size:12px; color:var(--ink-mid); line-height:1.6; }
 .page-title { margin:0; font-size:24px; font-weight:800; color:var(--ink); letter-spacing:-0.02em; }
 .page-subtitle { font-size:13px; color:var(--ink-soft); font-weight:500; }
 
