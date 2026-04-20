@@ -26,7 +26,11 @@
     </div>
 
     <div v-if="task.status==='error'" class="error-bar">
-      审计失败原因：{{ task.error_msg || 'AI接口超时或配置错误，请检查系统设置中的AI接口配置，然后重新巡检' }}
+      <div class="err-title">审计失败原因</div>
+      <!-- error_msg may span multiple lines (e.g. "AI 调用失败：余额不足..." +
+           raw 原始错误 payload). Preserve newlines so the user can actually
+           read the hint rather than seeing one crammed line. -->
+      <pre class="err-body">{{ task.error_msg || 'AI 接口超时或配置错误，请检查「个人 AI 设置」并重新触发巡检' }}</pre>
     </div>
 
     <div v-if="task.status==='error' && rawResponse" class="raw-ai-box">
@@ -90,7 +94,9 @@ const showRaw = ref(false)
 .ov-total { background:var(--sun-light); } .ov-total .ov-num { color:var(--sun-deep); }
 .ov-summary { flex:1; font-size:13px; color:var(--ink-mid); min-width:200px; }
 .ov-summary-label { font-weight:700; color:var(--ink); }
-.error-bar { background:var(--err-bg); border:1.5px solid var(--err-border); border-radius:var(--r-sm); padding:12px 16px; font-size:13.5px; color:var(--err); font-weight:600; margin-top:12px; line-height:1.6; }
+.error-bar { background:var(--err-bg); border:1.5px solid var(--err-border); border-radius:var(--r-sm); padding:12px 16px; margin-top:12px; }
+.error-bar .err-title { font-size:13.5px; font-weight:800; color:var(--err); margin-bottom:6px; }
+.error-bar .err-body { font-size:13px; color:var(--err); line-height:1.65; white-space:pre-wrap; word-break:break-word; margin:0; font-family:inherit; }
 .raw-ai-box { background:#fafafa; border:1px solid #ddd; border-radius:var(--r-sm); padding:10px 14px; margin-top:12px; font-size:13px; }
 .raw-ai-head { display:flex; justify-content:space-between; align-items:center; font-weight:600; color:#555; margin-bottom:6px; }
 .raw-ai-pre { max-height:520px; overflow:auto; background:#1e1e1e; color:#d4d4d4; padding:12px; border-radius:4px; font-family:Consolas,Menlo,monospace; font-size:12px; white-space:pre-wrap; word-break:break-all; margin:0; }

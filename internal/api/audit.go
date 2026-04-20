@@ -15,6 +15,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// explainAIError wraps ai.ExplainError so call sites in this package
+// don't need to reach into another module for what reads like a local
+// concern. Kept as a one-liner so the real mapping lives in the ai
+// package and the scheduler's auto-audit path gets the exact same text.
+func explainAIError(raw string) string {
+	return ai.ExplainError(raw)
+}
+
 func boolToInt(b bool) int {
 	if b {
 		return 1
@@ -228,6 +236,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	allChapters := make([]ai.V6Chapter, 0, 8)
 	var lastModel string
 	var lastRaw string
+	var lastBatchErr error
 	batchTotal := len(ai.TechnicalBatches)
 	for i, batch := range ai.TechnicalBatches {
 		log.Printf("[audit %d] 技术审计批次 %d/%d：%s", taskID, i+1, batchTotal, batch.Name)
@@ -239,6 +248,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 		}
 		if bErr != nil {
 			log.Printf("[audit %d] 批次 %d 失败: %v", taskID, i+1, bErr)
+			lastBatchErr = bErr
 			continue
 		}
 		log.Printf("[audit %d] 批次 %d 得到 %d 章节", taskID, i+1, len(chs))
@@ -248,7 +258,9 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	}
 
 	if len(allChapters) == 0 {
-		// All batches failed — persist raw response and fail.
+		// All batches failed — persist raw response and fail. Surface the
+		// actual underlying error so the user can actually fix it instead
+		// of staring at a vague "所有技术审计批次均失败".
 		rawSnippet := lastRaw
 		if len(rawSnippet) > 100000 {
 			rawSnippet = rawSnippet[:100000]
@@ -258,10 +270,14 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 			 VALUES ($1, '[]', '[]', '[]', '[]', '', '', $2, '', $3)`,
 			taskID, lastModel, rawSnippet,
 		)
+		errMsg := "所有技术审计批次均失败"
+		if lastBatchErr != nil {
+			errMsg = explainAIError(lastBatchErr.Error())
+		}
 		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=$1, finished_at=$2 WHERE id=$3",
-			"所有技术审计批次均失败", time.Now(), taskID)
-		log.Printf("[audit %d] 所有技术审计批次均失败", taskID)
-		telegram.NotifyUser(ownerUserID, "审计失败", siteName+" 审计失败：AI 调用异常")
+			errMsg, time.Now(), taskID)
+		log.Printf("[audit %d] 所有技术审计批次均失败: %v", taskID, lastBatchErr)
+		telegram.NotifyUser(ownerUserID, "审计失败", siteName+" 审计失败：\n"+errMsg)
 		return
 	}
 

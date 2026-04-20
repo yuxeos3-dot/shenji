@@ -539,6 +539,7 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	allChapters := make([]ai.V6Chapter, 0, 8)
 	var lastModel string
 	var lastRaw string
+	var lastBatchErr error
 	batchTotal := len(ai.TechnicalBatches)
 	for i, batch := range ai.TechnicalBatches {
 		log.Printf("[audit %d] scheduler 批次 %d/%d：%s", taskID, i+1, batchTotal, batch.Name)
@@ -550,6 +551,7 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		}
 		if bErr != nil {
 			log.Printf("[audit %d] scheduler 批次 %d 失败: %v", taskID, i+1, bErr)
+			lastBatchErr = bErr
 			continue
 		}
 		allChapters = append(allChapters, chs...)
@@ -568,11 +570,15 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		); err != nil {
 			log.Printf("[audit %d] scheduler insert empty results failed: %v", taskID, err)
 		}
-		if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg='所有技术审计批次均失败', finished_at=$1 WHERE id=$2",
-			time.Now(), taskID); err != nil {
+		errMsg := "所有技术审计批次均失败"
+		if lastBatchErr != nil {
+			errMsg = ai.ExplainError(lastBatchErr.Error())
+		}
+		if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=$1, finished_at=$2 WHERE id=$3",
+			errMsg, time.Now(), taskID); err != nil {
 			log.Printf("[audit %d] scheduler mark-failed failed: %v", taskID, err)
 		}
-		telegram.NotifyUser(ownerUserID, "巡检失败", siteName+": 所有技术审计批次均失败")
+		telegram.NotifyUser(ownerUserID, "巡检失败", siteName+":\n"+errMsg)
 		return
 	}
 
