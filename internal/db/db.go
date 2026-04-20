@@ -683,6 +683,19 @@ func Init() {
 		// 行通过 perm_migrated_v6 一次性回填。
 		"DO $$ BEGIN ALTER TABLE coordination_tasks ADD COLUMN issue_scope TEXT DEFAULT ''; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
 		`CREATE INDEX IF NOT EXISTS idx_coord_issue_scope ON coordination_tasks(issue_scope) WHERE issue_scope <> ''`,
+		// 站点历史事件 — 手动登记的运维 / 故障 / 黑名单事件，配合
+		// 协同管理的"已完成任务"一起在站点详情页里做"历史错误汇总"展示。
+		`CREATE TABLE IF NOT EXISTS site_incidents (
+			id          SERIAL PRIMARY KEY,
+			site_id     INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			title       TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			severity    TEXT DEFAULT 'medium',
+			occurred_at TIMESTAMPTZ DEFAULT NOW(),
+			created_by  INTEGER NOT NULL,
+			created_at  TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_site_incidents_site ON site_incidents(site_id, occurred_at DESC)`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {

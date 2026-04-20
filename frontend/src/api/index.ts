@@ -140,6 +140,13 @@ const api = {
 
   // Audit
   triggerAudit: (siteId: Id) => instance.post(`/v1/sites/${siteId}/audit`),
+
+  // Site history (combined coord-completed + manual incidents)
+  siteHistory: (siteId: Id) => instance.get(`/v1/sites/${siteId}/history`),
+  createSiteIncident: (siteId: Id, data: Record<string, any>) =>
+    instance.post(`/v1/sites/${siteId}/incidents`, data),
+  deleteSiteIncident: (siteId: Id, incidentId: Id) =>
+    instance.delete(`/v1/sites/${siteId}/incidents/${incidentId}`),
   listAudits: (siteId: Id) => instance.get(`/v1/sites/${siteId}/audits`),
   deleteAudit: (taskId: Id) => instance.delete(`/v1/audits/${taskId}`),
   getAudit: (taskId: Id) => instance.get(`/v1/audits/${taskId}`),

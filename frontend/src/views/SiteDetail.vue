@@ -43,6 +43,69 @@
       @delete-audit="deleteAudit"
     />
 
+    <!-- ── 历史错误汇总 ──────────────────────────────────────── -->
+    <div class="panel history-panel">
+      <div class="hp-head">
+        <div>
+          <h2 class="hp-title">📒 历史错误汇总</h2>
+          <p class="hp-sub">本站点已完成的协同任务 + 手动登记的故障 / 黑名单 / 服务异常事件，按时间倒序。
+            手动事件可删除；协同任务请到「协同管理」操作。</p>
+        </div>
+        <button class="btn btn-primary" @click="openIncidentDialog">＋ 登记事件</button>
+      </div>
+
+      <div v-if="!history.length" class="hp-empty">暂无历史记录</div>
+      <div v-else class="hp-list">
+        <div v-for="h in history" :key="h.id" class="hp-row" :class="'hp-' + h.source">
+          <div class="hp-when">{{ fmtDate(h.at) }}</div>
+          <div class="hp-icon">{{ h.source === 'coord' ? '✅' : '🚨' }}</div>
+          <div class="hp-body">
+            <div class="hp-row-head">
+              <span class="hp-title-text">{{ h.title }}</span>
+              <span v-if="h.severity" class="hp-sev" :class="'sev-' + sevKey(h.severity)">{{ sevLabel(h.severity) }}</span>
+              <span v-if="h.scope" class="hp-scope">{{ h.scope }}</span>
+              <span v-if="h.module" class="hp-mod">{{ h.module }}</span>
+              <span class="hp-source-tag">{{ h.source === 'coord' ? '协同已完成' : '手动登记' }}</span>
+            </div>
+            <div v-if="h.description || h.note" class="hp-desc">{{ h.description || h.note }}</div>
+            <div class="hp-meta">登记人：{{ h.actor_name || '—' }}</div>
+          </div>
+          <div class="hp-actions">
+            <button v-if="h.source === 'manual'" class="btn btn-xs btn-danger-xs" @click="deleteIncident(h)">删除</button>
+            <button v-else class="btn btn-xs" @click="$router.push(`/coordination/${h.coord_id}`)">查看任务</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 登记事件弹窗 -->
+    <el-dialog v-model="showIncidentDialog" title="📝 登记一个站点事件" width="540px">
+      <div class="form-row">
+        <label>标题 <span class="req">*</span></label>
+        <el-input v-model="incidentForm.title" placeholder="例如：站点 503 / 主域名被封 / 备案被注销" />
+      </div>
+      <div class="form-row">
+        <label>严重程度</label>
+        <el-select v-model="incidentForm.severity" style="width:100%">
+          <el-option label="🟢 低" value="low" />
+          <el-option label="🟡 中" value="medium" />
+          <el-option label="🔴 高" value="high" />
+        </el-select>
+      </div>
+      <div class="form-row">
+        <label>发生时间（不填默认现在）</label>
+        <el-date-picker v-model="incidentForm.occurred_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ssZ" placeholder="留空 = 现在" style="width:100%" />
+      </div>
+      <div class="form-row">
+        <label>详细描述</label>
+        <el-input v-model="incidentForm.description" type="textarea" rows="4" placeholder="可写：现象 / 触发原因 / 临时处理 / 永久修复方案，方便以后复盘参考" />
+      </div>
+      <template #footer>
+        <el-button @click="showIncidentDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveIncident" :loading="savingIncident">保存</el-button>
+      </template>
+    </el-dialog>
+
     <ScheduleConfig
       :sched-enabled="schedEnabled"
       :sched-mode="schedMode"
@@ -150,6 +213,75 @@ function loadData() {
   refetchSite()
   refetchAudits()
   refetchPages()
+  loadHistory()
+}
+
+// ── 历史错误汇总 ───────────────────────────────────────────────
+const history = ref([])
+const showIncidentDialog = ref(false)
+const savingIncident = ref(false)
+const incidentForm = ref({ title: '', severity: 'medium', occurred_at: '', description: '' })
+
+async function loadHistory() {
+  try {
+    const res = await api.siteHistory(route.params.id)
+    history.value = res.data || []
+  } catch { /* leave empty */ }
+}
+
+function openIncidentDialog() {
+  incidentForm.value = { title: '', severity: 'medium', occurred_at: '', description: '' }
+  showIncidentDialog.value = true
+}
+
+async function saveIncident() {
+  if (!incidentForm.value.title.trim()) {
+    ElMessage.warning('请填写事件标题')
+    return
+  }
+  savingIncident.value = true
+  try {
+    await api.createSiteIncident(route.params.id, incidentForm.value)
+    ElMessage.success('已登记')
+    showIncidentDialog.value = false
+    await loadHistory()
+  } catch (e) {
+    if (!e?.response) console.error(e)
+  } finally {
+    savingIncident.value = false
+  }
+}
+
+async function deleteIncident(h) {
+  try {
+    await ElMessageBox.confirm(`确认删除事件「${h.title}」？`, '删除', { type: 'warning' })
+  } catch { return }
+  try {
+    await api.deleteSiteIncident(route.params.id, h.incident_id)
+    ElMessage.success('已删除')
+    await loadHistory()
+  } catch (e) { console.error(e) }
+}
+
+function fmtDate(s) {
+  if (!s) return '—'
+  // Backend gives RFC3339-ish; render as local YYYY-MM-DD HH:mm.
+  const d = new Date(s)
+  if (isNaN(d.getTime())) return s
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function sevKey(s) {
+  if (!s) return 'medium'
+  const v = String(s).toLowerCase()
+  if (v.includes('致命') || v.includes('high') || v.includes('严重')) return 'high'
+  if (v.includes('低') || v.includes('low')) return 'low'
+  return 'medium'
+}
+function sevLabel(s) {
+  const k = sevKey(s)
+  return { high: '🔴 高', medium: '🟡 中', low: '🟢 低' }[k]
 }
 
 async function downloadReport(taskId) {
@@ -271,4 +403,36 @@ async function triggerAudit() {
 .btn { display:inline-flex; align-items:center; gap:6px; padding:9px 20px; border-radius:9px; border:1.5px solid var(--border); background:var(--surface); cursor:pointer; font-family:inherit; font-size:13.5px; font-weight:700; transition:all .18s; color:var(--ink-mid); }
 .btn-sm { padding:6px 14px !important; font-size:12.5px !important; }
 .btn-primary { background:linear-gradient(135deg,var(--sun) 0%,var(--coral) 100%); color:#fff; border-color:transparent; }
+.btn-xs { padding:4px 10px !important; font-size:12px !important; border-radius:6px; }
+.btn-danger-xs { color:var(--err); border-color:var(--err); }
+.btn-danger-xs:hover { background:var(--err); color:#fff; }
+
+/* History panel */
+.panel { background:var(--surface); border:1.5px solid var(--border-light); border-radius:var(--r); box-shadow:var(--s1); padding:18px 22px; margin-top:18px; }
+.history-panel { padding:18px 22px; }
+.hp-head { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; gap:18px; }
+.hp-title { margin:0; font-size:17px; font-weight:800; color:var(--ink); }
+.hp-sub { margin:4px 0 0; font-size:12.5px; color:var(--ink-soft); line-height:1.7; max-width:680px; }
+.hp-empty { padding:30px 0; text-align:center; color:var(--ink-hint); font-size:14px; }
+.hp-list { display:flex; flex-direction:column; gap:10px; }
+.hp-row { display:grid; grid-template-columns:140px 32px 1fr auto; gap:14px; align-items:flex-start; padding:14px 16px; background:var(--surface-2); border-radius:var(--r-sm); border-left:4px solid var(--border-light); }
+.hp-coord { border-left-color:#10B981; }
+.hp-manual { border-left-color:#EF4444; }
+.hp-when { font-size:12px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; padding-top:2px; }
+.hp-icon { font-size:20px; }
+.hp-row-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.hp-title-text { font-weight:700; color:var(--ink); font-size:14px; }
+.hp-sev { padding:2px 8px; border-radius:10px; font-size:11px; font-weight:700; }
+.sev-high { background:#FEF2F2; color:#DC2626; }
+.sev-medium { background:#FEF3C7; color:#D97706; }
+.sev-low { background:#ECFDF5; color:#059669; }
+.hp-scope { padding:2px 8px; background:var(--sun-light); color:var(--sun-deep); border-radius:10px; font-size:11px; font-weight:700; border:1px solid var(--peach); }
+.hp-mod { padding:2px 8px; background:#34495E; color:#fff; border-radius:6px; font-size:10.5px; font-weight:700; }
+.hp-source-tag { padding:2px 8px; background:var(--surface); color:var(--ink-soft); border-radius:6px; font-size:11px; font-weight:600; border:1px solid var(--border-light); }
+.hp-desc { margin-top:6px; font-size:13px; color:var(--ink-mid); line-height:1.6; white-space:pre-wrap; }
+.hp-meta { margin-top:6px; font-size:11.5px; color:var(--ink-soft); }
+.hp-actions { display:flex; align-items:center; }
+.form-row { margin-bottom:14px; }
+.form-row label { display:block; font-size:13px; font-weight:700; color:var(--ink-mid); margin-bottom:6px; }
+.req { color:var(--err); margin-left:2px; }
 </style>

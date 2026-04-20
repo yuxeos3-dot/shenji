@@ -276,6 +276,13 @@ func main() {
 		v1.POST("/site-bundle/import", api.RequirePermission("sites.import"), api.ImportSites)
 
 		// Audit (rate-limited: 5/min per user)
+		// Site history & manual incidents — owner-or-admin (canAccessSite
+		// inside each handler). Combines completed coord tasks with
+		// free-form ops log entries; see internal/api/site_incidents.go.
+		v1.GET("/sites/:id/history", api.RequirePermission("sites.view"), api.GetSiteHistory)
+		v1.POST("/sites/:id/incidents", api.RequirePermission("sites.edit"), api.CreateSiteIncident)
+		v1.DELETE("/sites/:id/incidents/:incident_id", api.RequirePermission("sites.edit"), api.DeleteSiteIncident)
+
 		v1.POST("/sites/:id/audit", api.RequirePermission("sites.audit"), middleware.UserRateLimit(5), api.TriggerAudit)
 		v1.GET("/sites/:id/audits", api.RequirePermission("sites.audit_view"), api.ListAudits)
 		v1.GET("/audits/:task_id", api.RequirePermission("sites.audit_view"), api.GetAudit)
