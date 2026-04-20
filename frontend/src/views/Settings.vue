@@ -149,8 +149,18 @@
           </p>
           <div class="field-row">
             <label>FRW API Key</label>
-            <el-input v-model="frwForm.apikey" type="password" autocomplete="new-password"
-              :placeholder="frw.bound ? '●●●●●● (已配置)' : '粘贴 FRW 对接 KEY (JWT 格式)'" />
+            <!-- textarea 而不是 password input — FRW 对接 KEY 通常
+                 800-2000 字符不等，单行 input 粘贴后看不到全部内容，
+                 用户无法判断是不是复制完整了。autosize 让它自适应。 -->
+            <el-input
+              v-model="frwForm.apikey"
+              type="textarea"
+              :autosize="{ minRows: 3, maxRows: 8 }"
+              resize="vertical"
+              spellcheck="false"
+              :placeholder="frw.bound ? '●●●●●● (已配置，如需替换请粘贴新的 KEY)' : '粘贴 FRW 对接 KEY (JWT 格式，通常较长，直接整段粘入)'"
+              class="frw-key-textarea"
+            />
           </div>
           <div class="row-actions">
             <el-button type="primary" @click="saveFRW" :loading="saving.frw">💾 保存</el-button>
@@ -708,6 +718,14 @@ async function saveSchedule() {
 .row-actions { display: flex; gap: 8px; margin-top: 6px; }
 
 .state-ok { font-size: 13px; color: var(--ok); font-weight: 700; margin-top: 4px; }
+
+/* FRW 对接 KEY 很长，textarea 用等宽字体显示更便于肉眼核对完整性 */
+.frw-key-textarea :deep(.el-textarea__inner) {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  word-break: break-all;
+}
 .state-warn { font-size: 13px; color: var(--warn); font-weight: 700; margin-top: 4px; }
 
 .test-results { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }

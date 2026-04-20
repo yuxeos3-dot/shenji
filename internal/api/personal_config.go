@@ -454,8 +454,15 @@ func PutMyFrw(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "参数错误"})
 		return
 	}
-	if len(req.APIKey) > 512 {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "api_key 过长"})
+	// FRW 对接 KEY is a JWT whose payload often carries a dozen claims
+	// (user_id, sub, iat, exp, iss, role, platform, permissions…) and
+	// each segment is base64 — real-world tokens sit anywhere from
+	// 400 to 2500 chars. Previous 512 cap rejected most legitimate keys.
+	// Raise to 16 KiB (way past any plausible JWT) so users can paste
+	// the full key without truncation, while still guarding against
+	// adversarial multi-megabyte blobs.
+	if len(req.APIKey) > 16384 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "api_key 长度异常（超过 16KB，请确认粘贴的是 FRW 对接 KEY）"})
 		return
 	}
 	if strings.TrimSpace(req.APIKey) == "" {
