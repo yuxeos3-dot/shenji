@@ -142,11 +142,11 @@
                 </el-table-column>
                 <el-table-column label="操作" width="360" fixed="right">
                   <template #default="{ row }">
-                    <div class="action-btns">
-                      <el-button class="btn-action btn-edit" size="small" @click="editSite(row)">✏️ 编辑</el-button>
-                      <el-button class="btn-action btn-detail" size="small" @click="$router.push(`/sites/${row.id}`)">📋 详情</el-button>
-                      <el-button class="btn-action btn-data" size="small" @click="$router.push(`/sites/${row.id}/data`)">📊 数据</el-button>
-                      <el-button class="btn-action btn-delete" size="small" @click="deleteSite(row)">🗑️ 删除</el-button>
+                    <div class="action-btns" @click.stop>
+                      <el-button class="btn-action btn-edit" size="small" @click.stop="editSite(row)">✏️ 编辑</el-button>
+                      <el-button class="btn-action btn-detail" size="small" @click.stop="goSiteDetail(row)">📋 详情</el-button>
+                      <el-button class="btn-action btn-data" size="small" @click.stop="goSiteData(row)">📊 数据</el-button>
+                      <el-button class="btn-action btn-delete" size="small" @click.stop="deleteSite(row)">🗑️ 删除</el-button>
                     </div>
                   </template>
                 </el-table-column>
@@ -191,8 +191,8 @@
             <template #default="{ row }">
               <div class="action-btns">
                 <el-button class="btn-action btn-edit" size="small" @click="editSite(row)">✏️ 编辑</el-button>
-                <el-button class="btn-action btn-detail" size="small" @click="$router.push(`/sites/${row.id}`)">📋 详情</el-button>
-                <el-button class="btn-action btn-data" size="small" @click="$router.push(`/sites/${row.id}/data`)">📊 数据</el-button>
+                <el-button class="btn-action btn-detail" size="small" @click="goSiteDetail(row)">📋 详情</el-button>
+                <el-button class="btn-action btn-data" size="small" @click="goSiteData(row)">📊 数据</el-button>
                 <el-button class="btn-action btn-delete" size="small" @click="deleteSite(row)">🗑️ 删除</el-button>
               </div>
             </template>
@@ -284,11 +284,28 @@ https://another.com"
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '../stores/user'
 import api from '../api'
 
 const userStore = useUserStore()
+const router = useRouter()
+
+// Named router-push handlers. Previously we inlined `$router.push(...)`
+// in the admin collapsible view's template, which was working for member
+// rows but occasionally got swallowed in the admin per-owner grouped
+// render (likely due to Element Plus fixed-column reflow). Wrapping it
+// in a named function + @click.stop gives us a deterministic click path
+// and a single place to guard against bad row objects.
+function goSiteDetail(row) {
+  if (!row || !row.id) { ElMessage.error('站点信息缺失，无法打开详情'); return }
+  router.push(`/sites/${row.id}`)
+}
+function goSiteData(row) {
+  if (!row || !row.id) { ElMessage.error('站点信息缺失，无法打开数据'); return }
+  router.push(`/sites/${row.id}/data`)
+}
 
 // fmtTime renders RFC3339 (backend always returns UTC) as local
 // YYYY-MM-DD HH:mm for the site list's 添加时间 column. Falls back to
