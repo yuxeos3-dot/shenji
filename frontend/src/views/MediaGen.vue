@@ -175,7 +175,7 @@
 </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 // Shared media generation page — used by both ImageGen.vue and VideoGen.vue
 // via a `kind` prop ('image' | 'video'). Polling logic is identical for
 // both; only the preset modes and preview element differ.

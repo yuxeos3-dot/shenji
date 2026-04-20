@@ -80,7 +80,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
 import { useSites, useOnlineUsers } from '../composables/useApi'
 import { useUserStore } from '../stores/user'
@@ -93,7 +93,7 @@ const { data: sitesData } = useSites()
 // the backend, so calling it from a member view would surface a 403
 // error toast + pollute the audit log. Conditional enabling means the
 // query never fires for members and their Dashboard is clean.
-const { data: onlineData } = useOnlineUsers(isAdmin.value)
+const { data: onlineData } = useOnlineUsers(isAdmin)
 
 const sites = computed(() => sitesData.value || [])
 const online = computed(() => onlineData.value || { online_count: 0, user_count: 0, users: [] })

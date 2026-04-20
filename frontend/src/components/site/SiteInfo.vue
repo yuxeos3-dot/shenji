@@ -21,7 +21,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 defineProps({
   site: { type: Object, required: true },
   auditing: { type: Boolean, default: false },

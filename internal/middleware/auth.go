@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -320,6 +321,12 @@ func InvalidateIPWhitelistCache() {
 // Cloudflare always sets CF-Connecting-IP to the real client; other
 // CDNs use X-Real-IP. Fall back to c.ClientIP() as a last resort.
 //
+// SECURITY NOTE: CF-Connecting-IP is trusted unconditionally. If the app
+// is accessed directly (bypassing Cloudflare), an attacker can spoof their
+// IP via this header. For production, ensure all traffic routes through CF
+// or validate that the request came from a known Cloudflare IP range.
+// TODO: Add CLOUDFLARE_IP_RANGES validation when direct access is possible.
+//
 // Without this, the "online users" panel accumulates a handful of
 // Cloudflare edge IPs per login (one per POP the browser keepalives to)
 // and the user appears to have "5 个会话" when they've only logged in once.
@@ -425,21 +432,43 @@ var heavyLimiter = &userRateLimiter{
 	requests: make(map[int64][]time.Time),
 }
 
-func init() {
+// StartBackgroundCleanups launches goroutines for rate limiter and online
+// user cleanup. Respects the given context for graceful shutdown.
+func StartBackgroundCleanups(ctx context.Context) {
 	go func() {
 		t := time.NewTicker(10 * time.Minute)
 		defer t.Stop()
-		for range t.C {
-			heavyLimiter.cleanup()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				heavyLimiter.cleanup()
+			}
 		}
 	}()
-	// Background cleanup for stale online-user entries (prevents memory leak
-	// when admin never opens the online-users page).
 	go func() {
 		t := time.NewTicker(5 * time.Minute)
 		defer t.Stop()
-		for range t.C {
-			cleanupStaleOnlineUsers()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				cleanupStaleOnlineUsers()
+			}
+		}
+	}()
+	go func() {
+		t := time.NewTicker(10 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				loginLimiter.cleanup()
+			}
 		}
 	}()
 }
@@ -524,15 +553,6 @@ var loginLimiter = &rateLimiter{
 	attempts: make(map[string][]time.Time),
 }
 
-func init() {
-	go func() {
-		t := time.NewTicker(10 * time.Minute)
-		defer t.Stop()
-		for range t.C {
-			loginLimiter.cleanup()
-		}
-	}()
-}
 
 func (r *rateLimiter) cleanup() {
 	r.mu.Lock()

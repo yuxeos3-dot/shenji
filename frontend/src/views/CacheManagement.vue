@@ -2,7 +2,7 @@
 export default { name: 'CacheManagement' }
 </script>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'

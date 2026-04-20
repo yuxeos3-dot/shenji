@@ -313,7 +313,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, watch, onMounted, h } from 'vue'
 import { ElMessage, ElInput, ElButton } from 'element-plus'
 import api from '../api'

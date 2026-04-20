@@ -292,10 +292,3 @@ func GetOnlineUsersAPI(c *gin.Context) {
 	}})
 }
 
-func GetInt64(c *gin.Context, key string) int64 {
-	val, _ := c.Get(key)
-	if v, ok := val.(int64); ok {
-		return v
-	}
-	return 0
-}

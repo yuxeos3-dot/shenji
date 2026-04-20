@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"net/http"
@@ -13,13 +14,19 @@ import (
 
 const oauthStateTTL = 10 * time.Minute
 
-// Start a background cleanup goroutine for expired OAuth states.
-func init() {
+// StartOAuthStateSweeper runs a background goroutine that periodically
+// cleans up expired OAuth states. Respects context for graceful shutdown.
+func StartOAuthStateSweeper(ctx context.Context) {
 	go func() {
 		t := time.NewTicker(5 * time.Minute)
 		defer t.Stop()
-		for range t.C {
-			db.DB.Exec("DELETE FROM oauth_states WHERE expires_at < NOW()")
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				db.DB.Exec("DELETE FROM oauth_states WHERE expires_at < NOW()")
+			}
 		}
 	}()
 }

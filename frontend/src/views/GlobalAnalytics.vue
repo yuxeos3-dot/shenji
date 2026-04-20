@@ -120,7 +120,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api'
@@ -170,7 +170,7 @@ function pendingLabel(s) {
   }[s] || s
 }
 
-// Simple markdown to HTML — handles ## headers, **bold**, bullet lists,
+// Simple markdown to HTML — XSS-safe because we escape &, <, > first. — handles ## headers, **bold**, bullet lists,
 // line breaks. Good enough for the AI's typical response format.
 function md(text) {
   if (!text) return ''

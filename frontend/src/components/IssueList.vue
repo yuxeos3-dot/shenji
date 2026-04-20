@@ -15,7 +15,7 @@
   <div v-else class="no-issues">暂无问题 ✓</div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref } from 'vue'
 const props = defineProps({ issues: { type: Array, default: () => [] } })
 const expanded = ref({})

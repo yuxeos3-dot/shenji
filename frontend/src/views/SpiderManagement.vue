@@ -2,7 +2,7 @@
 export default { name: 'SpiderManagement' }
 </script>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api'

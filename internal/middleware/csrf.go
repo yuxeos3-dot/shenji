@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -17,13 +18,25 @@ import (
 // `X-CSRF-Token` header on every state-changing request. The token is an
 // HMAC over a random nonce so it survives stateless restarts.
 
+// csrfSecretOverride holds the optional CSRF_SECRET env var, loaded at import
+// time. If non-empty, csrfKey() uses this instead of deriving from jwtSecret.
+var csrfSecretOverride = []byte(os.Getenv("CSRF_SECRET"))
+
 const (
 	CSRFCookieName = "csrf_token"
 	CSRFHeaderName = "X-CSRF-Token"
 	csrfTTLSeconds = 24 * 60 * 60
 )
 
+// csrfKey derives the key used for CSRF token HMACs. Prefers a dedicated
+// CSRF_SECRET environment variable for defense-in-depth (if JWT_SECRET
+// leaks, CSRF protection remains intact). Falls back to deriving from
+// jwtSecret for backward compatibility.
 func csrfKey() []byte {
+	if secret := csrfSecretOverride; len(secret) > 0 {
+		sum := sha256.Sum256(secret)
+		return sum[:]
+	}
 	sum := sha256.Sum256(append([]byte("csrf:"), jwtSecret...))
 	return sum[:]
 }

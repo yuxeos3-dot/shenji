@@ -15,9 +15,6 @@ const routes: RouteRecordRaw[] = [
       { path: 'sites/:id/audit/:taskId', name: 'AuditDetail', component: () => import('../views/AuditDetail.vue') },
       { path: 'sites/:id/data', name: 'DataCenter', component: () => import('../views/DataCenter.vue') },
       { path: 'geo-management', name: 'GeoManagement', component: () => import('../views/GeoContent.vue') },
-      // Image/Video gen share a single view with a kind prop. The `props` route
-      // option turns route params into component props but we need a static
-      // value, hence the render-function wrapper.
       { path: 'image-management', name: 'ImageManagement', component: () => import('../views/MediaGen.vue'), props: { kind: 'image' } },
       { path: 'video-management', name: 'VideoManagement', component: () => import('../views/MediaGen.vue'), props: { kind: 'video' } },
       { path: 'dead-links', name: 'DeadLinks', component: () => import('../views/DeadLinks.vue') },
@@ -32,44 +29,48 @@ const routes: RouteRecordRaw[] = [
       { path: 'reports/monthly/new', name: 'NewMonthlyReport', component: () => import('../views/NewMonthlyReport.vue') },
       { path: 'reports/monthly/:id', name: 'MonthlyReportDetail', component: () => import('../views/MonthlyReportDetail.vue') },
       { path: 'settings', name: 'Settings', component: () => import('../views/Settings.vue') },
-      { path: 'users', name: 'Users', component: () => import('../views/Users.vue') },
-      { path: 'users-monitor', name: 'UserMonitor', component: () => import('../views/UserMonitor.vue') },
-      { path: 'global-data', name: 'GlobalData', component: () => import('../views/GlobalData.vue') },
-      { path: 'global-analytics', name: 'GlobalAnalytics', component: () => import('../views/GlobalAnalytics.vue') },
-      { path: 'cache-management', name: 'CacheManagement', component: () => import('../views/CacheManagement.vue') },
-      { path: 'spider-management', name: 'SpiderManagement', component: () => import('../views/SpiderManagement.vue') },
-      { path: 'push-management', name: 'PushManagement', component: () => import('../views/PushManagement.vue') },
       { path: 'coordination', name: 'Coordination', component: () => import('../views/Coordination.vue') },
       { path: 'coordination/:id', name: 'CoordinationDetail', component: () => import('../views/CoordinationDetail.vue') },
+      { path: 'push-management', name: 'PushManagement', component: () => import('../views/PushManagement.vue') },
+
+      // ── Admin-only routes ─────────────────────────────────────────
+      // These routes require admin role. The backend also enforces 403
+      // for non-admin users, so this is defense-in-depth, not the only
+      // access control layer.
+      { path: 'users', name: 'Users', component: () => import('../views/Users.vue'), meta: { requireAdmin: true } },
+      { path: 'users-monitor', name: 'UserMonitor', component: () => import('../views/UserMonitor.vue'), meta: { requireAdmin: true } },
+      { path: 'global-data', name: 'GlobalData', component: () => import('../views/GlobalData.vue'), meta: { requireAdmin: true } },
+      { path: 'global-analytics', name: 'GlobalAnalytics', component: () => import('../views/GlobalAnalytics.vue'), meta: { requireAdmin: true } },
+      { path: 'cache-management', name: 'CacheManagement', component: () => import('../views/CacheManagement.vue'), meta: { requireAdmin: true } },
+      { path: 'spider-management', name: 'SpiderManagement', component: () => import('../views/SpiderManagement.vue'), meta: { requireAdmin: true } },
     ]
   },
+  // 404 catch-all — must be last
+  { path: '/:pathMatch(.*)*', name: 'NotFound', component: () => import('../views/NotFound.vue') },
 ]
 
 const router = createRouter({
   history: createWebHistory(),
   routes,
+  // Restore scroll position on back/forward; scroll to top on new navigation
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) return savedPosition
+    return { top: 0 }
+  },
 })
 
-// With cookie-based auth we can't see the token from JS, so the guard asks
-// the server once via /auth/me. Result is cached in the pinia store so
-// subsequent navigations are instant.
-// safeRedirect returns `to.fullPath` only when it's a safe same-origin path,
-// i.e. starts with exactly one "/" and isn't a protocol-relative URL like
-// "//evil.com/..." or a javascript: scheme. Anything else becomes "" and
-// the /login redirect falls back to its default landing page.
+// ── Auth & permission guards ────────────────────────────────────────────────
+
+// safeRedirect returns `to.fullPath` only when it's a safe same-origin path.
 function safeRedirect(fullPath: string): string {
   if (!fullPath || fullPath === '/') return ''
   if (!fullPath.startsWith('/')) return ''
-  if (fullPath.startsWith('//')) return '' // protocol-relative
-  if (fullPath.startsWith('/\\')) return ''
+  if (fullPath.startsWith('//')) return ''
+  if (fullPath.startsWith('/\')) return ''
   if (/^\s*(javascript|data|vbscript):/i.test(fullPath)) return ''
   return fullPath
 }
 
-// authProbed flips true the first time fetchUser resolves, regardless
-// of outcome. Used to distinguish "we haven't checked yet" from
-// "checked, definitely anonymous" so cold-load can route to /login
-// optimistically without re-probing on every step.
 let authProbed = false
 let inflightProbe: Promise<void> | null = null
 
@@ -84,49 +85,44 @@ function probeAuth() {
 }
 
 router.beforeEach(async (to, _from, next) => {
+  // Allow 404 and login without auth
+  if (to.name === 'NotFound') {
+    next()
+    return
+  }
+
   if (to.path === '/login') {
-    // Visiting /login while already authed (back button, manual URL)
-    // should bounce straight to the dashboard rather than show a stale
-    // form. Otherwise the user clicks 登录 and gets a "登录成功"
-    // toast for what was already a valid session.
     const userStore = useUserStore()
     if (userStore.authed) {
       next({ path: '/dashboard' })
       return
     }
     next()
-    // Probe in the background so if the cookie is actually valid,
-    // Login.vue's mounted hook can pick up authed=true and redirect.
     if (!authProbed) probeAuth()
     return
   }
 
   const userStore = useUserStore()
   if (userStore.authed) {
+    // Admin route guard: redirect non-admin users to dashboard
+    if (to.meta.requireAdmin && !userStore.isAdmin()) {
+      next({ path: '/dashboard' })
+      return
+    }
     next()
     return
   }
 
-  // Cold-load fast path: we've never probed and the cookie state is
-  // unknown. The vast majority of cold loads are anonymous (a session
-  // exists for at most a single browser tab at a time, and the typing
-  // a-domain-into-the-bar gesture usually means "I want to log in").
-  // Route to /login synchronously to skip the blank-screen wait — if
-  // the probe comes back authed, the redirect query in /login will
-  // bounce them to their original target.
+  // Cold-load fast path
   if (!authProbed) {
     probeAuth().then(() => {
-      // No-op here; the awaiting Login page will react to authed.value
-      // turning true and route forward via its own guard.
+      // Login page reacts to authed.value turning true
     })
     const target = safeRedirect(to.fullPath)
     next({ path: '/login', query: target ? { redirect: target } : {} })
     return
   }
 
-  // We've probed and the user is definitely anonymous (otherwise we
-  // would have hit the userStore.authed branch above). Send them to
-  // login proper.
   const target = safeRedirect(to.fullPath)
   next({ path: '/login', query: target ? { redirect: target } : {} })
 })

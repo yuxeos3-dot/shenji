@@ -1,5 +1,13 @@
+<script setup lang="ts">
+import ErrorBoundary from "./components/ErrorBoundary.vue"
+</script>
+
 <template>
-  <router-view />
+<!-- Global error boundary wraps all route views -->
+
+  <ErrorBoundary>
+    <router-view />
+  </ErrorBoundary>
 </template>
 
 <style>

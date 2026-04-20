@@ -1,6 +1,8 @@
-import { computed, type Ref } from 'vue'
+import { computed, unref, type Ref, type ComputedRef } from 'vue'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import api from '../api'
+
+type MaybeRef<T> = T | Ref<T> | ComputedRef<T>
 
 export function useSites() {
   return useQuery({
@@ -23,19 +25,21 @@ export function useAudits(siteId: Ref<number | string>) {
   })
 }
 
-export function useOnlineUsers(enabled = true) {
+export function useOnlineUsers(enabled: MaybeRef<boolean> = true) {
+  // Accept both plain boolean and reactive Ref<boolean>/ComputedRef<boolean>.
+  // When a Ref is passed (e.g. `isAdmin` computed), the query reactively
+  // enables/disables as the value changes — fixing the stale-snapshot bug
+  // where passing `isAdmin.value` at mount time locked the query off.
+  const enabledRef = computed(() => unref(enabled))
+
   return useQuery({
     queryKey: ['onlineUsers'],
     queryFn: async () => {
       const res = await api.getOnlineUsers()
       return res.data
     },
-    // `enabled` gates the initial fetch too — without this, a member's
-    // Dashboard mount would still fire one GET /v1/auth/online that
-    // 403s and spawns an error toast. With it, the query is dormant
-    // until isAdmin flips true (which it won't for members).
-    enabled,
-    refetchInterval: enabled ? 30_000 : false,
+    enabled: enabledRef,
+    refetchInterval: computed(() => enabledRef.value ? 30_000 : false),
   })
 }
 

@@ -124,6 +124,8 @@ func initJSONNameCache() {
 	// struct gains binding validations that should flow back as
 	// "fields" to the UI.
 	registerForJSONCache(reflect.TypeOf(CreateUserRequest{}))
+	registerForJSONCache(reflect.TypeOf(RegisterRequest{}))
+	registerForJSONCache(reflect.TypeOf(ApproveUserRequest{}))
 }
 
 func registerForJSONCache(t reflect.Type) {

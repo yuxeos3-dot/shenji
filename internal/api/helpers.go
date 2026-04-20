@@ -34,3 +34,13 @@ func parseISODate(raw string) (string, error) {
 	}
 	return t.Format("2006-01-02"), nil
 }
+
+// GetInt64 extracts a typed int64 from the gin context, returning 0 if
+// missing or wrong type. Commonly used for user_id set by auth middleware.
+func GetInt64(c *gin.Context, key string) int64 {
+	val, _ := c.Get(key)
+	if v, ok := val.(int64); ok {
+		return v
+	}
+	return 0
+}

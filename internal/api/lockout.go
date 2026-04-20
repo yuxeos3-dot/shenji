@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -16,14 +17,21 @@ const (
 	accountLockoutDuration  = 15 * time.Minute
 )
 
-// Start a background sweeper so lockouts don't accumulate forever when an
-// attacker cycles through many email addresses.
-func init() {
+// StartLockoutSweeper runs a background goroutine that periodically cleans
+// up expired lockout records. It respects the given context for graceful
+// shutdown — when ctx is cancelled, the goroutine exits cleanly.
+// Call this from main() instead of relying on init() goroutines.
+func StartLockoutSweeper(ctx context.Context) {
 	go func() {
 		t := time.NewTicker(10 * time.Minute)
 		defer t.Stop()
-		for range t.C {
-			sweepLockouts()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				sweepLockouts()
+			}
 		}
 	}()
 }

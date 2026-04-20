@@ -79,8 +79,8 @@
 
 </template>
 
-<script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+<script setup lang="ts">
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { useSiteConfigStore, APP_VERSION } from '../stores/siteConfig'
@@ -95,11 +95,13 @@ const appVersion = APP_VERSION
 const isMobile = ref(window.innerWidth <= 768)
 const sidebarOpen = ref(!isMobile.value)
 
+const handleResize = () => {
+  isMobile.value = window.innerWidth <= 768
+  if (!isMobile.value) sidebarOpen.value = true
+}
+
 onMounted(() => {
-  window.addEventListener('resize', () => {
-    isMobile.value = window.innerWidth <= 768
-    if (!isMobile.value) sidebarOpen.value = true
-  })
+  window.addEventListener('resize', handleResize)
   // Handle the OAuth callback redirect. The backend redirects to
   // "/?oauth=<svc>&status=success" or "/?oauth=<svc>&status=denied&
   // reason=<human-readable>". Surface it as a toast then strip the
@@ -117,6 +119,10 @@ onMounted(() => {
     }
     router.replace({ path: route.path, query: {} })
   }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", handleResize)
 })
 
 // Close sidebar on mobile route change

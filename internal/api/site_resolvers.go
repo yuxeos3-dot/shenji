@@ -24,6 +24,7 @@ package api
 // would otherwise call the list endpoint too.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -104,19 +105,27 @@ func resolveCacheSet(key, value string) {
 // init starts a background goroutine that sweeps expired resolveCache
 // entries every 10 minutes, preventing unbounded memory growth in
 // long-running processes.
-func init() {
+// StartResolverCacheSweeper runs a background goroutine that periodically
+// evicts stale entries from the site resolver cache. Respects context for
+// graceful shutdown.
+func StartResolverCacheSweeper(ctx context.Context) {
 	go func() {
 		t := time.NewTicker(10 * time.Minute)
 		defer t.Stop()
-		for range t.C {
-			resolveCacheMu.Lock()
-			now := time.Now()
-			for k, e := range resolveCache {
-				if now.Sub(e.at) > resolveCacheTTL {
-					delete(resolveCache, k)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				resolveCacheMu.Lock()
+				now := time.Now()
+				for k, e := range resolveCache {
+					if now.Sub(e.at) > resolveCacheTTL {
+						delete(resolveCache, k)
+					}
 				}
+				resolveCacheMu.Unlock()
 			}
-			resolveCacheMu.Unlock()
 		}
 	}()
 }
