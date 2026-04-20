@@ -539,19 +539,30 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 	allChapters := make([]ai.V6Chapter, 0, 8)
 	var lastModel string
 	var lastRaw string
-	var lastBatchErr error
+	// Same per-batch failure capture as the manual audit path — collect
+	// every failure's name / duration / classified reason so the final
+	// error_msg is specific instead of "all batches failed".
+	type schedBatchFailure struct {
+		idx      int
+		name     string
+		err      error
+		duration time.Duration
+	}
+	var batchFailures []schedBatchFailure
 	batchTotal := len(ai.TechnicalBatches)
 	for i, batch := range ai.TechnicalBatches {
 		log.Printf("[audit %d] scheduler 批次 %d/%d：%s", taskID, i+1, batchTotal, batch.Name)
+		batchStart := time.Now()
 		bp := ai.BuildTechPromptBatch(batch, config.Domain, sitePages, pages, gscData, gaData, yandexData)
 		chs, raw, model, bErr := ai.CallAIChaptersWithConfig(aiURL, aiKey, aiModel, bp)
+		dur := time.Since(batchStart)
 		lastModel = model
 		if raw != "" {
 			lastRaw = raw
 		}
 		if bErr != nil {
-			log.Printf("[audit %d] scheduler 批次 %d 失败: %v", taskID, i+1, bErr)
-			lastBatchErr = bErr
+			log.Printf("[audit %d] scheduler 批次 %d「%s」失败（耗时 %s）: %v", taskID, i+1, batch.Name, dur.Round(time.Millisecond), bErr)
+			batchFailures = append(batchFailures, schedBatchFailure{idx: i + 1, name: batch.Name, err: bErr, duration: dur})
 			continue
 		}
 		allChapters = append(allChapters, chs...)
@@ -570,15 +581,24 @@ func runSiteAudit(siteID int64, siteName string, config crawler.SiteConfig) {
 		); err != nil {
 			log.Printf("[audit %d] scheduler insert empty results failed: %v", taskID, err)
 		}
-		errMsg := "所有技术审计批次均失败"
-		if lastBatchErr != nil {
-			errMsg = ai.ExplainError(lastBatchErr.Error())
+		// Compose the same multi-section failure message as manual audit.
+		var sb strings.Builder
+		fmt.Fprintf(&sb, "❌ 所有 %d 个技术审计批次都失败，任务中止\n", len(batchFailures))
+		sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━\n")
+		fmt.Fprintf(&sb, "🔗 AI 端点：%s\n", aiURL)
+		fmt.Fprintf(&sb, "🤖 使用模型：%s\n", aiModel)
+		sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━\n")
+		for _, f := range batchFailures {
+			fmt.Fprintf(&sb, "\n▸ 批次 %d ·「%s」· 耗时 %s\n", f.idx, f.name, f.duration.Round(time.Millisecond))
+			sb.WriteString(ai.ExplainError(f.err.Error()))
+			sb.WriteString("\n")
 		}
+		errMsg := sb.String()
 		if _, err := db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=$1, finished_at=$2 WHERE id=$3",
 			errMsg, time.Now(), taskID); err != nil {
 			log.Printf("[audit %d] scheduler mark-failed failed: %v", taskID, err)
 		}
-		telegram.NotifyUser(ownerUserID, "巡检失败", siteName+":\n"+errMsg)
+		telegram.NotifyUser(ownerUserID, "巡检失败", siteName+"\n"+errMsg)
 		return
 	}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"seo-system/internal/ai"
@@ -15,10 +16,54 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// explainAIError wraps ai.ExplainError so call sites in this package
-// don't need to reach into another module for what reads like a local
-// concern. Kept as a one-liner so the real mapping lives in the ai
-// package and the scheduler's auto-audit path gets the exact same text.
+// auditBatchFailure captures every bit of context about a single
+// failed technical-audit batch so the aggregated error_msg can show
+// the user exactly which batch failed, how long it took, and why.
+// Used by both the manual audit path and the scheduler.
+type auditBatchFailure struct {
+	idx      int
+	name     string
+	err      error
+	duration time.Duration
+}
+
+// composeBatchFailureMsg produces a detailed multi-section failure
+// message for the 审计详情 banner and the Telegram push. Structure:
+//
+//	❌ 所有 N 个技术审计批次都失败
+//	━━━━━━━━━━━━━━━━━━━━
+//	AI 端点：https://api.example.com/v1
+//	使用模型：claude-sonnet-4-6
+//	━━━━━━━━━━━━━━━━━━━━
+//	批次 1 ·「技术审计A」· 耗时 8.9s
+//	❌ [classified headline]
+//	供应商原文：[extracted error.message]
+//	建议处理：[action]
+//	原始响应片段：[trimmed raw]
+//
+//	批次 2 ·「技术审计B」· 耗时 9.2s
+//	...
+//
+// This is verbose ON PURPOSE — the user's complaint was "笼统回答".
+// Every bit of context the audit pipeline collected gets surfaced.
+func composeBatchFailureMsg(apiURL, model string, failures []auditBatchFailure) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "❌ 所有 %d 个技术审计批次都失败，任务中止\n", len(failures))
+	sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━\n")
+	fmt.Fprintf(&sb, "🔗 AI 端点：%s\n", apiURL)
+	fmt.Fprintf(&sb, "🤖 使用模型：%s\n", model)
+	sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━\n")
+	for _, f := range failures {
+		fmt.Fprintf(&sb, "\n▸ 批次 %d ·「%s」· 耗时 %s\n",
+			f.idx, f.name, f.duration.Round(time.Millisecond))
+		sb.WriteString(ai.ExplainError(f.err.Error()))
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// explainAIError is kept as a thin wrapper for any call sites that only
+// need single-error translation without the full batch context.
 func explainAIError(raw string) string {
 	return ai.ExplainError(raw)
 }
@@ -236,31 +281,37 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	allChapters := make([]ai.V6Chapter, 0, 8)
 	var lastModel string
 	var lastRaw string
-	var lastBatchErr error
+	// Per-batch failure log so the final error_msg can show EXACTLY which
+	// batch failed with what reason + how long it took — no more "all
+	// failed" black box.
+	var batchFailures []auditBatchFailure
 	batchTotal := len(ai.TechnicalBatches)
 	for i, batch := range ai.TechnicalBatches {
 		log.Printf("[audit %d] 技术审计批次 %d/%d：%s", taskID, i+1, batchTotal, batch.Name)
+		batchStart := time.Now()
 		bp := ai.BuildTechPromptBatch(batch, site.Domain, sitePages, crawlPages, gscData, gaData, yandexData)
 		chs, raw, model, bErr := ai.CallAIChaptersWithConfig(aiURL, aiKey, aiModel, bp)
+		dur := time.Since(batchStart)
 		lastModel = model
 		if raw != "" {
 			lastRaw = raw
 		}
 		if bErr != nil {
-			log.Printf("[audit %d] 批次 %d 失败: %v", taskID, i+1, bErr)
-			lastBatchErr = bErr
+			log.Printf("[audit %d] 批次 %d「%s」失败（耗时 %s）: %v", taskID, i+1, batch.Name, dur.Round(time.Millisecond), bErr)
+			batchFailures = append(batchFailures, auditBatchFailure{idx: i + 1, name: batch.Name, err: bErr, duration: dur})
 			continue
 		}
-		log.Printf("[audit %d] 批次 %d 得到 %d 章节", taskID, i+1, len(chs))
+		log.Printf("[audit %d] 批次 %d 得到 %d 章节（耗时 %s）", taskID, i+1, len(chs), dur.Round(time.Millisecond))
 		allChapters = append(allChapters, chs...)
 		// Progress: spread 65 → 80 across batches.
 		updateProgress(65 + ((i + 1) * 15 / batchTotal))
 	}
 
 	if len(allChapters) == 0 {
-		// All batches failed — persist raw response and fail. Surface the
-		// actual underlying error so the user can actually fix it instead
-		// of staring at a vague "所有技术审计批次均失败".
+		// All batches failed — persist raw response and fail. Build a
+		// detailed multi-section error message so the 审计详情 banner shows
+		// the user EXACTLY which batch died with what reason, on which
+		// model, against which endpoint.
 		rawSnippet := lastRaw
 		if len(rawSnippet) > 100000 {
 			rawSnippet = rawSnippet[:100000]
@@ -270,14 +321,11 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 			 VALUES ($1, '[]', '[]', '[]', '[]', '', '', $2, '', $3)`,
 			taskID, lastModel, rawSnippet,
 		)
-		errMsg := "所有技术审计批次均失败"
-		if lastBatchErr != nil {
-			errMsg = explainAIError(lastBatchErr.Error())
-		}
+		errMsg := composeBatchFailureMsg(aiURL, aiModel, batchFailures)
 		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=$1, finished_at=$2 WHERE id=$3",
 			errMsg, time.Now(), taskID)
-		log.Printf("[audit %d] 所有技术审计批次均失败: %v", taskID, lastBatchErr)
-		telegram.NotifyUser(ownerUserID, "审计失败", siteName+" 审计失败：\n"+errMsg)
+		log.Printf("[audit %d] 所有技术审计批次均失败（%d 批次）", taskID, len(batchFailures))
+		telegram.NotifyUser(ownerUserID, "审计失败", siteName+"\n"+errMsg)
 		return
 	}
 
