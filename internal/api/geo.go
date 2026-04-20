@@ -61,11 +61,27 @@ func GeoStats(c *gin.Context) {
 
 // ─── Title Libraries ─────────────────────────────────────────────────────────
 
+// GeoListTitleLibs only returns libs belonging to the caller. Admin
+// sees their own libs too — the product rule is "每个人管自己的"。
+// Orphan rows (user_id=0, from before the column existed) are treated
+// as admin-owned to avoid losing access to legacy data.
 func GeoListTitleLibs(c *gin.Context) {
+	uid := c.GetInt64("user_id")
+	role, _ := c.Get("role")
+	isAdmin := role == "admin"
 	siteID := c.Query("site_id")
 	contentType := c.DefaultQuery("content_type", "geo")
 	q := "SELECT id, name, description, title_count, created_at FROM geo_title_libs WHERE content_type = $1"
 	args := []interface{}{contentType}
+	// Per-user isolation: admin sees user_id=self OR user_id=0 (orphan),
+	// member sees only user_id=self.
+	if isAdmin {
+		q += fmt.Sprintf(" AND (user_id = $%d OR user_id = 0)", len(args)+1)
+		args = append(args, uid)
+	} else {
+		q += fmt.Sprintf(" AND user_id = $%d", len(args)+1)
+		args = append(args, uid)
+	}
 	if siteID != "" {
 		q += fmt.Sprintf(" AND site_id = $%d", len(args)+1)
 		args = append(args, siteID)
@@ -104,8 +120,12 @@ func GeoCreateTitleLib(c *gin.Context) {
 	if req.ContentType == "" {
 		req.ContentType = "geo"
 	}
+	uid := c.GetInt64("user_id")
 	var id int64
-	err := db.DB.QueryRow("INSERT INTO geo_title_libs (name, description, site_id, content_type) VALUES ($1, $2, $3, $4) RETURNING id", req.Name, req.Description, req.SiteID, req.ContentType).Scan(&id)
+	err := db.DB.QueryRow(
+		"INSERT INTO geo_title_libs (name, description, site_id, content_type, user_id) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+		req.Name, req.Description, req.SiteID, req.ContentType, uid,
+	).Scan(&id)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "创建失败"})
 		return
@@ -113,14 +133,35 @@ func GeoCreateTitleLib(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "data": gin.H{"id": id}})
 }
 
+// assertGeoLibOwnership returns the lib row + ok=true only when the
+// caller is allowed to touch it. Members: must be user_id owner.
+// Admin: can touch their own OR legacy orphan (user_id=0).
+func assertGeoLibOwnership(c *gin.Context, libID string) (int64, int64, string, bool) {
+	uid := c.GetInt64("user_id")
+	role, _ := c.Get("role")
+	var owner, siteID int64
+	var contentType string
+	err := db.DB.QueryRow(
+		"SELECT COALESCE(user_id,0), COALESCE(site_id,0), COALESCE(content_type,'geo') FROM geo_title_libs WHERE id=$1",
+		libID,
+	).Scan(&owner, &siteID, &contentType)
+	if err != nil {
+		c.JSON(404, gin.H{"code": -1, "error": "关键词库不存在"})
+		return 0, 0, "", false
+	}
+	allowed := owner == uid || (role == "admin" && owner == 0)
+	if !allowed {
+		c.JSON(403, gin.H{"code": -1, "error": "无权访问该关键词库（非本人创建）"})
+		return 0, 0, "", false
+	}
+	return owner, siteID, contentType, true
+}
+
 func GeoDeleteTitleLib(c *gin.Context) {
 	id := c.Param("id")
 	contentType := c.DefaultQuery("content_type", "geo")
-	// Only delete if content_type matches, prevents cross-type deletion
-	var ct string
-	var libSiteID int64
-	if err := db.DB.QueryRow("SELECT content_type, COALESCE(site_id,0) FROM geo_title_libs WHERE id=$1", id).Scan(&ct, &libSiteID); err != nil {
-		c.JSON(404, gin.H{"code": -1, "error": "关键词库不存在"})
+	_, libSiteID, ct, ok := assertGeoLibOwnership(c, id)
+	if !ok {
 		return
 	}
 	if ct != contentType {
@@ -137,8 +178,10 @@ func GeoDeleteTitleLib(c *gin.Context) {
 
 func GeoListTitles(c *gin.Context) {
 	libID := c.Param("id")
-	var listLibSiteID int64
-	db.DB.QueryRow("SELECT COALESCE(site_id,0) FROM geo_title_libs WHERE id=$1", libID).Scan(&listLibSiteID)
+	_, listLibSiteID, _, ok := assertGeoLibOwnership(c, libID)
+	if !ok {
+		return
+	}
 	if listLibSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", listLibSiteID)) {
 		return
 	}
@@ -177,8 +220,10 @@ func GeoListTitles(c *gin.Context) {
 
 func GeoAddTitles(c *gin.Context) {
 	libID := c.Param("id")
-	var addLibSiteID int64
-	db.DB.QueryRow("SELECT COALESCE(site_id,0) FROM geo_title_libs WHERE id=$1", libID).Scan(&addLibSiteID)
+	_, addLibSiteID, _, ok := assertGeoLibOwnership(c, libID)
+	if !ok {
+		return
+	}
 	if addLibSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", addLibSiteID)) {
 		return
 	}
@@ -208,8 +253,10 @@ func GeoAddTitles(c *gin.Context) {
 
 func GeoImportTitles(c *gin.Context) {
 	libID := c.Param("id")
-	var impLibSiteID int64
-	db.DB.QueryRow("SELECT COALESCE(site_id,0) FROM geo_title_libs WHERE id=$1", libID).Scan(&impLibSiteID)
+	_, impLibSiteID, _, ok := assertGeoLibOwnership(c, libID)
+	if !ok {
+		return
+	}
 	if impLibSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", impLibSiteID)) {
 		return
 	}
@@ -250,8 +297,10 @@ func GeoDeleteTitle(c *gin.Context) {
 	var libID int64
 	db.DB.QueryRow("SELECT lib_id FROM geo_titles WHERE id = $1", id).Scan(&libID)
 	if libID > 0 {
-		var titleLibSiteID int64
-		db.DB.QueryRow("SELECT COALESCE(site_id,0) FROM geo_title_libs WHERE id=$1", libID).Scan(&titleLibSiteID)
+		_, titleLibSiteID, _, ok := assertGeoLibOwnership(c, fmt.Sprintf("%d", libID))
+		if !ok {
+			return
+		}
 		if titleLibSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", titleLibSiteID)) {
 			return
 		}
@@ -266,6 +315,10 @@ func GeoDeleteTitle(c *gin.Context) {
 // GeoImportFromGSC imports top keywords from GSC data into a keyword library.
 func GeoImportFromGSC(c *gin.Context) {
 	libID := c.Param("id")
+	// Lib must belong to the caller (or be admin-owned orphan).
+	if _, _, _, ok := assertGeoLibOwnership(c, libID); !ok {
+		return
+	}
 	var req struct {
 		SiteID int64 `json:"site_id" binding:"required"`
 		Limit  int   `json:"limit"` // optional, 0 = all (position 1-99)

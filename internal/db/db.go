@@ -696,6 +696,11 @@ func Init() {
 			created_at  TIMESTAMPTZ DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_site_incidents_site ON site_incidents(site_id, occurred_at DESC)`,
+		// GEO 关键词库 — 每用户独立，不是共享资源。新增 user_id 列，
+		// 旧行 user_id=0 作为"orphan 管理员专属"处理。配合 handler
+		// 里按 user_id 过滤，避免 admin 和 member 互相看到 / 删除。
+		"DO $$ BEGIN ALTER TABLE geo_title_libs ADD COLUMN user_id INTEGER DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		`CREATE INDEX IF NOT EXISTS idx_geo_title_libs_user ON geo_title_libs(user_id)`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {

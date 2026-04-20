@@ -58,10 +58,26 @@ func GetExternalLinks(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"items": links, "total": total, "page": page, "per_page": perPage}})
 }
 
-// ─── Shared Backlink Pool (公共外链库) ────────────────────────────────────────
+// ─── Per-user Backlink Pool (外链库，每人管自己的) ────────────────────────────
+// 说明：曾设计为"共享外链库"，但产品反馈是"admin 加一条用户也看到 / 用户
+// 删一条 admin 也没了"。实际业务是每人独立管理自己的外链素材，所以列表
+// + 删除都按 created_by 过滤。admin 仍能看到历史 created_by=0 的孤行，
+// 避免在迁移后丢失老数据。
 
 func ListExtlinkPool(c *gin.Context) {
-	rows, err := db.DB.Query("SELECT id, url, name, created_at FROM extlink_pool ORDER BY id DESC LIMIT 500")
+	uid := c.GetInt64("user_id")
+	role, _ := c.Get("role")
+	var q string
+	var args []interface{}
+	if role == "admin" {
+		// Admin sees their own + legacy orphan rows (created_by=0).
+		q = "SELECT id, url, name, created_at FROM extlink_pool WHERE created_by = $1 OR created_by = 0 ORDER BY id DESC LIMIT 500"
+		args = []interface{}{uid}
+	} else {
+		q = "SELECT id, url, name, created_at FROM extlink_pool WHERE created_by = $1 ORDER BY id DESC LIMIT 500"
+		args = []interface{}{uid}
+	}
+	rows, err := db.DB.Query(q, args...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
 		return
