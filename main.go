@@ -466,6 +466,11 @@ func main() {
 			coord.PUT("/tasks/:id", api.RequirePermission("coord.edit"), api.UpdateCoordTask)
 			coord.DELETE("/tasks/:id", api.RequirePermission("coord.delete"), api.DeleteCoordTask)
 			coord.POST("/tasks/:id/assign", api.RequirePermission("coord.assign"), api.AssignCoordTask)
+			// 组长 / 经理审核：prevent new staff from forwarding non-issues
+			// to developers. Reviewers are chosen on the assign dialog; the
+			// decision endpoint is gated by coord.review so only people with
+			// that permission can approve/reject.
+			coord.POST("/tasks/:id/review", api.RequirePermission("coord.review"), api.SubmitCoordReviewerDecision)
 			coord.POST("/tasks/:id/submit", api.RequirePermission("coord.submit"), api.SubmitCoordTask)
 			coord.POST("/tasks/:id/verify", api.RequirePermission("coord.verify"), api.VerifyCoordTask)
 			coord.POST("/tasks/:id/comments", api.RequirePermission("coord.comment"), api.AddCoordComment)

@@ -701,6 +701,23 @@ func Init() {
 		// 里按 user_id 过滤，避免 admin 和 member 互相看到 / 删除。
 		"DO $$ BEGIN ALTER TABLE geo_title_libs ADD COLUMN user_id INTEGER DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
 		`CREATE INDEX IF NOT EXISTS idx_geo_title_libs_user ON geo_title_libs(user_id)`,
+		// 协同任务 · 组长 / 经理审核环节。新人创建任务时先指定拟派开
+		// 发 (pending_assignee_id)，再勾选一个或多个审核人；任务进入
+		// pending_review 状态，所有审核人同意之后系统自动推给开发。
+		"DO $$ BEGIN ALTER TABLE coordination_tasks ADD COLUMN pending_assignee_id INTEGER DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE coordination_tasks ADD COLUMN pending_assign_note TEXT DEFAULT ''; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		`CREATE TABLE IF NOT EXISTS coord_task_reviewers (
+			id            SERIAL PRIMARY KEY,
+			task_id       INTEGER NOT NULL REFERENCES coordination_tasks(id) ON DELETE CASCADE,
+			reviewer_id   INTEGER NOT NULL REFERENCES users(id),
+			decision      TEXT NOT NULL DEFAULT 'pending',
+			decision_note TEXT DEFAULT '',
+			decided_at    TIMESTAMPTZ,
+			created_at    TIMESTAMPTZ DEFAULT NOW(),
+			UNIQUE(task_id, reviewer_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_coord_reviewers_task ON coord_task_reviewers(task_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_coord_reviewers_reviewer ON coord_task_reviewers(reviewer_id, decision)`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {

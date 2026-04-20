@@ -117,6 +117,7 @@ var PermissionTree = []PermNode{
 		{Code: "coord.edit", Label: "编辑任务（标题 / 问题描述）"},
 		{Code: "coord.delete", Label: "删除任务"},
 		{Code: "coord.assign", Label: "分配给开发（启动）"},
+		{Code: "coord.review", Label: "组长 / 经理审核（同意或拒绝新人派发给开发）"},
 		{Code: "coord.comment", Label: "添加备注 / 提问回复"},
 		{Code: "coord.ping_dev", Label: "📣 发送给开发（推送通知）"},
 		{Code: "coord.attachment", Label: "上传 / 删除附件"},

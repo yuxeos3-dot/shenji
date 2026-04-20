@@ -98,9 +98,11 @@
             <!-- Creator / Admin actions: assignment, verify, reject, edit, delete.
                  Developer sees none of these on their tasks so they can't
                  accidentally re-route or close their own work. -->
-            <template v-if="canCreatorAct && (task.status === 'pending' || task.status === 'in_progress')">
-              <button class="btn btn-primary" @click="showAssignDialog = true">
-                {{ task.status === 'pending' ? '🛠 分配给开发（开始）' : '🔁 重新分配' }}
+            <template v-if="canCreatorAct && (task.status === 'pending' || task.status === 'in_progress' || task.status === 'pending_review')">
+              <button class="btn btn-primary" @click="openAssignDialog">
+                {{ task.status === 'pending' ? '🛠 分配给开发（开始）'
+                  : task.status === 'pending_review' ? '🔁 重新送审 / 改派开发'
+                  : '🔁 重新分配' }}
               </button>
             </template>
             <!-- 📣 Ad-hoc ping to the developer. Only meaningful once the
@@ -138,7 +140,7 @@
               @click="startEditNote"
             >✏ 编辑问题</button>
             <button
-              v-if="canCreatorAct && task.status === 'pending'"
+              v-if="canCreatorAct && (task.status === 'pending' || task.status === 'pending_review')"
               class="btn btn-danger-soft"
               @click="doDelete"
             >🗑 删除任务</button>
@@ -153,6 +155,25 @@
         </div>
         <div v-else class="locked-banner">
           🔒 任务已完成并关闭，所有操作已锁定（留痕）
+        </div>
+
+        <!-- Reviewer action banner: visible to the current user IF they
+             are on the reviewer roster AND haven't decided yet. Takes
+             priority over the Q&A banner below when both would match
+             (they can't, since pending_review blocks awaiting_answer). -->
+        <div v-if="canReviewNow" class="review-action-box">
+          <div class="ra-title">
+            👀 你是本任务的审核人，请判断是否真的需要开发介入：
+          </div>
+          <div class="ra-meta">
+            <span>拟派开发：<strong>{{ task.pending_assignee_name || '—' }}</strong></span>
+            <span v-if="task.pending_assign_note" class="ra-note">备注：{{ task.pending_assign_note }}</span>
+          </div>
+          <div class="ra-actions">
+            <button class="btn btn-verify" @click="openReview('approved')" :disabled="sending">✅ 同意送开发</button>
+            <button class="btn btn-danger-soft" @click="openReview('rejected')" :disabled="sending">❌ 拒绝派发</button>
+          </div>
+          <div class="ra-hint">拒绝后任务会留在「待审核」，创建人可根据你的理由决定取消或修改后再送审。</div>
         </div>
 
         <!-- When waiting for the creator to answer, surface the question
@@ -284,6 +305,34 @@
           <el-button type="danger" @click="confirmReject" :disabled="!rejectNote.trim()">确认打回</el-button>
         </template>
       </el-dialog>
+
+      <!-- Reviewer roster — visible for any task that went through the
+           review gate (reviewers.length > 0). Shows every reviewer's
+           decision + optional note so the creator can track progress. -->
+      <div v-if="reviewers.length" class="panel reviewer-panel">
+        <div class="section-title">
+          👀 审核人（{{ reviewProgress.approved }}/{{ reviewProgress.total }} 同意<span v-if="reviewProgress.rejected"> · {{ reviewProgress.rejected }} 拒绝</span>）
+          <span v-if="task.status === 'pending_review' && task.pending_assignee_name" class="reviewer-target">
+            拟派：<strong>{{ task.pending_assignee_name }}</strong>
+          </span>
+        </div>
+        <div class="reviewer-list">
+          <div v-for="r in reviewers" :key="r.id" :class="['rev-row', 'rev-' + r.decision]">
+            <div class="rev-head">
+              <span class="rev-name">{{ r.reviewer_name || '—' }}</span>
+              <span v-if="r.reviewer_dept" class="rev-dept">{{ r.reviewer_dept }}</span>
+              <span :class="['rev-decision', 'rd-' + r.decision]">
+                {{ r.decision === 'approved' ? '✅ 同意' : r.decision === 'rejected' ? '❌ 拒绝' : '⏳ 待审核' }}
+              </span>
+              <span v-if="r.decided_at" class="rev-time">{{ fmtTime(r.decided_at) }}</span>
+            </div>
+            <div v-if="r.decision_note" class="rev-note">{{ r.decision_note }}</div>
+          </div>
+        </div>
+        <div v-if="task.status === 'pending_review' && canCreatorAct" class="reviewer-creator-hint">
+          💡 提示：任务正在等待审核人同意；如果审核人拒绝，你可以点击「🔁 重新送审」重新选择审核人或开发。
+        </div>
+      </div>
 
       <!-- Issue snapshot. Read-only in every status except pending when
            the user is in edit mode — then all 4 fields become editable
@@ -479,8 +528,10 @@
       </div>
     </template>
 
-    <!-- Assign dialog -->
-    <el-dialog v-model="showAssignDialog" title="分配给开发" width="440px">
+    <!-- Assign dialog — choose a developer and optionally route through
+         组长/经理 审核 first. Reviewer-empty ⇒ direct hand-off. Non-empty
+         ⇒ task enters 待审核 until every selected reviewer approves. -->
+    <el-dialog v-model="showAssignDialog" title="分配给开发" width="520px">
       <div class="assign-field">
         <label>选择开发</label>
         <el-select v-model="assignForm.assignee_id" placeholder="选择开发账号" style="width:100%" filterable>
@@ -493,12 +544,63 @@
         </el-select>
       </div>
       <div class="assign-field">
+        <label>
+          组长 / 经理 审核 <span class="field-hint">（可多选；留空则直接派给开发）</span>
+        </label>
+        <el-select
+          v-model="assignForm.reviewer_ids"
+          multiple
+          placeholder="选择 1 个或多个审核人"
+          style="width:100%"
+          filterable
+          clearable
+        >
+          <el-option
+            v-for="u in reviewerCandidates"
+            :key="u.id"
+            :label="formatDeveloperLabel(u)"
+            :value="u.id"
+          />
+        </el-select>
+        <div class="reviewer-hint">
+          ⚠️ 一旦选择审核人，任务会进入「待审核」状态；所有审核人点同意后才会自动推给开发。
+        </div>
+      </div>
+      <div class="assign-field">
         <label>备注（可选）</label>
-        <textarea v-model="assignForm.note" rows="3" class="assign-textarea" placeholder="给开发的说明"></textarea>
+        <textarea v-model="assignForm.note" rows="3" class="assign-textarea" placeholder="给开发的说明（审核人也能看到）"></textarea>
       </div>
       <template #footer>
         <el-button @click="showAssignDialog = false">取消</el-button>
-        <el-button type="primary" @click="doAssign" :loading="sending">确认分配</el-button>
+        <el-button type="primary" @click="doAssign" :loading="sending">
+          {{ (assignForm.reviewer_ids || []).length > 0 ? '发送审核' : '直接分配' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Reviewer decision dialog (同意 / 拒绝) -->
+    <el-dialog v-model="showReviewDialog" :title="reviewForm.decision === 'approved' ? '同意送开发' : '拒绝派发'" width="480px">
+      <p v-if="reviewForm.decision === 'approved'" class="review-hint">
+        点击同意后，任务将继续等待其他审核人；当所有人都同意后，系统会自动把任务推给开发者
+        <strong>{{ task?.pending_assignee_name || '（未知）' }}</strong>。
+      </p>
+      <p v-else class="review-hint reject-flavor">
+        拒绝会让任务留在「待审核」状态，请填写理由让创建人知道哪里需要改进。
+      </p>
+      <textarea
+        v-model="reviewForm.note"
+        rows="5"
+        class="review-textarea"
+        :placeholder="reviewForm.decision === 'approved' ? '可选：补充说明' : '必填：告诉创建人为什么拒绝（例如：不是 bug、优先级低、已有重复任务等）'"
+      ></textarea>
+      <template #footer>
+        <el-button @click="showReviewDialog = false">取消</el-button>
+        <el-button
+          :type="reviewForm.decision === 'approved' ? 'success' : 'danger'"
+          @click="confirmReview"
+          :loading="sending"
+          :disabled="reviewForm.decision === 'rejected' && !reviewForm.note.trim()"
+        >{{ reviewForm.decision === 'approved' ? '✅ 确认同意' : '❌ 确认拒绝' }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -520,6 +622,7 @@ const task = ref(null)
 const events = ref([])
 const attachments = ref([])
 const developers = ref([])
+const reviewers = ref([])
 const loading = ref(false)
 const sending = ref(false)
 
@@ -556,7 +659,38 @@ const uploading = ref(false)
 const fileInputRef = ref(null)
 
 const showAssignDialog = ref(false)
-const assignForm = ref({ assignee_id: null, note: '' })
+// reviewer_ids = [] means direct assign (bypass review), non-empty sends
+// the task to 组长/经理 审核 first. Creator picks from the same user list
+// as assignee; backend strips the creator and the chosen assignee out.
+const assignForm = ref({ assignee_id: null, reviewer_ids: [], note: '' })
+
+// Reviewer decision dialog state.
+const showReviewDialog = ref(false)
+const reviewForm = ref({ decision: 'approved', note: '' })
+
+// Is the current user a reviewer on this task, and has their decision
+// row not been decided yet? Controls visibility of the 审核 panel.
+const myReviewerRow = computed(() => {
+  const uid = userStore.user?.id
+  if (!uid) return null
+  return reviewers.value.find(r => r.reviewer_id === uid) || null
+})
+const canReviewNow = computed(() =>
+  task.value?.status === 'pending_review' &&
+  !!myReviewerRow.value &&
+  myReviewerRow.value.decision === 'pending'
+)
+// Reviewer-progress display for the creator. Counts pending / approved /
+// rejected so we can render a "2/3 同意" style readout.
+const reviewProgress = computed(() => {
+  const r = reviewers.value
+  return {
+    total: r.length,
+    approved: r.filter(x => x.decision === 'approved').length,
+    rejected: r.filter(x => x.decision === 'rejected').length,
+    pending: r.filter(x => x.decision === 'pending').length,
+  }
+})
 
 // ── Pre-audit (待验收) state ─────────────────────────────────────────────
 // All pre-audit refs are only meaningful when task.status === 'under_review'.
@@ -614,6 +748,7 @@ function statusLabel(s) {
   return {
     '': '—',
     pending: '待分配',
+    pending_review: '待审核',
     in_progress: '开发中',
     awaiting_answer: '待发起人回复',
     under_review: '待验收',
@@ -632,6 +767,9 @@ function eventLabel(t) {
     create: '🆕 创建任务',
     edit: '✏ 编辑问题',
     assign: '👤 分配开发',
+    review_submit: '👀 送组长审核',
+    review_approve: '✅ 审核同意',
+    review_reject: '❌ 审核拒绝',
     start: '▶ 开始处理',
     ask: '❓ 开发提问',
     answer: '✉ 发起人回复',
@@ -661,6 +799,7 @@ async function load() {
     task.value = res.data?.task || null
     events.value = res.data?.events || []
     attachments.value = res.data?.attachments || []
+    reviewers.value = res.data?.reviewers || []
     noteDraft.value = task.value?.note || ''
     // Load test pages only while under_review; other states don't need
     // them and one extra request is enough noise to skip.
@@ -896,6 +1035,29 @@ async function saveNote() {
   finally { sending.value = false }
 }
 
+// Reviewer candidate list excludes the creator (must not self-approve)
+// and the currently-selected assignee (dev shouldn't review their own
+// assignment). Backend applies the same filter defensively.
+const reviewerCandidates = computed(() => {
+  const creatorId = task.value?.created_by
+  const assigneeId = assignForm.value.assignee_id
+  return developers.value.filter(u => u.id !== creatorId && u.id !== assigneeId)
+})
+
+// Open dialog with form hydrated from the task's current review state so
+// re-sending after a reject doesn't force the creator to re-pick everyone.
+function openAssignDialog() {
+  const t = task.value
+  assignForm.value = {
+    assignee_id: t?.pending_assignee_id || t?.assignee_id || null,
+    reviewer_ids: reviewers.value
+      .filter(r => r.decision === 'pending' || r.decision === 'approved')
+      .map(r => r.reviewer_id),
+    note: t?.pending_assign_note || '',
+  }
+  showAssignDialog.value = true
+}
+
 async function doAssign() {
   if (!assignForm.value.assignee_id) {
     ElMessage.warning('请选择开发')
@@ -903,13 +1065,49 @@ async function doAssign() {
   }
   sending.value = true
   try {
-    await api.coordAssignTask(task.value.id, {
+    const reviewerIds = (assignForm.value.reviewer_ids || []).filter(x => x)
+    const res = await api.coordAssignTask(task.value.id, {
       assignee_id: assignForm.value.assignee_id,
+      reviewer_ids: reviewerIds,
       note: assignForm.value.note || '',
     })
-    ElMessage.success('已分配，任务进入「开发中」')
+    const status = res.data?.status
+    if (status === 'pending_review') {
+      ElMessage.success(`已送审（${reviewerIds.length} 位审核人）`)
+    } else {
+      ElMessage.success('已分配，任务进入「开发中」')
+    }
     showAssignDialog.value = false
-    assignForm.value = { assignee_id: null, note: '' }
+    assignForm.value = { assignee_id: null, reviewer_ids: [], note: '' }
+    await load()
+  } catch { /* interceptor showed */ }
+  finally { sending.value = false }
+}
+
+// Reviewer clicks 同意 or 拒绝 — opens the confirm dialog with optional note.
+function openReview(decision) {
+  reviewForm.value = { decision, note: '' }
+  showReviewDialog.value = true
+}
+
+async function confirmReview() {
+  if (reviewForm.value.decision === 'rejected' && !reviewForm.value.note.trim()) {
+    ElMessage.warning('拒绝时请填写理由')
+    return
+  }
+  sending.value = true
+  try {
+    const res = await api.coordReviewDecision(task.value.id, {
+      decision: reviewForm.value.decision,
+      note: reviewForm.value.note || '',
+    })
+    const promoted = res.data?.promoted
+    if (reviewForm.value.decision === 'approved') {
+      ElMessage.success(promoted ? '✅ 全部同意，任务已推给开发' : '✅ 已同意，等待其他审核人')
+    } else {
+      ElMessage.success('❌ 已拒绝，已通知创建人')
+    }
+    showReviewDialog.value = false
     await load()
   } catch { /* interceptor showed */ }
   finally { sending.value = false }
@@ -1143,6 +1341,7 @@ onMounted(async () => {
 
 .status-tag { display:inline-block; padding:5px 14px; border-radius:20px; font-size:12.5px; font-weight:800; }
 .st-pending { background:#DBEAFE; color:#1D4ED8; }
+.st-pending_review { background:#FFE4E6; color:#BE185D; animation: blink 2s ease-in-out infinite; }
 .st-in_progress { background:#FEF3C7; color:#92400E; }
 .st-awaiting_answer { background:#FEE2E2; color:#B91C1C; animation: blink 2s ease-in-out infinite; }
 .st-under_review { background:#EDE9FE; color:#6D28D9; }
@@ -1286,6 +1485,9 @@ onMounted(async () => {
 .tl-item.tl-attach_delete .tl-dot { background:var(--err); border-color:var(--err); }
 .tl-item.tl-pre_audit .tl-dot { background:#8B5CF6; border-color:#8B5CF6; }
 .tl-item.tl-reject .tl-dot { background:var(--err); border-color:var(--err); }
+.tl-item.tl-review_submit .tl-dot { background:#EC4899; border-color:#EC4899; }
+.tl-item.tl-review_approve .tl-dot { background:var(--ok); border-color:var(--ok); }
+.tl-item.tl-review_reject .tl-dot { background:var(--err); border-color:var(--err); }
 
 /* ── Pre-audit (待验收) panel ─────────────────────────────────────────── */
 .preaudit-panel { padding:20px 26px; margin-bottom:16px; border:1.5px solid #C7D2FE; background:linear-gradient(180deg, #F5F3FF 0%, var(--surface) 55%); }
@@ -1341,4 +1543,44 @@ onMounted(async () => {
 .reject-hint { font-size:13px; color:var(--ink-mid); margin-bottom:10px; padding:8px 12px; background:#FEF2F2; border-left:3px solid var(--err); border-radius:6px; line-height:1.6; }
 .reject-textarea { width:100%; box-sizing:border-box; padding:10px 12px; border:1.5px solid var(--border); border-radius:var(--r-sm); font-size:13.5px; font-family:inherit; line-height:1.7; resize:vertical; outline:none; background:var(--surface); min-height:110px; }
 .reject-textarea:focus { border-color:var(--err); box-shadow:0 0 0 3px rgba(239,68,68,.12); }
+
+/* ── Reviewer approval workflow ──────────────────────────────────────── */
+
+/* Banner for a reviewer who hasn't decided yet */
+.review-action-box { margin-top:18px; padding:18px 20px; background:linear-gradient(135deg,#FFF1F5,#FFF); border:2px solid #F9A8D4; border-radius:var(--r-sm); }
+.review-action-box .ra-title { font-size:14px; font-weight:800; color:#BE185D; margin-bottom:12px; }
+.review-action-box .ra-meta { display:flex; gap:18px; flex-wrap:wrap; font-size:13px; color:var(--ink-mid); margin-bottom:14px; }
+.review-action-box .ra-meta strong { color:var(--ink); }
+.review-action-box .ra-note { font-family:inherit; padding:3px 10px; background:var(--surface-2); border-radius:6px; border:1px solid var(--border-light); }
+.review-action-box .ra-actions { display:flex; gap:10px; margin-bottom:10px; }
+.review-action-box .ra-hint { font-size:11.5px; color:var(--ink-hint); }
+
+/* Reviewer roster panel */
+.reviewer-panel { background:linear-gradient(135deg,#FDF4FF,#FFFBFD); border-color:#F5D0FE; }
+.reviewer-target { margin-left:auto; font-size:12px; font-weight:700; color:var(--ink-soft); }
+.reviewer-target strong { color:var(--ink); }
+.reviewer-list { display:flex; flex-direction:column; gap:8px; }
+.rev-row { padding:10px 14px; background:var(--surface); border:1.5px solid var(--border-light); border-radius:var(--r-sm); }
+.rev-row.rev-pending { border-color:#FCD34D; background:#FFFBEB; }
+.rev-row.rev-approved { border-color:#A7F3D0; background:#ECFDF5; }
+.rev-row.rev-rejected { border-color:#FECACA; background:#FEF2F2; }
+.rev-head { display:flex; align-items:center; gap:10px; font-size:13px; }
+.rev-name { font-weight:800; color:var(--ink); }
+.rev-dept { font-size:11.5px; color:var(--ink-hint); background:var(--surface-2); padding:2px 8px; border-radius:10px; }
+.rev-decision { font-size:12px; font-weight:800; padding:2px 10px; border-radius:10px; margin-left:auto; }
+.rev-decision.rd-pending { background:#FEF3C7; color:#92400E; }
+.rev-decision.rd-approved { background:var(--ok-bg); color:var(--ok); }
+.rev-decision.rd-rejected { background:#FEE2E2; color:#B91C1C; }
+.rev-time { font-size:11px; color:var(--ink-hint); font-family:'JetBrains Mono',monospace; margin-left:4px; }
+.rev-note { font-size:12.5px; color:var(--ink-mid); margin-top:6px; padding:6px 10px; background:var(--surface-2); border-radius:6px; white-space:pre-wrap; line-height:1.55; }
+.reviewer-creator-hint { margin-top:12px; padding:8px 12px; background:#FEFCE8; border:1px solid #FDE68A; border-radius:6px; font-size:12px; color:#713F12; }
+
+/* Review decision dialog */
+.review-hint { font-size:13px; color:var(--ink-mid); margin-bottom:10px; padding:8px 12px; background:#ECFDF5; border-left:3px solid var(--ok); border-radius:6px; line-height:1.6; }
+.review-hint.reject-flavor { background:#FEF2F2; border-left-color:var(--err); }
+.review-textarea { width:100%; box-sizing:border-box; padding:10px 12px; border:1.5px solid var(--border); border-radius:var(--r-sm); font-size:13.5px; font-family:inherit; line-height:1.7; resize:vertical; outline:none; background:var(--surface); min-height:100px; }
+.review-textarea:focus { border-color:var(--sun); box-shadow:0 0 0 3px rgba(249,115,22,.12); }
+
+.field-hint { font-size:11.5px; font-weight:500; color:var(--ink-hint); }
+.reviewer-hint { margin-top:6px; font-size:11.5px; color:var(--ink-hint); }
 </style>

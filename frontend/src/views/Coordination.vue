@@ -10,6 +10,10 @@
         <div class="stat-num">{{ stats.pending || 0 }}</div>
         <div class="stat-label">📋 待分配</div>
       </div>
+      <div class="stat-cell review-gate" :class="{active: filter.status==='pending_review'}" @click="setStatus('pending_review')">
+        <div class="stat-num">{{ stats.pending_review || 0 }}</div>
+        <div class="stat-label">👀 待审核</div>
+      </div>
       <div class="stat-cell running" :class="{active: filter.status==='in_progress'}" @click="setStatus('in_progress')">
         <div class="stat-num">{{ stats.in_progress || 0 }}</div>
         <div class="stat-label">🛠 开发中</div>
@@ -144,7 +148,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const sites = ref([])
 const tasks = ref([])
-const stats = ref({ pending: 0, in_progress: 0, under_review: 0, done: 0 })
+const stats = ref({ pending: 0, pending_review: 0, in_progress: 0, under_review: 0, done: 0 })
 const loading = ref(false)
 // Admin team filters: 部门 / 组 / 姓名. Members don't see these inputs
 // so the extra fields stay null and backend treats them as absent.
@@ -185,7 +189,8 @@ const perPage = 100
 const total = ref(0)
 
 const totalAll = computed(() =>
-  (stats.value.pending || 0) + (stats.value.in_progress || 0) +
+  (stats.value.pending || 0) + (stats.value.pending_review || 0) +
+  (stats.value.in_progress || 0) +
   (stats.value.awaiting_answer || 0) +
   (stats.value.under_review || 0) + (stats.value.done || 0)
 )
@@ -211,6 +216,7 @@ const groupedBySite = computed(() => {
 function statusLabel(s) {
   return {
     pending: '📋 待分配',
+    pending_review: '👀 待审核',
     in_progress: '🛠 开发中',
     awaiting_answer: '❓ 待回复',
     under_review: '🔍 待验收',
@@ -266,7 +272,7 @@ async function reload() {
     ])
     tasks.value = tRes.data?.items || []
     total.value = tRes.data?.total || 0
-    stats.value = sRes.data || { pending: 0, in_progress: 0, under_review: 0, done: 0 }
+    stats.value = sRes.data || { pending: 0, pending_review: 0, in_progress: 0, under_review: 0, done: 0 }
   } catch (e) {
     console.error(e)
   } finally {
@@ -306,13 +312,14 @@ onMounted(async () => {
 .coord-page { display:flex; flex-direction:column; gap:16px; }
 .panel { background:var(--surface); border-radius:var(--r); box-shadow:var(--s1); border:1.5px solid var(--border-light); padding:16px 22px; }
 
-.stats-bar { display:grid; grid-template-columns:repeat(6,1fr); gap:12px; padding:14px; }
+.stats-bar { display:grid; grid-template-columns:repeat(7,1fr); gap:12px; padding:14px; }
 .stat-cell { text-align:center; padding:16px 12px; border-radius:var(--r-sm); cursor:pointer; transition:all .18s; border:1.5px solid var(--border-light); background:var(--surface-2); }
 .stat-cell:hover { transform:translateY(-1px); box-shadow:var(--s1); border-color:var(--peach); }
 .stat-cell.active { background:linear-gradient(135deg,var(--sun-light),#FFF); border-color:var(--sun); box-shadow:0 3px 12px rgba(249,115,22,.2); }
 .stat-cell .stat-num { font-size:26px; font-weight:800; font-family:'JetBrains Mono',monospace; color:var(--ink); line-height:1; }
 .stat-cell .stat-label { font-size:12px; font-weight:700; color:var(--ink-soft); margin-top:6px; }
 .stat-cell.pending.active .stat-num { color:#3B82F6; }
+.stat-cell.review-gate.active .stat-num { color:#BE185D; }
 .stat-cell.running.active .stat-num { color:var(--warn); }
 .stat-cell.answer.active .stat-num { color:#B91C1C; }
 .stat-cell.review.active .stat-num { color:#7C3AED; }
@@ -347,6 +354,7 @@ onMounted(async () => {
 
 .status-tag { display:inline-block; padding:3px 9px; border-radius:12px; font-size:11px; font-weight:700; }
 .s-pending { background:#DBEAFE; color:#1D4ED8; }
+.s-pending_review { background:#FFE4E6; color:#BE185D; }
 .s-in_progress { background:#FEF3C7; color:#92400E; }
 .s-awaiting_answer { background:#FEE2E2; color:#B91C1C; }
 .s-under_review { background:#EDE9FE; color:#6D28D9; }

@@ -36,6 +36,7 @@ import (
 
 const (
 	coordStatusPending        = "pending"
+	coordStatusPendingReview  = "pending_review" // awaiting 组长/经理 approvals before going to dev
 	coordStatusInProgress     = "in_progress"
 	coordStatusAwaitingAnswer = "awaiting_answer" // developer raised a question, waiting on creator
 	coordStatusUnderReview    = "under_review"
@@ -45,7 +46,7 @@ const (
 // validCoordStatus reports whether s is one of the legal states.
 func validCoordStatus(s string) bool {
 	switch s {
-	case coordStatusPending, coordStatusInProgress, coordStatusAwaitingAnswer,
+	case coordStatusPending, coordStatusPendingReview, coordStatusInProgress, coordStatusAwaitingAnswer,
 		coordStatusUnderReview, coordStatusDone:
 		return true
 	}
@@ -82,6 +83,26 @@ type coordTask struct {
 	PreAuditVerdict string  `json:"pre_audit_verdict,omitempty"`
 	PreAuditResult  string  `json:"pre_audit_result,omitempty"`
 	PreAuditAt      *string `json:"pre_audit_at,omitempty"`
+	// When the task is in pending_review, pending_assignee_id captures
+	// who the creator wants the task to land with once all reviewers
+	// have approved. Zero / empty on tasks that skipped the review step.
+	PendingAssigneeID   int64  `json:"pending_assignee_id,omitempty"`
+	PendingAssigneeName string `json:"pending_assignee_name,omitempty"`
+	PendingAssignNote   string `json:"pending_assign_note,omitempty"`
+}
+
+// coordReviewer is one row in coord_task_reviewers, exposed to the
+// frontend for rendering the reviewer panel on the task detail page.
+type coordReviewer struct {
+	ID           int64   `json:"id"`
+	TaskID       int64   `json:"task_id"`
+	ReviewerID   int64   `json:"reviewer_id"`
+	ReviewerName string  `json:"reviewer_name"`
+	ReviewerDept string  `json:"reviewer_dept,omitempty"`
+	Decision     string  `json:"decision"` // pending / approved / rejected
+	DecisionNote string  `json:"decision_note,omitempty"`
+	DecidedAt    *string `json:"decided_at,omitempty"`
+	CreatedAt    string  `json:"created_at"`
 }
 
 type coordEvent struct {
@@ -140,7 +161,9 @@ func loadCoordTask(id int64) (*coordTask, error) {
 		       t.assignee_id, COALESCE(u2.name,''), COALESCE(d2.name,''), COALESCE(g2.name,''),
 		       t.created_at, t.started_at, t.submitted_at, t.verified_at,
 		       COALESCE(t.pre_audit_verdict,''), COALESCE(t.pre_audit_result,''),
-		       t.pre_audit_at
+		       t.pre_audit_at,
+		       COALESCE(t.pending_assignee_id,0), COALESCE(u3.name,''),
+		       COALESCE(t.pending_assign_note,'')
 		FROM coordination_tasks t
 		LEFT JOIN sites s ON s.id = t.site_id
 		LEFT JOIN users u1 ON u1.id = t.created_by
@@ -149,6 +172,7 @@ func loadCoordTask(id int64) (*coordTask, error) {
 		LEFT JOIN users u2 ON u2.id = t.assignee_id
 		LEFT JOIN departments d2 ON d2.id = u2.department_id
 		LEFT JOIN dept_groups g2 ON g2.id = u2.group_id
+		LEFT JOIN users u3 ON u3.id = t.pending_assignee_id
 		WHERE t.id = $1`
 	var t coordTask
 	var started, submitted, verified, preAuditAt sql.NullString
@@ -162,6 +186,7 @@ func loadCoordTask(id int64) (*coordTask, error) {
 		&t.AssigneeID, &t.AssigneeName, &t.AssigneeDept, &t.AssigneeGroup,
 		&t.CreatedAt, &started, &submitted, &verified,
 		&t.PreAuditVerdict, &t.PreAuditResult, &preAuditAt,
+		&t.PendingAssigneeID, &t.PendingAssigneeName, &t.PendingAssignNote,
 	)
 	if err != nil {
 		return nil, err
@@ -547,11 +572,12 @@ func ListCoordTasks(c *gin.Context) {
 		ORDER BY
 			CASE t.status
 				WHEN 'awaiting_answer' THEN 0
-				WHEN 'under_review'    THEN 1
-				WHEN 'in_progress'     THEN 2
-				WHEN 'pending'         THEN 3
-				WHEN 'done'            THEN 4
-				ELSE 5
+				WHEN 'pending_review'  THEN 1
+				WHEN 'under_review'    THEN 2
+				WHEN 'in_progress'     THEN 3
+				WHEN 'pending'         THEN 4
+				WHEN 'done'            THEN 5
+				ELSE 6
 			END,
 			t.created_at DESC
 		LIMIT ` + fmt.Sprintf("$%d", len(args)+1) + ` OFFSET ` + fmt.Sprintf("$%d", len(args)+2)
@@ -672,12 +698,16 @@ func GetCoordTask(c *gin.Context) {
 		}
 	}
 
+	// Reviewer roster — empty for tasks that skipped the review gate.
+	reviewers, _ := loadCoordReviewers(id)
+
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"data": gin.H{
 			"task":        t,
 			"events":      events,
 			"attachments": attachments,
+			"reviewers":   reviewers,
 		},
 	})
 }
@@ -691,11 +721,31 @@ func GetCoordTask(c *gin.Context) {
 type transitionBody struct {
 	Note       string `json:"note"`
 	AssigneeID int64  `json:"assignee_id"` // only used by /assign
+	// Optional multi-select of 组长 / 经理 who must approve before the task
+	// can be handed to the developer. Empty = legacy direct assign (no
+	// gating). Any non-empty list puts the task into pending_review and
+	// requires ALL reviewers to approve.
+	ReviewerIDs []int64 `json:"reviewer_ids"`
+	// Reviewer decision body (used by /review). "approved" or "rejected".
+	Decision string `json:"decision"`
 }
 
-// AssignCoordTask moves a `pending` task to `in_progress` and records who
-// the developer is. If the task was already in_progress we still allow
-// reassigning (without a state change) — projects get juggled.
+// AssignCoordTask routes the task to development. Two variants:
+//
+//  1. Direct (legacy) — caller sends assignee_id only, no reviewer_ids.
+//     Task jumps straight from pending → in_progress, assignee set,
+//     started_at stamped, developer pinged. Same as before.
+//
+//  2. Review-gated — caller sends assignee_id plus reviewer_ids=[…].
+//     Task moves pending → pending_review. We record pending_assignee_id
+//     (who it *will* go to once approved), wipe any previous reviewer
+//     rows, insert one coord_task_reviewers row per listed reviewer with
+//     decision='pending', and notify each reviewer. The actual assignee_id
+//     stays zero / unchanged until the final approval promotes it.
+//
+// Reassigning an already in_progress task (moving it to a different dev)
+// still works direct, no review — changing hands mid-development is an
+// ops fix, not a new work item.
 func AssignCoordTask(c *gin.Context) {
 	id := parseInt64Param(c, "id")
 	var body transitionBody
@@ -709,13 +759,10 @@ func AssignCoordTask(c *gin.Context) {
 	if !ok {
 		return
 	}
-	// Assignment is a creator-side decision — the developer shouldn't be
-	// re-routing their own task to someone else.
 	if !requireCreatorOrAdmin(c, t, "分配任务") {
 		return
 	}
 
-	// Look up the name for the timeline
 	var assignName string
 	if err := db.DB.QueryRow("SELECT name FROM users WHERE id = $1", body.AssigneeID).Scan(&assignName); err != nil && err != sql.ErrNoRows {
 		log.Printf("[coord] AssignCoordTask(%d) assignee lookup failed: %v", id, err)
@@ -725,25 +772,53 @@ func AssignCoordTask(c *gin.Context) {
 		return
 	}
 
+	// De-duplicate + validate reviewer ids. The creator can't be their
+	// own reviewer (defeats the gate-keeping purpose), and the chosen
+	// developer can't review the request to work on themselves.
 	uid, uname := currentUser(c)
-	now := time.Now().UTC()
+	reviewerIDs := sanitizeReviewerIDs(body.ReviewerIDs, uid, body.AssigneeID)
 
-	// First-time assignment moves from pending → in_progress and stamps
-	// started_at. A subsequent reassignment stays in_progress.
+	// Review-gated path — available from the initial 'pending' state
+	// and from 'pending_review' (resend after a reviewer rejected).
+	// Reassigning an already in-progress task bypasses the gate; the
+	// original assignment is already approved.
+	if len(reviewerIDs) > 0 && (t.Status == coordStatusPending || t.Status == coordStatusPendingReview) {
+		if err := startReviewFlow(c, id, t, uid, uname, body, assignName, reviewerIDs); err != nil {
+			log.Printf("[coord] startReviewFlow(%d) failed: %v", id, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "送审失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status": coordStatusPendingReview}})
+		return
+	}
+
+	now := time.Now().UTC()
 	var newStatus string
-	if t.Status == coordStatusPending {
+	if t.Status == coordStatusPending || t.Status == coordStatusPendingReview {
+		// Direct assign (no reviewers requested) from either of the two
+		// pre-dev states. Wipe any leftover reviewer rows + pending_*
+		// columns so the task doesn't display stale review data.
 		newStatus = coordStatusInProgress
-		_, err := db.DB.Exec(
+		res, err := db.DB.Exec(
 			`UPDATE coordination_tasks
-			 SET assignee_id = $1, status = $2, started_at = $3
-			 WHERE id = $4 AND status = $5`,
-			body.AssigneeID, newStatus, now, id, t.Status)
+			 SET assignee_id = $1, status = $2, started_at = $3,
+			     pending_assignee_id = 0, pending_assign_note = ''
+			 WHERE id = $4 AND (status = $5 OR status = $6)`,
+			body.AssigneeID, newStatus, now, id, coordStatusPending, coordStatusPendingReview)
 		if err != nil {
 			log.Printf("[coord] AssignCoordTask(%d) update failed: %v", id, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "分配失败"})
 			return
 		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "任务状态已变更，请刷新后重试"})
+			return
+		}
+		// Clean up leftover reviewer rows from a prior (cancelled) review.
+		db.DB.Exec(`DELETE FROM coord_task_reviewers WHERE task_id = $1`, id)
 	} else {
+		// In-flight reassignment (in_progress, awaiting_answer). State
+		// unchanged, only swap assignee.
 		newStatus = t.Status
 		_, err := db.DB.Exec(
 			`UPDATE coordination_tasks SET assignee_id = $1 WHERE id = $2`,
@@ -761,13 +836,249 @@ func AssignCoordTask(c *gin.Context) {
 	}
 	recordEvent(id, "assign", t.Status, newStatus, uid, uname, note)
 	WriteAuditLog(c, "coord_assign", "coordination_task", fmt.Sprintf("%d", id), assignName)
-	// Ping the new assignee — this is the "task handed to you" moment.
-	// Refresh the in-memory copy so the notification carries the latest
-	// assignee_id / status (caller may have changed them above).
 	t.AssigneeID = body.AssigneeID
 	t.Status = newStatus
 	notifyCoord(body.AssigneeID, "🛠 新协同任务", t, fmt.Sprintf("由 %s 分配", uname))
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status": newStatus}})
+}
+
+// sanitizeReviewerIDs dedups the incoming list and strips out the creator
+// and the proposed assignee — neither may review the request.
+func sanitizeReviewerIDs(ids []int64, creatorID, assigneeID int64) []int64 {
+	seen := map[int64]bool{}
+	out := make([]int64, 0, len(ids))
+	for _, r := range ids {
+		if r <= 0 || r == creatorID || r == assigneeID || seen[r] {
+			continue
+		}
+		seen[r] = true
+		out = append(out, r)
+	}
+	return out
+}
+
+// startReviewFlow transitions a pending task into pending_review, wiping
+// any prior reviewer rows, stamping pending_assignee_id + pending_assign_note,
+// inserting one reviewer row per id, and notifying each reviewer.
+func startReviewFlow(c *gin.Context, taskID int64, t *coordTask, uid int64, uname string, body transitionBody, assigneeName string, reviewerIDs []int64) error {
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.Exec(
+		`UPDATE coordination_tasks
+		 SET status = $1, pending_assignee_id = $2, pending_assign_note = $3
+		 WHERE id = $4 AND (status = $5 OR status = $6)`,
+		coordStatusPendingReview, body.AssigneeID, body.Note, taskID,
+		coordStatusPending, coordStatusPendingReview)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("task status changed before we could lock it")
+	}
+	if _, err := tx.Exec(`DELETE FROM coord_task_reviewers WHERE task_id = $1`, taskID); err != nil {
+		return err
+	}
+	for _, rid := range reviewerIDs {
+		if _, err := tx.Exec(
+			`INSERT INTO coord_task_reviewers (task_id, reviewer_id, decision)
+			 VALUES ($1, $2, 'pending')`, taskID, rid); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	summary := fmt.Sprintf("送审 · 拟派 %s · %d 位审核人", assigneeName, len(reviewerIDs))
+	if body.Note != "" {
+		summary += " · " + body.Note
+	}
+	recordEvent(taskID, "review_submit", t.Status, coordStatusPendingReview, uid, uname, summary)
+	WriteAuditLog(c, "coord_submit_review", "coordination_task", fmt.Sprintf("%d", taskID), assigneeName)
+
+	// Notify each reviewer — copy t so we don't mutate the caller's view.
+	snapshot := *t
+	snapshot.Status = coordStatusPendingReview
+	for _, rid := range reviewerIDs {
+		notifyCoord(rid, "👀 协同任务待审核", &snapshot, fmt.Sprintf("%s 送来一项任务待你审核，拟派 %s", uname, assigneeName))
+	}
+	return nil
+}
+
+// loadCoordReviewers returns the reviewer roster + each decision for a
+// given task, ordered by created_at so the timeline feels stable.
+func loadCoordReviewers(taskID int64) ([]coordReviewer, error) {
+	rows, err := db.DB.Query(
+		`SELECT r.id, r.task_id, r.reviewer_id, COALESCE(u.name,''), COALESCE(d.name,''),
+		        r.decision, COALESCE(r.decision_note,''), r.decided_at, r.created_at
+		 FROM coord_task_reviewers r
+		 LEFT JOIN users u ON u.id = r.reviewer_id
+		 LEFT JOIN departments d ON d.id = u.department_id
+		 WHERE r.task_id = $1
+		 ORDER BY r.created_at ASC, r.id ASC`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []coordReviewer{}
+	for rows.Next() {
+		var r coordReviewer
+		var decidedAt sql.NullString
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.ReviewerID, &r.ReviewerName, &r.ReviewerDept,
+			&r.Decision, &r.DecisionNote, &decidedAt, &r.CreatedAt); err != nil {
+			continue
+		}
+		if decidedAt.Valid {
+			r.DecidedAt = &decidedAt.String
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// SubmitCoordReviewerDecision is called by a 组长 / 经理 clicking 同意 or 拒绝
+// on a task they were added as reviewer for. When the LAST pending reviewer
+// approves the task auto-promotes to in_progress and pings the dev. A
+// reject locks the task in pending_review until the creator re-submits.
+func SubmitCoordReviewerDecision(c *gin.Context) {
+	id := parseInt64Param(c, "id")
+	var body transitionBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "参数错误"})
+		return
+	}
+	decision := strings.ToLower(strings.TrimSpace(body.Decision))
+	if decision != "approved" && decision != "rejected" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "decision 必须是 approved 或 rejected"})
+		return
+	}
+	if decision == "rejected" && strings.TrimSpace(body.Note) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "拒绝时请填写理由"})
+		return
+	}
+
+	t, ok := assertEditable(c, id)
+	if !ok {
+		return
+	}
+	if t.Status != coordStatusPendingReview {
+		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "只有「待审核」的任务才能审批"})
+		return
+	}
+
+	uid, uname := currentUser(c)
+
+	// Caller must be on the reviewer roster, and their row must still be
+	// pending (no re-voting after they've already decided).
+	var rowID int64
+	var currentDecision string
+	err := db.DB.QueryRow(
+		`SELECT id, decision FROM coord_task_reviewers
+		 WHERE task_id = $1 AND reviewer_id = $2`, id, uid).Scan(&rowID, &currentDecision)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusForbidden, gin.H{"code": -1, "error": "你不在该任务的审核人列表里"})
+		return
+	}
+	if err != nil {
+		log.Printf("[coord] SubmitCoordReviewerDecision(%d) reviewer lookup failed: %v", id, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "加载失败"})
+		return
+	}
+	if currentDecision != "pending" {
+		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "你已经审核过，不可重复操作"})
+		return
+	}
+
+	// Flip the reviewer row. Keep the WHERE decision='pending' for
+	// belt-and-suspenders concurrency (two tabs, same reviewer, racing clicks).
+	now := time.Now().UTC()
+	res, err := db.DB.Exec(
+		`UPDATE coord_task_reviewers
+		 SET decision = $1, decision_note = $2, decided_at = $3
+		 WHERE id = $4 AND decision = 'pending'`,
+		decision, body.Note, now, rowID)
+	if err != nil {
+		log.Printf("[coord] SubmitCoordReviewerDecision(%d) update failed: %v", id, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "审核失败"})
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "该审核已被处理，请刷新"})
+		return
+	}
+
+	// Timeline + audit log.
+	eventType := "review_approve"
+	verb := "同意"
+	if decision == "rejected" {
+		eventType = "review_reject"
+		verb = "拒绝"
+	}
+	noteForTimeline := verb
+	if body.Note != "" {
+		noteForTimeline = verb + "：" + body.Note
+	}
+	recordEvent(id, eventType, coordStatusPendingReview, coordStatusPendingReview, uid, uname, noteForTimeline)
+	WriteAuditLog(c, "coord_review_"+decision, "coordination_task", fmt.Sprintf("%d", id), body.Note)
+
+	// Recount remaining pending reviewers. If this was a reject, the
+	// task stays in pending_review regardless — the creator must act
+	// (cancel + resend, or edit the issue).
+	if decision == "rejected" {
+		// Ping the creator so they know the review came back with a concern.
+		notifyCoord(t.CreatedBy, "❌ 协同任务被拒绝", t, fmt.Sprintf("%s 拒绝：%s", uname, body.Note))
+		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status": coordStatusPendingReview, "promoted": false}})
+		return
+	}
+
+	// Approved: does any row still read 'pending' or 'rejected'?
+	var remainingPending, anyRejected int
+	db.DB.QueryRow(
+		`SELECT
+		   COUNT(*) FILTER (WHERE decision = 'pending'),
+		   COUNT(*) FILTER (WHERE decision = 'rejected')
+		 FROM coord_task_reviewers WHERE task_id = $1`, id).Scan(&remainingPending, &anyRejected)
+
+	if remainingPending > 0 || anyRejected > 0 {
+		// Not the last approval — ping the creator as a progress update
+		// but leave the task in pending_review for now.
+		notifyCoord(t.CreatedBy, "✅ 审核人同意", t, fmt.Sprintf("%s 同意（还剩 %d 位待审核）", uname, remainingPending))
+		c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status": coordStatusPendingReview, "promoted": false}})
+		return
+	}
+
+	// All reviewers approved — auto-promote to in_progress, copy the
+	// pending_assignee_id over to assignee_id, stamp started_at.
+	promoteRes, err := db.DB.Exec(
+		`UPDATE coordination_tasks
+		 SET status = $1, assignee_id = pending_assignee_id, started_at = $2,
+		     pending_assignee_id = 0, pending_assign_note = ''
+		 WHERE id = $3 AND status = $4`,
+		coordStatusInProgress, now, id, coordStatusPendingReview)
+	if err != nil || promoteRes == nil {
+		log.Printf("[coord] SubmitCoordReviewerDecision(%d) promote failed: %v", id, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "审核保存成功但推送给开发失败，请刷新"})
+		return
+	}
+	if n, _ := promoteRes.RowsAffected(); n == 0 {
+		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "任务状态已变更，请刷新后重试"})
+		return
+	}
+
+	recordEvent(id, "assign", coordStatusPendingReview, coordStatusInProgress, uid, uname,
+		fmt.Sprintf("全体审核人同意，任务自动推给 %s", t.PendingAssigneeName))
+
+	// Reload so the Telegram notification carries the final assignee_id.
+	updated, err := loadCoordTask(id)
+	if err == nil && updated != nil {
+		notifyCoord(updated.AssigneeID, "🛠 新协同任务", updated, "所有审核人已同意，任务已分配给你")
+		notifyCoord(updated.CreatedBy, "✅ 任务已进入开发", updated, "所有审核人已同意，任务已推给开发")
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"status": coordStatusInProgress, "promoted": true}})
 }
 
 // SubmitCoordTask is the "修改完毕" button — developer marks the fix as
@@ -1220,6 +1531,7 @@ func CoordStats(c *gin.Context) {
 
 	counts := map[string]int{
 		coordStatusPending:        0,
+		coordStatusPendingReview:  0,
 		coordStatusInProgress:     0,
 		coordStatusAwaitingAnswer: 0,
 		coordStatusUnderReview:    0,

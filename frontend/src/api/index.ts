@@ -349,6 +349,8 @@ const api = {
   coordUpdateTask: (id: Id, data: Record<string, any>) => instance.put(`/v1/coord/tasks/${id}`, data),
   coordDeleteTask: (id: Id) => instance.delete(`/v1/coord/tasks/${id}`),
   coordAssignTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/assign`, data),
+  // 组长 / 经理审核 — approve or reject a pending_review task.
+  coordReviewDecision: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/review`, data),
   coordSubmitTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/submit`, data),
   coordVerifyTask: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/verify`, data),
   coordAddComment: (id: Id, data: Record<string, any>) => instance.post(`/v1/coord/tasks/${id}/comments`, data),
