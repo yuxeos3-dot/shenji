@@ -182,7 +182,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from "vue"
-import * as api from "../api"
+import api from "../api"
 import { copyToClipboard } from "../utils/clipboard"
 
 const props = defineProps<{
