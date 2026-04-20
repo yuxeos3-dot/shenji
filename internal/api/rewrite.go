@@ -155,7 +155,11 @@ func callRewriteAI(apiURL, apiKey, model, prompt string) (interface{}, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	// Cap at 10 MB — every other AI-proxy handler in this codebase uses
+	// the same ceiling, and a legitimate rewrite response is always
+	// a small JSON array (3 versions × ~2 KB). An unbounded ReadAll
+	// would OOM the process if the provider flooded us with junk.
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 
 	var apiResp struct {
 		Choices []struct {

@@ -181,15 +181,18 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	// Consume the invite code only if one was actually supplied &
-	// matched. Blank submissions leave the CSV untouched.
-	if matched != "" {
-		consumeInviteCode(matched)
-	}
-
 	if err := tx.Commit(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "注册失败"})
 		return
+	}
+
+	// Consume the invite code ONLY after the user row is durably
+	// committed. Previously we consumed before tx.Commit — settings
+	// updates aren't part of the tx, so a commit failure would have
+	// burned a valid code without creating the user, leaving the
+	// candidate locked out with no way forward.
+	if matched != "" {
+		consumeInviteCode(matched)
 	}
 
 	WriteAuditLogAnonymous(c, "register", "user", fmt.Sprintf("%d", newID), req.EmployeeID)

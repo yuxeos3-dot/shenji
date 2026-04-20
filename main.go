@@ -496,7 +496,11 @@ func main() {
 			coord.DELETE("/tasks/:id/test-pages/:page_id", api.RequirePermission("coord.test_pages"), api.DeleteCoordTestPage)
 			coord.POST("/tasks/:id/test-pages/:page_id/fetch", api.RequirePermission("coord.test_pages"), api.FetchCoordTestPage)
 			coord.GET("/tasks/:id/test-pages/:page_id/source", api.RequirePermission("coord.view"), api.GetCoordTestPageSource)
-			coord.POST("/tasks/:id/pre-audit", api.RequirePermission("coord.pre_audit"), api.PreAuditCoordTask)
+			// Pre-audit runs a full AI call against the attached test-page
+			// HTML — expensive, paid per-user. Rate-limit to 3/min so a
+			// stuck refresh loop or accidental double-click can't blow
+			// through a user's quota.
+			coord.POST("/tasks/:id/pre-audit", api.RequirePermission("coord.pre_audit"), middleware.UserRateLimit(3), api.PreAuditCoordTask)
 			coord.POST("/tasks/:id/reject", api.RequirePermission("coord.reject"), api.RejectCoordTask)
 		}
 
@@ -538,7 +542,10 @@ func main() {
 			// Per-keyword async AI writing workflow (both GEO + ExtLink
 			// share this backend; differentiate via content_type in the
 			// request body). Returns job id immediately, frontend polls.
-			geo.POST("/keyword/workflow/start", api.RequirePermission("geo.workflow"), api.GeoStartKeywordWorkflow)
+			// Keyword workflow kicks a multi-step AI pipeline per keyword
+			// (draft → refine → publish). Same rate limit rationale as
+			// coord pre-audit above — per-user AI quota protection.
+			geo.POST("/keyword/workflow/start", api.RequirePermission("geo.workflow"), middleware.UserRateLimit(5), api.GeoStartKeywordWorkflow)
 			geo.GET("/keyword/workflow/jobs", api.RequirePermission("geo.view"), api.GeoListWorkflowJobs)
 			geo.GET("/keyword/workflow/:id", api.RequirePermission("geo.view"), api.GeoGetWorkflowJob)
 			geo.POST("/keyword/workflow/:id/apply", api.RequirePermission("geo.workflow"), api.GeoApplyWorkflowJob)

@@ -138,7 +138,7 @@
                   </template>
                 </el-table-column>
                 <el-table-column prop="created_at" label="添加时间" width="160">
-                  <template #default="{ row }"><span class="date-text">{{ row.created_at }}</span></template>
+                  <template #default="{ row }"><span class="date-text">{{ fmtTime(row.created_at) }}</span></template>
                 </el-table-column>
                 <el-table-column label="操作" width="360" fixed="right">
                   <template #default="{ row }">
@@ -185,7 +185,7 @@
             </template>
           </el-table-column>
           <el-table-column prop="created_at" label="添加时间" width="160">
-            <template #default="{ row }"><span class="date-text">{{ row.created_at }}</span></template>
+            <template #default="{ row }"><span class="date-text">{{ fmtTime(row.created_at) }}</span></template>
           </el-table-column>
           <el-table-column label="操作" width="360" fixed="right">
             <template #default="{ row }">
@@ -263,6 +263,17 @@ import { useUserStore } from '../stores/user'
 import api from '../api'
 
 const userStore = useUserStore()
+
+// fmtTime renders RFC3339 (backend always returns UTC) as local
+// YYYY-MM-DD HH:mm for the site list's 添加时间 column. Falls back to
+// raw string for unparsable input so we never blank out the cell.
+function fmtTime(s) {
+  if (!s) return '—'
+  const d = new Date(s)
+  if (isNaN(d.getTime())) return s
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 const sites = ref([])
 const loading = ref(false)

@@ -551,7 +551,7 @@ func RejectCoordTask(c *gin.Context) {
 		return
 	}
 
-	_, err := db.DB.Exec(
+	res, err := db.DB.Exec(
 		`UPDATE coordination_tasks
 		 SET status = $1, submitted_at = NULL, pre_audit_verdict = '', pre_audit_result = ''
 		 WHERE id = $2 AND status = $3`,
@@ -559,6 +559,10 @@ func RejectCoordTask(c *gin.Context) {
 	if err != nil {
 		log.Printf("[coord] RejectCoordTask(%d) update failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "打回失败"})
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "任务状态已变更，请刷新后重试"})
 		return
 	}
 	_, uname := currentUser(c)

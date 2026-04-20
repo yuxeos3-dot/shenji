@@ -796,7 +796,7 @@ func SubmitCoordTask(c *gin.Context) {
 
 	uid, uname := currentUser(c)
 	now := time.Now().UTC()
-	_, err := db.DB.Exec(
+	res, err := db.DB.Exec(
 		`UPDATE coordination_tasks
 		 SET status = $1, submitted_at = $2
 		 WHERE id = $3 AND (status = $4 OR status = $5)`,
@@ -804,6 +804,13 @@ func SubmitCoordTask(c *gin.Context) {
 	if err != nil {
 		log.Printf("[coord] SubmitCoordTask(%d) update failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "提交失败"})
+		return
+	}
+	// Optimistic-lock loss: another admin flipped this task state in
+	// the ~ms window between our load and our UPDATE. Bail cleanly
+	// with 409 rather than write a phantom timeline + Telegram ping.
+	if n, _ := res.RowsAffected(); n == 0 {
+		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "任务状态已变更，请刷新后重试"})
 		return
 	}
 	recordEvent(id, "submit", t.Status, coordStatusUnderReview, uid, uname, body.Note)
@@ -854,7 +861,7 @@ func VerifyCoordTask(c *gin.Context) {
 
 	uid, uname := currentUser(c)
 	now := time.Now().UTC()
-	_, err := db.DB.Exec(
+	res, err := db.DB.Exec(
 		`UPDATE coordination_tasks
 		 SET status = $1, verified_at = $2
 		 WHERE id = $3 AND status = $4`,
@@ -862,6 +869,10 @@ func VerifyCoordTask(c *gin.Context) {
 	if err != nil {
 		log.Printf("[coord] VerifyCoordTask(%d) update failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "验收失败"})
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "任务状态已变更，请刷新后重试"})
 		return
 	}
 	recordEvent(id, "verify", coordStatusUnderReview, coordStatusDone, uid, uname, body.Note)
@@ -904,13 +915,17 @@ func AskCoordTask(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "只有「开发中」的任务才能发起提问"})
 		return
 	}
-	_, err := db.DB.Exec(
+	res, err := db.DB.Exec(
 		`UPDATE coordination_tasks SET status = $1
 		 WHERE id = $2 AND status = $3`,
 		coordStatusAwaitingAnswer, id, coordStatusInProgress)
 	if err != nil {
 		log.Printf("[coord] AskCoordTask(%d) update failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "提交失败"})
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "任务状态已变更，请刷新后重试"})
 		return
 	}
 	recordEvent(id, "ask", coordStatusInProgress, coordStatusAwaitingAnswer, uid, uname, body.Note)
@@ -953,13 +968,17 @@ func AnswerCoordTask(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "只有「待回复」的任务才能回复"})
 		return
 	}
-	_, err := db.DB.Exec(
+	res, err := db.DB.Exec(
 		`UPDATE coordination_tasks SET status = $1
 		 WHERE id = $2 AND status = $3`,
 		coordStatusInProgress, id, coordStatusAwaitingAnswer)
 	if err != nil {
 		log.Printf("[coord] AnswerCoordTask(%d) update failed: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "回复失败"})
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "任务状态已变更，请刷新后重试"})
 		return
 	}
 	recordEvent(id, "answer", coordStatusAwaitingAnswer, coordStatusInProgress, uid, uname, body.Note)
