@@ -34,7 +34,8 @@ func main() {
 
 	// Initialize database
 	db.Init()
-n	// Create the DI-aware server. New handlers should be methods on srv
+
+	// Create the DI-aware server. New handlers should be methods on srv
 	// (e.g. auth.GET("/me", srv.GetMe)). Existing package-level handlers
 	// continue to work unchanged via the db.DB global.
 	_ = api.DefaultServer()
