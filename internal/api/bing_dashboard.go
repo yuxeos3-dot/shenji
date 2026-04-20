@@ -388,9 +388,15 @@ func BingSiteDetail(c *gin.Context) {
 	}
 	wg.Wait()
 
-	if errs["queries"] != "" {
-		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "error": "Bing API: " + errs["queries"]})
-		return
+	// Don't 502 on a single sub-endpoint failure — return whatever we
+	// got plus a per-endpoint error map so the frontend can render
+	// partial data ("the queries succeeded but pages failed because
+	// rate-limit") instead of just blanking the whole page.
+	// `friendlyBingError` runs over each error string so the frontend
+	// gets the same actionable text the overview cards use.
+	friendlyErrs := make(map[string]string, len(errs))
+	for k, v := range errs {
+		friendlyErrs[k] = friendlyBingError(v, nil)
 	}
 
 	go saveBingOverviewAsSync(siteURL, ed, result["queries"])
@@ -404,7 +410,7 @@ func BingSiteDetail(c *gin.Context) {
 		"crawl":      result["crawl"],
 		"index":      result["index"],
 		"errors":     result["errors"],
-		"api_errors": errs,
+		"api_errors": friendlyErrs,
 	}})
 }
 

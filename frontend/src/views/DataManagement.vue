@@ -142,6 +142,17 @@
         <div class="err-title">❌ {{ error }}</div>
       </div>
       <template v-else>
+        <!-- Per-sub-endpoint warning banner (e.g. Bing GetPageStats failed
+             but GetQueryStats succeeded). Lets the user understand why
+             a particular section is empty rather than wonder if it broke. -->
+        <div v-if="apiErrors" class="api-errors-banner">
+          <div class="aeb-title">⚠️ 部分数据接口调用失败，已展示能拿到的数据：</div>
+          <ul class="aeb-list">
+            <li v-for="(msg, name) in apiErrors" :key="name">
+              <span class="aeb-name">{{ name }}</span>：{{ msg }}
+            </li>
+          </ul>
+        </div>
         <div class="kpi-strip">
           <div v-for="kpi in detailKPIs" :key="kpi.label" class="panel kpi-card">
             <div class="kpi-label">{{ kpi.label }}</div>
@@ -323,6 +334,12 @@ const hasLagWarning = computed(() => {
 const view = ref<'overview' | 'detail'>('overview')
 const loading = ref(false)
 const error = ref('')
+// Per-sub-endpoint errors from the Bing detail handler. Format:
+// { queries: "...", pages: "...", crawl: "..." }. Rendered as a yellow
+// banner above the data tables so the user sees why some sections
+// might be missing data ("the queries call succeeded but pages got
+// rate-limited") instead of blank tables with no explanation.
+const apiErrors = ref<Record<string, string> | null>(null)
 
 const overview = reactive({ cards: [] as any[] })
 const detail = reactive({
@@ -470,11 +487,13 @@ function openDetail(c: any) {
 function backToOverview() {
   view.value = 'overview'
   error.value = ''
+  apiErrors.value = null
 }
 
 async function loadDetail(siteKey: string, siteName: string) {
   loading.value = true
   error.value = ''
+  apiErrors.value = null
   detail.siteKey = siteKey
   detail.siteName = siteName
   detail.kpis = {}
@@ -594,12 +613,21 @@ function digestGA(d: any) {
 }
 
 function digestBing(d: any) {
-  const rows = d.queries?.d || []
+  // Bing detail handler now returns 200 even on partial failure with
+  // api_errors[name] = friendly message. Surface those into the
+  // shared apiErrors ref so the template can render a per-endpoint
+  // banner instead of the user staring at empty tables.
+  apiErrors.value = d.api_errors && Object.keys(d.api_errors).length ? d.api_errors : null
+  // Position field name varies (AvgImpressionPosition vs AvgClickPosition);
+  // fall back so newly-added accounts don't render zero everywhere.
+  const posOf = (r: any) => Number(r?.AvgImpressionPosition || r?.AvgClickPosition || 0)
+  const rows = (d.queries?.d || []).filter((r: any) => r && typeof r === 'object')
   let clicks = 0, impr = 0, wPos = 0
   rows.forEach((r: any) => {
-    clicks += r.Clicks || 0
-    impr += r.Impressions || 0
-    wPos += (r.AvgImpressionPosition || 0) * (r.Impressions || 0)
+    const c = Number(r.Clicks || 0)
+    const i = Number(r.Impressions || 0)
+    clicks += c; impr += i
+    wPos += posOf(r) * i
   })
   detail.kpis = {
     clicks, impressions: impr,
@@ -608,16 +636,16 @@ function digestBing(d: any) {
   }
   detail.keywords = rows.slice(0, 20).map((r: any) => ({
     query: r.Query || '',
-    clicks: r.Clicks || 0, impressions: r.Impressions || 0,
-    ctr: r.Impressions ? r.Clicks / r.Impressions : 0,
-    position: r.AvgImpressionPosition || 0,
+    clicks: Number(r.Clicks || 0), impressions: Number(r.Impressions || 0),
+    ctr: r.Impressions ? Number(r.Clicks || 0) / Number(r.Impressions) : 0,
+    position: posOf(r),
   }))
-  const pages = d.pages?.d || []
+  const pages = (d.pages?.d || []).filter((r: any) => r && typeof r === 'object')
   detail.pages = pages.slice(0, 20).map((r: any) => ({
     page: r.Page || r.Url || '',
-    clicks: r.Clicks || 0, impressions: r.Impressions || 0,
-    ctr: r.Impressions ? r.Clicks / r.Impressions : 0,
-    position: r.AvgImpressionPosition || 0,
+    clicks: Number(r.Clicks || 0), impressions: Number(r.Impressions || 0),
+    ctr: r.Impressions ? Number(r.Clicks || 0) / Number(r.Impressions) : 0,
+    position: posOf(r),
   }))
   detail.trendRows = []; detail.devices = []; detail.countries = []
 }
@@ -823,6 +851,12 @@ onMounted(() => { loadOverview() })
 .state-empty,
 .state-error { padding:60px 20px; text-align:center; color:var(--ink-hint); font-size:14px; }
 .state-error { color:#B91C1C; }
+
+.api-errors-banner { background:#FFFBEB; border:1.5px solid #FCD34D; border-radius:var(--r-sm); padding:12px 16px; margin-bottom:14px; }
+.aeb-title { font-size:13px; font-weight:800; color:#92400E; margin-bottom:6px; }
+.aeb-list { margin:0; padding-left:18px; }
+.aeb-list li { font-size:12.5px; color:#713F12; line-height:1.6; }
+.aeb-name { font-family:'JetBrains Mono', monospace; background:#FEF3C7; padding:1px 6px; border-radius:4px; margin-right:4px; font-weight:700; }
 .err-title { font-size:15px; font-weight:700; margin-bottom:6px; }
 .err-hint { font-size:12px; color:var(--ink-hint); }
 </style>
