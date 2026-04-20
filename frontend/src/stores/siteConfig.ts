@@ -4,7 +4,7 @@ import api from '../api'
 
 // Version bumps: update this whenever a release is cut. Shown in the sidebar
 // footer + login page so operators can confirm what's deployed.
-export const APP_VERSION = 'v12.8'
+export const APP_VERSION = 'v13.2'
 
 /**
  * siteConfig holds globally-visible UI strings (window title, sidebar logo,
