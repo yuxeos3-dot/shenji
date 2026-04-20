@@ -397,7 +397,7 @@ async function hideCard(c: any) {
   const label = c.display_name || key
   try {
     await ElMessageBox.confirm(
-      `将「${label}」从「${platformLabel.value}」总览中隐藏？可在其他用户看到，只影响你自己的视图。`,
+      `确认将「${label}」从「${platformLabel.value}」总览中隐藏？隐藏后下次登录也不会再出现，除非在平台重新授权。`,
       '隐藏站点',
       { type: 'warning', confirmButtonText: '隐藏', cancelButtonText: '取消' }
     )
