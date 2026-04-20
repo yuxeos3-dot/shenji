@@ -12,6 +12,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -151,28 +152,51 @@ func BingOverview(c *gin.Context) {
 				cards[idx] = cd
 				return
 			}
-			// Bing returns {"d":[{"Clicks":N,"Impressions":M,"AvgImpressionPosition":P,...}, ...]}
-			// Each row is per-keyword; sum for site totals.
-			var r struct {
-				D []struct {
-					Clicks                float64 `json:"Clicks"`
-					Impressions           float64 `json:"Impressions"`
-					AvgImpressionPosition float64 `json:"AvgImpressionPosition"`
-				} `json:"d"`
+			// Bing returns {"d":[{"Clicks":N,"Impressions":M,"AvgImpressionPosition"|"AvgClickPosition":P,
+			// "Date":"/Date(...)/", "__type":"...", "Query":"..."}, ...]}
+			//
+			// Two reasons we can't use a tight struct Unmarshal:
+			//   1. Which position field exists varies — some deployments
+			//      return AvgImpressionPosition, others only AvgClickPosition.
+			//   2. Dates come as Microsoft JSON date strings ("/Date(...)/");
+			//      if we bound them to a numeric field by mistake the whole
+			//      payload fails to parse.
+			// Solution: decode the envelope as RawMessage, then walk rows as
+			// generic maps — any per-field type mismatch is an ignored
+			// skip, not a full-payload abort.
+			var envelope struct {
+				D json.RawMessage `json:"d"`
 			}
-			if err := json.Unmarshal(raw, &r); err != nil {
-				// Not the expected {"d":[...]} shape — surface what Bing
-				// actually returned so the user can act on it instead of
-				// staring at a bare "解析失败".
+			if err := json.Unmarshal(raw, &envelope); err != nil {
+				cd.Error = friendlyBingError(string(raw), err)
+				cards[idx] = cd
+				return
+			}
+			if len(envelope.D) == 0 || string(envelope.D) == "null" {
+				// {"d":null} or {"d":[]} — site registered but no data for
+				// the date range; not an error, just blank numbers.
+				cards[idx] = cd
+				return
+			}
+			var rows []map[string]interface{}
+			if err := json.Unmarshal(envelope.D, &rows); err != nil {
 				cd.Error = friendlyBingError(string(raw), err)
 				cards[idx] = cd
 				return
 			}
 			var weightedPos float64
-			for _, row := range r.D {
-				cd.Clicks += row.Clicks
-				cd.Impressions += row.Impressions
-				weightedPos += row.AvgImpressionPosition * row.Impressions
+			for _, row := range rows {
+				clicks := asFloat(row["Clicks"])
+				imp := asFloat(row["Impressions"])
+				cd.Clicks += clicks
+				cd.Impressions += imp
+				// Position field name varies by Bing deployment. Prefer
+				// AvgImpressionPosition if present, else AvgClickPosition.
+				pos := asFloat(row["AvgImpressionPosition"])
+				if pos == 0 {
+					pos = asFloat(row["AvgClickPosition"])
+				}
+				weightedPos += pos * imp
 			}
 			if cd.Impressions > 0 {
 				cd.CTR = cd.Clicks / cd.Impressions
@@ -201,6 +225,33 @@ func BingOverview(c *gin.Context) {
 		"site_count": len(cards),
 		"cards":      cards,
 	}})
+}
+
+// asFloat coerces a generic interface{} (from a map parsed via
+// json.Unmarshal into map[string]interface{}) into a float64, accepting
+// either a numeric JSON value or a numeric string like "82". Anything
+// else (bool / nil / struct / malformed string) returns 0. Used by the
+// Bing overview parser so a single weird row doesn't nuke the whole
+// site card.
+func asFloat(v interface{}) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case int:
+		return float64(x)
+	case int64:
+		return float64(x)
+	case string:
+		if x == "" {
+			return 0
+		}
+		var f float64
+		// strconv would be overkill; Fprintf-round-trip via fmt.Sscanf.
+		if _, err := fmt.Sscanf(x, "%f", &f); err == nil {
+			return f
+		}
+	}
+	return 0
 }
 
 // friendlyBingError maps a Bing Webmaster API error (either a fetch
