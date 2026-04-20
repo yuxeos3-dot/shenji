@@ -63,6 +63,7 @@ type coordTask struct {
 	IssueSeverity   string  `json:"issue_severity"`
 	IssueModule     string  `json:"issue_module"`
 	IssueChapter    string  `json:"issue_chapter"`
+	IssueScope      string  `json:"issue_scope"` // 影响页面：全站 / 首页 / 详情页 / 列表页 / 等
 	IssueSnapshot   string  `json:"issue_snapshot"`
 	Note            string  `json:"note"`
 	Status          string  `json:"status"`
@@ -132,7 +133,8 @@ func loadCoordTask(id int64) (*coordTask, error) {
 	const q = `
 		SELECT t.id, t.site_id, COALESCE(s.name,''), COALESCE(s.domain,''),
 		       t.audit_task_id, t.issue_id, t.issue_title, t.issue_severity,
-		       t.issue_module, t.issue_chapter, t.issue_snapshot, t.note,
+		       t.issue_module, t.issue_chapter, COALESCE(t.issue_scope,''),
+		       t.issue_snapshot, t.note,
 		       t.status,
 		       t.created_by, COALESCE(u1.name,''), COALESCE(d1.name,''), COALESCE(g1.name,''),
 		       t.assignee_id, COALESCE(u2.name,''), COALESCE(d2.name,''), COALESCE(g2.name,''),
@@ -153,7 +155,8 @@ func loadCoordTask(id int64) (*coordTask, error) {
 	err := db.DB.QueryRow(q, id).Scan(
 		&t.ID, &t.SiteID, &t.SiteName, &t.SiteDomain,
 		&t.AuditTaskID, &t.IssueID, &t.IssueTitle, &t.IssueSeverity,
-		&t.IssueModule, &t.IssueChapter, &t.IssueSnapshot, &t.Note,
+		&t.IssueModule, &t.IssueChapter, &t.IssueScope,
+		&t.IssueSnapshot, &t.Note,
 		&t.Status,
 		&t.CreatedBy, &t.CreatorName, &t.CreatorDept, &t.CreatorGroup,
 		&t.AssigneeID, &t.AssigneeName, &t.AssigneeDept, &t.AssigneeGroup,
@@ -207,6 +210,74 @@ func currentUser(c *gin.Context) (int64, string) {
 		log.Printf("[coord] currentUser(%d) lookup failed: %v", uid, err)
 	}
 	return uid, name
+}
+
+// extractIssueScope pulls the "scope" field out of an issue snapshot
+// JSON blob. The audit pipeline (see ai/analyzer.go::V6Issue) stores
+// strings like "全站" / "首页" / "详情页" / "播放列表页" — that's the
+// "影响页面" the coordination list filters by. Returns empty string
+// for malformed JSON or missing field; the caller writes "" to DB.
+func extractIssueScope(snapshot string) string {
+	s := strings.TrimSpace(snapshot)
+	if s == "" || (s[0] != '{' && s[0] != '[') {
+		return ""
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		return ""
+	}
+	if v, ok := m["scope"].(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
+// BackfillCoordIssueScope runs once at startup (keyed by settings flag
+// `coord_scope_backfilled_v1`) and fills issue_scope for every old
+// coordination task created before the column existed.
+func BackfillCoordIssueScope() {
+	var done string
+	db.DB.QueryRow(`SELECT COALESCE(value,'') FROM settings WHERE key='coord_scope_backfilled_v1'`).Scan(&done)
+	if done == "1" {
+		return
+	}
+	rows, err := db.DB.Query(
+		`SELECT id, COALESCE(issue_snapshot,'') FROM coordination_tasks
+		 WHERE COALESCE(issue_scope,'') = ''`)
+	if err != nil {
+		log.Printf("[coord-backfill] list: %v", err)
+		return
+	}
+	type r struct {
+		id   int64
+		snap string
+	}
+	var todo []r
+	for rows.Next() {
+		var x r
+		if err := rows.Scan(&x.id, &x.snap); err == nil {
+			todo = append(todo, x)
+		}
+	}
+	rows.Close()
+	updated := 0
+	for _, x := range todo {
+		scope := extractIssueScope(x.snap)
+		if scope == "" {
+			continue
+		}
+		if _, err := db.DB.Exec(
+			`UPDATE coordination_tasks SET issue_scope = $1 WHERE id = $2`,
+			scope, x.id,
+		); err == nil {
+			updated++
+		}
+	}
+	db.DB.Exec(`INSERT INTO settings(key, value) VALUES('coord_scope_backfilled_v1','1')
+		ON CONFLICT(key) DO UPDATE SET value='1'`)
+	if updated > 0 {
+		log.Printf("[coord-backfill] filled issue_scope on %d task(s)", updated)
+	}
 }
 
 // parseInt64Param extracts a positive int64 route parameter, returning
@@ -321,15 +392,21 @@ func CreateCoordTask(c *gin.Context) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Extract scope ("影响页面" — 全站 / 首页 / 详情页 / 列表页 / etc.)
+	// from the issue_snapshot JSON so the list page can show + filter
+	// by it without re-parsing on every render. Store empty string if
+	// the snapshot doesn't carry a scope.
+	issueScope := extractIssueScope(req.IssueSnapshot)
+
 	var taskID int64
 	err := tx.QueryRow(
 		`INSERT INTO coordination_tasks
 		 (site_id, audit_task_id, issue_id, issue_title, issue_severity,
-		  issue_module, issue_chapter, issue_snapshot, note, status,
+		  issue_module, issue_chapter, issue_snapshot, issue_scope, note, status,
 		  created_by, assignee_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11) RETURNING id`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $12) RETURNING id`,
 		req.SiteID, req.AuditTaskID, req.IssueID, req.IssueTitle, req.IssueSeverity,
-		req.IssueModule, req.IssueChapter, req.IssueSnapshot, req.Note,
+		req.IssueModule, req.IssueChapter, req.IssueSnapshot, issueScope, req.Note,
 		uid, req.AssigneeID,
 	).Scan(&taskID)
 	if err != nil {
@@ -399,6 +476,13 @@ func ListCoordTasks(c *gin.Context) {
 		where = append(where, fmt.Sprintf("t.assignee_id = $%d", len(args)+1))
 		args = append(args, a)
 	}
+	// 影响页面筛选 — exact match against the extracted scope ("全站" /
+	// "首页" / "详情页" / etc.). Frontend gets the option list from the
+	// distinct values endpoint below.
+	if sc := strings.TrimSpace(c.Query("scope")); sc != "" {
+		where = append(where, fmt.Sprintf("COALESCE(t.issue_scope,'') = $%d", len(args)+1))
+		args = append(args, sc)
+	}
 	// Admin 协同管理 page filters: by 部门 / 组 / 姓名搜索. These scope
 	// by the ASSIGNEE's user profile — a 部门经理 wants "show me every
 	// task assigned to my people", not every task my team members created.
@@ -444,7 +528,8 @@ func ListCoordTasks(c *gin.Context) {
 	q := `
 		SELECT t.id, t.site_id, COALESCE(s.name,''), COALESCE(s.domain,''),
 		       t.audit_task_id, t.issue_id, t.issue_title, t.issue_severity,
-		       t.issue_module, t.issue_chapter, t.issue_snapshot, t.note,
+		       t.issue_module, t.issue_chapter, COALESCE(t.issue_scope,''),
+		       t.issue_snapshot, t.note,
 		       t.status,
 		       t.created_by, COALESCE(u1.name,''), COALESCE(d1.name,''), COALESCE(g1.name,''),
 		       t.assignee_id, COALESCE(u2.name,''), COALESCE(d2.name,''), COALESCE(g2.name,''),
@@ -486,7 +571,8 @@ func ListCoordTasks(c *gin.Context) {
 		if err := rows.Scan(
 			&t.ID, &t.SiteID, &t.SiteName, &t.SiteDomain,
 			&t.AuditTaskID, &t.IssueID, &t.IssueTitle, &t.IssueSeverity,
-			&t.IssueModule, &t.IssueChapter, &t.IssueSnapshot, &t.Note,
+			&t.IssueModule, &t.IssueChapter, &t.IssueScope,
+			&t.IssueSnapshot, &t.Note,
 			&t.Status,
 			&t.CreatedBy, &t.CreatorName, &t.CreatorDept, &t.CreatorGroup,
 			&t.AssigneeID, &t.AssigneeName, &t.AssigneeDept, &t.AssigneeGroup,
@@ -1051,6 +1137,33 @@ func DeleteCoordTask(c *gin.Context) {
 
 	WriteAuditLog(c, "coord_delete", "coordination_task", fmt.Sprintf("%d", id), t.IssueTitle)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "已删除"})
+}
+
+// ListCoordScopes returns the distinct issue_scope values currently in
+// use, sorted by frequency desc — populates the 影响页面 filter dropdown
+// on the coord list page. Empty / null scopes are skipped.
+func ListCoordScopes(c *gin.Context) {
+	rows, err := db.DB.Query(`
+		SELECT COALESCE(issue_scope,'') AS s, COUNT(*) AS n
+		FROM coordination_tasks
+		WHERE COALESCE(issue_scope,'') <> ''
+		GROUP BY s
+		ORDER BY n DESC, s ASC
+		LIMIT 50`)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
+		return
+	}
+	defer rows.Close()
+	out := []gin.H{}
+	for rows.Next() {
+		var s string
+		var n int
+		if err := rows.Scan(&s, &n); err == nil {
+			out = append(out, gin.H{"scope": s, "count": n})
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": out})
 }
 
 // ─── Stats / dashboard helper ───────────────────────────────────────────────

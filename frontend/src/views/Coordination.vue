@@ -64,6 +64,11 @@
         />
       </template>
 
+      <span class="filter-label" style="margin-left:16px">影响页面</span>
+      <el-select v-model="filter.scope" placeholder="全部页面" clearable style="width:160px" @change="reload">
+        <el-option v-for="s in scopes" :key="s.scope" :label="`${s.scope} (${s.count})`" :value="s.scope" />
+      </el-select>
+
       <button class="btn btn-sm refresh-btn" @click="reload" :disabled="loading">{{ loading ? '加载中...' : '↻ 刷新' }}</button>
     </div>
 
@@ -86,6 +91,7 @@
           <tr>
             <th style="width:72px">级别</th>
             <th>问题</th>
+            <th style="width:120px">影响页面</th>
             <th style="width:110px">状态</th>
             <th style="width:110px">分配给</th>
             <th style="width:160px">创建时间</th>
@@ -101,6 +107,10 @@
                 <span v-if="t.issue_module" class="mod-chip">{{ t.issue_module }}</span>
                 <span v-if="t.issue_chapter" class="chapter-chip">{{ t.issue_chapter }}</span>
               </div>
+            </td>
+            <td>
+              <span v-if="t.issue_scope" class="scope-chip">{{ t.issue_scope }}</span>
+              <span v-else class="scope-empty">—</span>
             </td>
             <td><span :class="['status-tag', statusClass(t.status)]">{{ statusLabel(t.status) }}</span></td>
             <td>{{ t.assignee_name || '—' }}</td>
@@ -144,7 +154,19 @@ const filter = ref({
   department_id: null,
   group_id: null,
   user_search: '',
+  scope: '',
 })
+
+// 影响页面 dropdown options come from /v1/coord/scopes — distinct
+// scope values + their counts. Refreshed once on mount and on every
+// reload so newly-created tasks with new scopes appear.
+const scopes = ref([])
+async function loadScopes() {
+  try {
+    const res = await api.coordListScopes()
+    scopes.value = res.data || []
+  } catch { /* ignore — filter just stays empty */ }
+}
 
 const departments = ref([])
 const groups = ref([])
@@ -237,6 +259,7 @@ async function reload() {
     if (filter.value.group_id) params.group_id = filter.value.group_id
     const q = String(filter.value.user_search || '').trim()
     if (q) params.user_search = q
+    if (filter.value.scope) params.scope = filter.value.scope
     const [tRes, sRes] = await Promise.all([
       api.coordListTasks(params),
       api.coordStats(filter.value.site_id ? { site_id: filter.value.site_id } : {}),
@@ -274,6 +297,7 @@ onMounted(async () => {
       groups.value = gRes.data || []
     } catch { /* ignore — filters just stay empty */ }
   }
+  await loadScopes()
   await reload()
 })
 </script>
@@ -317,6 +341,8 @@ onMounted(async () => {
 .title-cell .issue-title { font-size:13.5px; font-weight:700; color:var(--ink); margin-bottom:4px; }
 .title-cell .issue-sub { display:flex; gap:6px; }
 .mod-chip { font-size:10.5px; padding:1px 7px; background:#34495E; color:#ECF0F1; border-radius:3px; font-weight:700; }
+.scope-chip { display:inline-block; font-size:11.5px; padding:2px 10px; background:var(--sun-light); color:var(--sun-deep); border:1px solid var(--peach); border-radius:12px; font-weight:700; }
+.scope-empty { color:var(--ink-hint); font-size:13px; }
 .chapter-chip { font-size:10.5px; padding:1px 7px; background:var(--surface-3); color:var(--ink-soft); border-radius:3px; font-weight:600; }
 
 .status-tag { display:inline-block; padding:3px 9px; border-radius:12px; font-size:11px; font-weight:700; }

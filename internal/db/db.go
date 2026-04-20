@@ -678,6 +678,11 @@ func Init() {
 		// case-insensitive so HF001 and hf001 collide.
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_employee_id_ci ON users(LOWER(employee_id)) WHERE employee_id <> ''`,
 		`CREATE INDEX IF NOT EXISTS idx_users_register_status ON users(register_status)`,
+		// 协同任务 — 抽取 issue_snapshot 里的 scope 到独立列，避免每次
+		// 列表请求都解析 JSON。新建任务时由 CreateCoordTask 写入；老
+		// 行通过 perm_migrated_v6 一次性回填。
+		"DO $$ BEGIN ALTER TABLE coordination_tasks ADD COLUMN issue_scope TEXT DEFAULT ''; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		`CREATE INDEX IF NOT EXISTS idx_coord_issue_scope ON coordination_tasks(issue_scope) WHERE issue_scope <> ''`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {

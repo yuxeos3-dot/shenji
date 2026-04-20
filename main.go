@@ -43,6 +43,12 @@ func main() {
 	// on every subsequent boot.
 	api.MigrateLegacyPermissions()
 
+	// One-shot backfill: every existing coordination_tasks row gets its
+	// issue_scope column populated by parsing the stored issue_snapshot
+	// JSON. New rows are filled inline by CreateCoordTask. Idempotent
+	// via settings flag coord_scope_backfilled_v1.
+	api.BackfillCoordIssueScope()
+
 	// One-time migration of ALL global platform credentials (Telegram
 	// bot, Bing key, FRW apikey, OAuth client + access tokens) onto a
 	// designated per-user record (沈万三, fallback first-admin).
@@ -446,6 +452,7 @@ func main() {
 		coord := v1.Group("/coord")
 		{
 			coord.GET("/stats", api.RequirePermission("coord.view"), api.CoordStats)
+			coord.GET("/scopes", api.RequirePermission("coord.view"), api.ListCoordScopes)
 			coord.GET("/tasks", api.RequirePermission("coord.view"), api.ListCoordTasks)
 			coord.POST("/tasks", api.RequirePermission("coord.create"), api.CreateCoordTask)
 			coord.GET("/tasks/:id", api.RequirePermission("coord.view"), api.GetCoordTask)

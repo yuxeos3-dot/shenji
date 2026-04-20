@@ -336,6 +336,7 @@ const api = {
   // Coordination (协同管理)
   coordStats: (params?: Record<string, any>) => instance.get('/v1/coord/stats', { params }),
   coordListTasks: (params?: Record<string, any>) => instance.get('/v1/coord/tasks', { params }),
+  coordListScopes: () => instance.get('/v1/coord/scopes'),
   coordCreateTask: (data: Record<string, any>) => instance.post('/v1/coord/tasks', data),
   coordGetTask: (id: Id) => instance.get(`/v1/coord/tasks/${id}`),
   coordUpdateTask: (id: Id, data: Record<string, any>) => instance.put(`/v1/coord/tasks/${id}`, data),
