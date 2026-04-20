@@ -92,6 +92,10 @@ const api = {
   publicListGroups: (departmentID: number | string) =>
     instance.get('/auth/groups-public', { params: { department_id: departmentID } }),
   // Pending registration review (admin only — under /v1/users).
+  // Global Analytics / Strategy Intelligence
+  analyticsSnapshot: () => instance.get('/v1/admin/analytics/snapshot'),
+  analyticsAdvise: () => instance.post('/v1/admin/analytics/ai-advise', {}, { timeout: 180000 } as any),
+
   listPendingUsers: () => instance.get('/v1/users/pending'),
   approvePendingUser: (id: Id, data: Record<string, any>) =>
     instance.post(`/v1/users/${id}/approve`, data),

@@ -234,6 +234,10 @@ func main() {
 			admin.GET("/global-data", api.GetGlobalDataOverview)
 			// Detailed metrics require admin auth (security audit #15).
 			admin.GET("/metrics", api.Metrics)
+			// Strategy Intelligence — aggregated DB snapshot + AI
+			// advice over it. See internal/api/analytics.go.
+			admin.GET("/analytics/snapshot", api.GetAnalyticsSnapshot)
+			admin.POST("/analytics/ai-advise", api.RunAnalyticsAdvise)
 		}
 
 		// Organization structure — admin only. Matches the /users pattern

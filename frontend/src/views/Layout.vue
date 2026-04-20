@@ -190,6 +190,7 @@ const groups = [
     key: 'global-data', icon: '🌐', label: '全局数据', adminOnly: true,
     items: [
       { path: '/global-data', icon: '📈', label: '全局数据总览' },
+      { path: '/global-analytics', icon: '🧠', label: '全局数据分析' },
     ],
   },
   {
