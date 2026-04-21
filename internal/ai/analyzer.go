@@ -407,13 +407,13 @@ func BuildTechPromptBatch(batch TechBatch, domain string, sitePages []SitePageFo
 
 输出结构极简：
 
-{"chapters":[{"title":"一、TDK与基础Meta","issues":[{"id":1,"severity":"严重","module":"TDK","title":"首页description缺失","scope":"首页 https://example.com/","evidence_label":"首页 <head>","evidence_code":"<head>\n  <title>示例</title>\n</head>","current_status":"首页缺少 meta description","fix_suggestion":"在 <head> 中添加 <meta name=\"description\" content=\"...\">\n• 长度 120-160 字符\n• 每页唯一\n• 验收：用 GSC 覆盖率报告确认无缺失"}]}]}
+{"chapters":[{"title":"一、TDK与基础Meta","issues":[{"id":1,"severity":"严重","module":"TDK","title":"首页description缺失","scope":"首页 https://52tvdy.com/","evidence_label":"首页 <head>","evidence_code":"<head>\n  <title>示例</title>\n</head>","current_status":"首页缺少 meta description","fix_suggestion":"在 <head> 中添加 <meta name=\"description\" content=\"...\">\n• 长度 120-160 字符\n• 每页唯一\n• 验收：用 GSC 覆盖率报告确认无缺失"}]}]}
 
 **严格字段要求：**
 - severity 只能是：致命/严重/中等/低
 - id 在本批次内连续从 1 开始（不用担心跨批次冲突，后端会重排）
 - title ≤ 20 字、evidence_label ≤ 20 字
-- scope：必须包含受影响页面的完整URL，格式为"页面类型 URL"（例如"首页 https://example.com/" 或"分类页 https://example.com/category"），禁止只写"首页"而不带URL
+- scope：【严格要求】必须写成"页面类型 实际URL"的格式。示例："首页 https://52tvdy.com/" 或 "详情页 https://52tvdy.com/detail/90518"。直接从上方已抓取页面的URL字段复制粘贴。绝对禁止只写"首页""详情页""全站"等文字描述而不带https开头的完整URL。如果影响多个页面，写出最重要的2-3个URL
 - evidence_code：3-10 行真实源码，不得编造
 - current_status：**≤ 40 字**，只说缺什么/错什么，不解释原理不推断后果
 - fix_suggestion：**200-400 字详细**，必须含：① 可复制的 HTML/配置代码 ② 3-5 条关键参数 ③ 验收方式
