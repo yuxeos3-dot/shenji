@@ -1237,7 +1237,7 @@ func CallAIChaptersWithConfig(apiURL, apiKey, model, prompt string) ([]V6Chapter
 	reqBody := map[string]interface{}{
 		"model":       model,
 		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-		"max_tokens":  maxTok,
+		maxTokensKey(model):  maxTok,
 		"temperature": 0.2,
 	}
 	jsonBody, err := json.Marshal(reqBody)
@@ -1300,7 +1300,7 @@ func CallAIStrategyWithConfig(apiURL, apiKey, model, prompt string) (*V6Chapter,
 	reqBody := map[string]interface{}{
 		"model":       model,
 		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-		"max_tokens":  16000,
+		maxTokensKey(model):  16000,
 		"temperature": 0.3,
 	}
 	jsonBody, err := json.Marshal(reqBody)
@@ -1438,4 +1438,14 @@ func BuildExternalVerifyPrompt(domain string, ev *ExternalVerification, issueCou
 	fmt.Fprintf(&b, "{\"chapters\":[{\"title\":\"外部验证与可访问性\",\"issues\":[{\"id\":1,\"severity\":\"严重\",\"module\":\"外部验证\",\"title\":\"示例\",\"scope\":\"全站 https://%s/\",\"evidence_label\":\"验证数据\",\"evidence_code\":\"...\",\"current_status\":\"问题\",\"fix_suggestion\":\"修复\"}]}]}\n\n", domain)
 	b.WriteString("severity只能是致命/严重/中等/低。scope必须含URL。每个类别至少1个issue，总计至少8个。\n")
 	return b.String()
+}
+
+// maxTokensKey returns the correct parameter name for the model.
+// OpenAI GPT-4o/GPT-5+ use max_completion_tokens; all others use max_tokens.
+func maxTokensKey(model string) string {
+	m := strings.ToLower(model)
+	if strings.Contains(m, "gpt-4o") || strings.Contains(m, "gpt-5") || strings.Contains(m, "o1") || strings.Contains(m, "o3") || strings.Contains(m, "o4") {
+		return "max_completion_tokens"
+	}
+	return "max_tokens"
 }
