@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -73,7 +74,8 @@ func DownloadAuditReport(c *gin.Context) {
 	}
 
 	filename := fmt.Sprintf("%s_SEO审计报告_%s.docx", domain, time.Now().Format("20060102"))
-	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	encodedName := url.PathEscape(filename)
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, filename, encodedName))
 	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", docx)
 }

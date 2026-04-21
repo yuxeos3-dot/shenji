@@ -418,7 +418,12 @@ func BuildTechPromptBatch(batch TechBatch, domain string, sitePages []SitePageFo
 - current_status：**≤ 40 字**，只说缺什么/错什么，不解释原理不推断后果
 - fix_suggestion：**200-400 字详细**，必须含：① 可复制的 HTML/配置代码 ② 3-5 条关键参数 ③ 验收方式
 
-**完整性要求：本批次涉及的每一个大类都必须至少出现一次**（完全合规的大类在该章里放一条 severity=低 的"本类无明显问题"占位 issue）。`)
+**完整性要求（极其重要）：
+1. 本批次涉及的每一个大类都必须至少出现一次
+2. 每个大类至少输出2-3个issue（真实问题或改进建议），不要只放1个占位
+3. 深入分析每个页面的HTML源码，找出所有可改进的点
+4. scope字段必须包含受影响页面的完整URL（如"首页 https://domain.com/"），禁止只写"首页"
+5. evidence_code必须引用页面中真实的HTML代码，不得编造**（完全合规的大类在该章里放一条 severity=低 的"本类无明显问题"占位 issue）。`)
 	return prompt.String()
 }
 
