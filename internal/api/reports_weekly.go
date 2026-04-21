@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"seo-system/internal/ai"
 	"seo-system/internal/db"
 	"seo-system/internal/httpx"
 
@@ -414,7 +415,7 @@ func summarizeWeekWithAI(userID int64, start, end, concatenated string) (string,
 	body := map[string]interface{}{
 		"model":       model,
 		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-		"max_tokens":  4000,
+		ai.MaxTokensKey(model):  4000,
 		"temperature": 0.3,
 	}
 	bj, _ := json.Marshal(body)

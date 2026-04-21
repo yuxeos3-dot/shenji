@@ -135,7 +135,7 @@ func callRewriteAI(apiURL, apiKey, model, prompt string) (interface{}, error) {
 	reqBody := map[string]interface{}{
 		"model":       model,
 		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-		"max_tokens":  3000,
+		ai.MaxTokensKey(model):  3000,
 		"temperature": 0.7,
 	}
 	jsonBody, err := json.Marshal(reqBody)

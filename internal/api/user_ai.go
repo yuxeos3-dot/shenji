@@ -229,7 +229,7 @@ func callAISlot(apiURL, apiKey, model, prompt string, maxTokens int) (string, er
 	body := map[string]interface{}{
 		"model":       model,
 		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-		"max_tokens":  maxTokens,
+		ai.MaxTokensKey(model):  maxTokens,
 		"temperature": 0.7,
 	}
 	bj, err := json.Marshal(body)

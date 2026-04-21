@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"seo-system/internal/ai"
 	"seo-system/internal/db"
 	"seo-system/internal/telegram"
 	"seo-system/internal/httpx"
@@ -338,7 +339,7 @@ Agent自动化应用（必须有）：
 	body := map[string]interface{}{
 		"model":       model,
 		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-		"max_tokens":  4000,
+		ai.MaxTokensKey(model):  4000,
 		"temperature": 0.3,
 	}
 	bj, _ := json.Marshal(body)

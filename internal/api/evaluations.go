@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"seo-system/internal/ai"
 	"seo-system/internal/db"
 	"seo-system/internal/httpx"
 
@@ -352,7 +353,7 @@ func polishEvaluationWithAI(userID int64, reportType, draft string) (string, err
 	body := map[string]interface{}{
 		"model":       model,
 		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-		"max_tokens":  1200,
+		ai.MaxTokensKey(model):  1200,
 		"temperature": 0.25,
 	}
 	bj, _ := json.Marshal(body)

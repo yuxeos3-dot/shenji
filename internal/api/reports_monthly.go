@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"seo-system/internal/ai"
 	"seo-system/internal/db"
 	"seo-system/internal/httpx"
 
@@ -395,7 +396,7 @@ func summarizeMonthWithAI(userID int64, year, month int, concatenated string) (s
 	body := map[string]interface{}{
 		"model":       model,
 		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-		"max_tokens":  5000,
+		ai.MaxTokensKey(model):  5000,
 		"temperature": 0.3,
 	}
 	bj, _ := json.Marshal(body)
