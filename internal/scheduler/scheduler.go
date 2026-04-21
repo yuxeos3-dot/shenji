@@ -54,6 +54,10 @@ func Start() {
 	// Scheduled push: check every 10 minutes for push schedules that need to run.
 	c.AddFunc("*/10 * * * *", runScheduledPushes)
 
+	// ── Platform Deep Data Sync (daily at 02:00) ────────────────
+	// Runs derived-layer computations for all sites that have deep data.
+	c.AddFunc("0 5 * * *", runDeepDataDerivations)
+
 	c.Start()
 	log.Println("调度器已启动")
 }
@@ -213,6 +217,39 @@ func runScheduledPushes() {
 		log.Printf("[push-scheduler] running schedule %d: %s %s -> %s", s.id, s.platform, s.pushType, s.targetURL)
 		go api.RunScheduledPush(s.id, s.siteID, s.userID, s.platform, s.pushType, s.targetURL)
 	}
+}
+
+// runDeepDataDerivations computes derived data (rank buckets, opportunities,
+// cannibalization, query diff) for all sites that have deep GSC data.
+func runDeepDataDerivations() {
+	log.Println("[deep-data] Starting daily derivations...")
+
+	rows, err := db.DB.Query("SELECT DISTINCT site_id FROM gsc_query_page_daily WHERE date >= CURRENT_DATE - INTERVAL '7 days'")
+	if err != nil {
+		log.Printf("[deep-data] query sites: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	var siteIDs []int64
+	for rows.Next() {
+		var sid int64
+		rows.Scan(&sid)
+		siteIDs = append(siteIDs, sid)
+	}
+
+	for _, sid := range siteIDs {
+		log.Printf("[deep-data] site %d: computing opportunities", sid)
+		api.ComputeOpportunities(sid)
+
+		log.Printf("[deep-data] site %d: computing cannibalization", sid)
+		api.ComputeCannibalization(sid)
+
+		log.Printf("[deep-data] site %d: computing query diff", sid)
+		api.ComputeQueryDiff(sid)
+	}
+
+	log.Printf("[deep-data] Derivations complete for %d sites", len(siteIDs))
 }
 
 func Stop() {

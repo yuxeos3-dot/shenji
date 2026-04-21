@@ -237,6 +237,29 @@ https://another.com"
         <el-form-item label="站点名称">
           <el-input v-model="form.name" placeholder="我的网站" />
         </el-form-item>
+        <div class="form-section-title" style="margin-top:16px">SEO 深度数据配置</div>
+        <el-form-item label="品牌正则">
+          <el-input v-model="form.brand_regex" placeholder="brand|品牌名|别名（用 | 分隔）" />
+          <div style="font-size:11px;color:#999;margin-top:4px">用于区分品牌词 vs 非品牌词，支持正则。留空则不分类。</div>
+        </el-form-item>
+        <el-form-item label="站点语言">
+          <el-select v-model="form.site_language" style="width:100%">
+            <el-option value="zh" label="中文" /><el-option value="en" label="English" />
+            <el-option value="ru" label="Русский" /><el-option value="ja" label="日本語" />
+            <el-option value="ko" label="한국어" /><el-option value="other" label="其他" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="主要国家">
+          <el-input v-model="form.primary_country" placeholder="3 字母 ISO，如 chn / usa / rus" />
+        </el-form-item>
+        <el-form-item label="站点类型">
+          <el-select v-model="form.site_type" clearable style="width:100%">
+            <el-option value="" label="未设置" /><el-option value="movie" label="影视" />
+            <el-option value="news" label="新闻" /><el-option value="ecommerce" label="电商" />
+            <el-option value="saas" label="SaaS" /><el-option value="blog" label="博客" />
+            <el-option value="corporate" label="企业官网" /><el-option value="other" label="其他" />
+          </el-select>
+        </el-form-item>
         <div style="margin-top:12px;padding:10px 14px;background:var(--surface-2);border-radius:8px;font-size:12px;color:var(--ink-mid);line-height:1.6">
           💡 数据平台（GSC / GA4 / Bing / Yandex）的站点会根据域名自动匹配，无需手动填写。
           请确保已在「系统管理 → 数据平台」完成授权，并在对应平台里添加 + 验证过本站点。
@@ -471,9 +494,11 @@ async function editSite(row) {
       url_category: s.url_category || '', url_detail: s.url_detail || '',
       url_news_list: s.url_news_list || '', url_news_detail: s.url_news_detail || '',
       url_search: s.url_search || '', url_static: s.url_static || '',
+      brand_regex: s.brand_regex || '', site_language: s.site_language || 'zh',
+      primary_country: s.primary_country || 'chn', site_type: s.site_type || '',
     }
   } catch {
-    form.value = { domain: row.domain, name: row.name, url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' }
+    form.value = { domain: row.domain, name: row.name, url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '', brand_regex: '', site_language: 'zh', primary_country: 'chn', site_type: '' }
   }
   showDialog.value = true
 }
@@ -486,7 +511,7 @@ async function saveSite() {
     if (editId.value) { await api.updateSite(editId.value, form.value); ElMessage.success('站点信息已更新') }
     else { await api.createSite(form.value); ElMessage.success('站点添加成功') }
     showDialog.value = false
-    form.value = { domain: '', name: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '' }
+    form.value = { domain: '', name: '', url_category: '', url_detail: '', url_news_list: '', url_news_detail: '', url_search: '', url_static: '', brand_regex: '', site_language: 'zh', primary_country: 'chn', site_type: '' }
     loadSites()
   } catch (e) { console.error('保存站点失败', e) }
 }

@@ -429,6 +429,90 @@ const api = {
     instance.delete(`/v1/push/schedules/${id}`),
   togglePushSchedule: (id: Id) =>
     instance.put(`/v1/push/schedules/${id}/toggle`),
+
+  // ── Platform Data Deep ─────────────────────────────────────────
+  // GSC Deep
+  syncGSCDeep: (siteId: Id, date?: string) =>
+    instance.post(`/v1/sites/${siteId}/gsc/deep-sync`, date ? { date } : {}, { timeout: 300000 } as any),
+  syncGSCURLInspection: (siteId: Id) =>
+    instance.post(`/v1/sites/${siteId}/gsc/url-inspection`, {}, { timeout: 300000 } as any),
+  getGSCOverviewDeep: (siteId: Id, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/deep/gsc/overview`, { params: { days } }),
+  getGSCRankBuckets: (siteId: Id, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/deep/gsc/buckets`, { params: { days } }),
+  getGSCKeywords: (siteId: Id, params?: Record<string, any>) =>
+    instance.get(`/v1/sites/${siteId}/deep/gsc/keywords`, { params }),
+  getGSCKeywordDetail: (siteId: Id, query: string) =>
+    instance.get(`/v1/sites/${siteId}/deep/gsc/keyword-detail`, { params: { q: query } }),
+  getGSCDeepPages: (siteId: Id, params?: Record<string, any>) =>
+    instance.get(`/v1/sites/${siteId}/deep/gsc/pages`, { params }),
+  getGSCAppearance: (siteId: Id, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/deep/gsc/appearance`, { params: { days } }),
+  getGSCUrlInspection: (siteId: Id, params?: Record<string, any>) =>
+    instance.get(`/v1/sites/${siteId}/deep/gsc/url-inspection`, { params }),
+  getGSCSitemaps: (siteId: Id) =>
+    instance.get(`/v1/sites/${siteId}/deep/gsc/sitemaps`),
+  getGSCOpportunities: (siteId: Id, params?: Record<string, any>) =>
+    instance.get(`/v1/sites/${siteId}/deep/gsc/opportunities`, { params }),
+  getGSCCannibalization: (siteId: Id) =>
+    instance.get(`/v1/sites/${siteId}/deep/gsc/cannibalization`),
+  getGSCQueryDiff: (siteId: Id, type?: string) =>
+    instance.get(`/v1/sites/${siteId}/deep/gsc/query-diff`, { params: { type } }),
+
+  getGSCKeywordsExport: (siteId: Id, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/deep/gsc/keywords/export`, { params: { days }, responseType: 'blob' } as any),
+
+  // GA4 Deep
+  syncGA4Deep: (siteId: Id) =>
+    instance.post(`/v1/sites/${siteId}/ga/deep-sync`, {}, { timeout: 300000 } as any),
+  getGA4Extended: (siteId: Id, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/deep/ga/extended`, { params: { days } }),
+  getGA4LandingPages: (siteId: Id, params?: Record<string, any>) =>
+    instance.get(`/v1/sites/${siteId}/deep/ga/landing-pages`, { params }),
+  getGA4SourceMedium: (siteId: Id, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/deep/ga/source-medium`, { params: { days } }),
+  getGA4Events: (siteId: Id, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/deep/ga/events`, { params: { days } }),
+  getGA4Tech: (siteId: Id, dimension?: string, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/deep/ga/tech`, { params: { dimension, days } }),
+  getGA4Geo: (siteId: Id, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/deep/ga/geo`, { params: { days } }),
+  getGA4Hourly: (siteId: Id, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/deep/ga/hourly`, { params: { days } }),
+  getGA4DayOfWeek: (siteId: Id) =>
+    instance.get(`/v1/sites/${siteId}/deep/ga/day-of-week`),
+  getGA4ScrollDepth: (siteId: Id, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/deep/ga/scroll-depth`, { params: { days } }),
+  getGA4OutboundClicks: (siteId: Id, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/deep/ga/outbound-clicks`, { params: { days } }),
+  getGA4ConversionsDaily: (siteId: Id, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/deep/ga/conversions`, { params: { days } }),
+
+  // Bing Deep
+  syncBingDeep: (siteId: Id) =>
+    instance.post(`/v1/sites/${siteId}/bing/deep-sync`, {}, { timeout: 300000 } as any),
+  getBingKeywords: (siteId: Id, params?: Record<string, any>) =>
+    instance.get(`/v1/sites/${siteId}/deep/bing/keywords`, { params }),
+  getBingDeepPages: (siteId: Id, params?: Record<string, any>) =>
+    instance.get(`/v1/sites/${siteId}/deep/bing/pages`, { params }),
+  getBingInboundLinks: (siteId: Id) =>
+    instance.get(`/v1/sites/${siteId}/deep/bing/inbound-links`),
+  getBingSitemaps: (siteId: Id) =>
+    instance.get(`/v1/sites/${siteId}/deep/bing/sitemaps`),
+
+  // Yandex Deep
+  syncYandexDeep: (siteId: Id) =>
+    instance.post(`/v1/sites/${siteId}/yandex/deep-sync`, {}, { timeout: 300000 } as any),
+  getYandexKeywords: (siteId: Id, params?: Record<string, any>) =>
+    instance.get(`/v1/sites/${siteId}/deep/yandex/keywords`, { params }),
+  getYandexIndexEvents: (siteId: Id, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/deep/yandex/index-events`, { params: { days } }),
+  getYandexHTTPStatus: (siteId: Id, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/deep/yandex/http-status`, { params: { days } }),
+  getYandexExternalLinks: (siteId: Id) =>
+    instance.get(`/v1/sites/${siteId}/deep/yandex/external-links`),
+  getYandexIndexedUrls: (siteId: Id, params?: Record<string, any>) =>
+    instance.get(`/v1/sites/${siteId}/deep/yandex/indexed-urls`, { params }),
 }
 
 export default api

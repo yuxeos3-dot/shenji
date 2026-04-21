@@ -26,6 +26,7 @@ func RegisterRoutes(r *gin.Engine, authMW, csrfMW gin.HandlerFunc) {
 	registerGeoRoutes(v1)
 	registerFRWRoutes(v1)
 	registerAdminRoutes(v1)
+	registerDeepDataRoutes(v1)
 }
 
 // registerPublicRoutes handles unauthenticated endpoints.

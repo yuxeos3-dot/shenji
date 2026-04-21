@@ -731,6 +731,599 @@ func Init() {
 			UNIQUE(user_id, platform, site_key)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_platform_hides ON user_platform_hides(user_id, platform)`,
+
+		// ─── Phase 2: Platform Data Deep Fields (2026-04) ────────────────
+		// ALTER sites — add SEO metadata columns
+		"DO $$ BEGIN ALTER TABLE sites ADD COLUMN brand_regex TEXT DEFAULT ''; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE sites ADD COLUMN site_language TEXT DEFAULT 'zh'; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE sites ADD COLUMN primary_country TEXT DEFAULT 'chn'; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE sites ADD COLUMN site_type TEXT DEFAULT ''; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		// ALTER gsc_data
+		"DO $$ BEGIN ALTER TABLE gsc_data ADD COLUMN data_sampled BOOLEAN DEFAULT FALSE; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		// ALTER bing_data
+		"DO $$ BEGIN ALTER TABLE bing_data ADD COLUMN url_submission_quota_daily INT DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE bing_data ADD COLUMN url_submission_quota_monthly INT DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE bing_data ADD COLUMN blocked_urls_count INT DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE bing_data ADD COLUMN deep_link_count INT DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE bing_data ADD COLUMN inbound_links_count INT DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		// ALTER yandex_data
+		"DO $$ BEGIN ALTER TABLE yandex_data ADD COLUMN sqi INT DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE yandex_data ADD COLUMN searchable_pages_count INT DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE yandex_data ADD COLUMN excluded_pages_count INT DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE yandex_data ADD COLUMN avg_show_position DOUBLE PRECISION DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE yandex_data ADD COLUMN avg_click_position DOUBLE PRECISION DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE yandex_data ADD COLUMN unique_users INT DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE yandex_data ADD COLUMN site_problems_json JSONB DEFAULT '{}'; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE yandex_data ADD COLUMN recrawl_quota_daily INT DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE yandex_data ADD COLUMN recrawl_quota_used INT DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+
+		// ─── GSC Deep Tables ─────────────────────────────────────────────
+		// 1. GSC query × page × device × country × date (fact table)
+		`CREATE TABLE IF NOT EXISTS gsc_query_page_daily (
+			id                BIGSERIAL PRIMARY KEY,
+			site_id           INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date              DATE NOT NULL,
+			query             TEXT NOT NULL,
+			page_url          TEXT NOT NULL,
+			country           TEXT DEFAULT 'all',
+			device            TEXT DEFAULT 'all',
+			search_type       TEXT DEFAULT 'web',
+			clicks            INT DEFAULT 0,
+			impressions       INT DEFAULT 0,
+			ctr               DOUBLE PRECISION DEFAULT 0,
+			position          DOUBLE PRECISION DEFAULT 0,
+			created_at        TIMESTAMPTZ DEFAULT NOW(),
+			UNIQUE(site_id, date, query, page_url, country, device, search_type)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gqpd_site_date ON gsc_query_page_daily(site_id, date DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_gqpd_site_position ON gsc_query_page_daily(site_id, position)`,
+		`CREATE INDEX IF NOT EXISTS idx_gqpd_query ON gsc_query_page_daily(site_id, query)`,
+		`CREATE INDEX IF NOT EXISTS idx_gqpd_page ON gsc_query_page_daily(site_id, page_url)`,
+		`CREATE INDEX IF NOT EXISTS idx_gqpd_clicks ON gsc_query_page_daily(site_id, date, clicks DESC)`,
+
+		// 2. GSC rank buckets daily (aggregated from gsc_query_page_daily)
+		`CREATE TABLE IF NOT EXISTS gsc_rank_buckets_daily (
+			id                BIGSERIAL PRIMARY KEY,
+			site_id           INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date              DATE NOT NULL,
+			bucket            TEXT NOT NULL,
+			search_type       TEXT DEFAULT 'web',
+			country           TEXT DEFAULT 'all',
+			device            TEXT DEFAULT 'all',
+			query_count       INT DEFAULT 0,
+			page_count        INT DEFAULT 0,
+			query_page_count  INT DEFAULT 0,
+			total_clicks      INT DEFAULT 0,
+			total_impressions INT DEFAULT 0,
+			avg_ctr           DOUBLE PRECISION DEFAULT 0,
+			avg_position      DOUBLE PRECISION DEFAULT 0,
+			top_queries_json  JSONB DEFAULT '[]',
+			top_pages_json    JSONB DEFAULT '[]',
+			UNIQUE(site_id, date, bucket, search_type, country, device)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_grbd_site_date ON gsc_rank_buckets_daily(site_id, date DESC)`,
+
+		// 3. GSC URL Inspection
+		`CREATE TABLE IF NOT EXISTS gsc_url_inspection (
+			id                BIGSERIAL PRIMARY KEY,
+			site_id           INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			url               TEXT NOT NULL,
+			inspected_at      TIMESTAMPTZ DEFAULT NOW(),
+			verdict           TEXT DEFAULT '',
+			coverage_state    TEXT DEFAULT '',
+			robots_txt_state  TEXT DEFAULT '',
+			indexing_state    TEXT DEFAULT '',
+			page_fetch_state  TEXT DEFAULT '',
+			last_crawl_time   TIMESTAMPTZ,
+			google_canonical  TEXT DEFAULT '',
+			user_canonical    TEXT DEFAULT '',
+			crawled_as        TEXT DEFAULT '',
+			mobile_usable     BOOLEAN DEFAULT TRUE,
+			rich_results_json JSONB DEFAULT '[]',
+			referring_urls_json JSONB DEFAULT '[]',
+			sitemap_urls_json JSONB DEFAULT '[]'
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gui_site_url ON gsc_url_inspection(site_id, url)`,
+		`CREATE INDEX IF NOT EXISTS idx_gui_coverage ON gsc_url_inspection(site_id, coverage_state)`,
+
+		// 4. GSC Sitemap status
+		`CREATE TABLE IF NOT EXISTS gsc_sitemaps (
+			id                BIGSERIAL PRIMARY KEY,
+			site_id           INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			sitemap_path      TEXT NOT NULL,
+			snapshot_date     DATE NOT NULL,
+			is_sitemaps_index BOOLEAN DEFAULT FALSE,
+			is_pending        BOOLEAN DEFAULT FALSE,
+			type              TEXT DEFAULT '',
+			last_submitted    TIMESTAMPTZ,
+			last_downloaded   TIMESTAMPTZ,
+			errors            INT DEFAULT 0,
+			warnings          INT DEFAULT 0,
+			contents_json     JSONB DEFAULT '[]',
+			UNIQUE(site_id, sitemap_path, snapshot_date)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gsm_site ON gsc_sitemaps(site_id, snapshot_date DESC)`,
+
+		// 5. GSC searchAppearance daily
+		`CREATE TABLE IF NOT EXISTS gsc_appearance_daily (
+			id                BIGSERIAL PRIMARY KEY,
+			site_id           INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date              DATE NOT NULL,
+			appearance        TEXT NOT NULL,
+			clicks            INT DEFAULT 0,
+			impressions       INT DEFAULT 0,
+			ctr               DOUBLE PRECISION DEFAULT 0,
+			position          DOUBLE PRECISION DEFAULT 0,
+			UNIQUE(site_id, date, appearance)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gad_site_date ON gsc_appearance_daily(site_id, date DESC)`,
+
+		// ─── Bing Deep Tables ────────────────────────────────────────────
+		// 6. Bing query × page daily
+		`CREATE TABLE IF NOT EXISTS bing_query_page_daily (
+			id                      BIGSERIAL PRIMARY KEY,
+			site_id                 INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date                    DATE NOT NULL,
+			query                   TEXT NOT NULL,
+			page_url                TEXT NOT NULL,
+			clicks                  INT DEFAULT 0,
+			impressions             INT DEFAULT 0,
+			avg_impression_position DOUBLE PRECISION DEFAULT 0,
+			avg_click_position      DOUBLE PRECISION DEFAULT 0,
+			UNIQUE(site_id, date, query, page_url)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_bqpd_site_date ON bing_query_page_daily(site_id, date DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_bqpd_query ON bing_query_page_daily(site_id, query)`,
+		`CREATE INDEX IF NOT EXISTS idx_bqpd_page ON bing_query_page_daily(site_id, page_url)`,
+
+		// 7. Bing query daily (aggregated)
+		`CREATE TABLE IF NOT EXISTS bing_query_daily (
+			id                      BIGSERIAL PRIMARY KEY,
+			site_id                 INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date                    DATE NOT NULL,
+			query                   TEXT NOT NULL,
+			clicks                  INT DEFAULT 0,
+			impressions             INT DEFAULT 0,
+			ctr                     DOUBLE PRECISION DEFAULT 0,
+			avg_impression_position DOUBLE PRECISION DEFAULT 0,
+			avg_click_position      DOUBLE PRECISION DEFAULT 0,
+			page_count              INT DEFAULT 0,
+			UNIQUE(site_id, date, query)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_bqd_site_date ON bing_query_daily(site_id, date DESC)`,
+
+		// 8. Bing page daily
+		`CREATE TABLE IF NOT EXISTS bing_page_daily (
+			id                      BIGSERIAL PRIMARY KEY,
+			site_id                 INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date                    DATE NOT NULL,
+			page_url                TEXT NOT NULL,
+			clicks                  INT DEFAULT 0,
+			impressions             INT DEFAULT 0,
+			ctr                     DOUBLE PRECISION DEFAULT 0,
+			avg_impression_position DOUBLE PRECISION DEFAULT 0,
+			avg_click_position      DOUBLE PRECISION DEFAULT 0,
+			query_count             INT DEFAULT 0,
+			UNIQUE(site_id, date, page_url)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_bpd_site_date ON bing_page_daily(site_id, date DESC)`,
+
+		// 9. Bing inbound links
+		`CREATE TABLE IF NOT EXISTS bing_inbound_links (
+			id          BIGSERIAL PRIMARY KEY,
+			site_id     INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			target_page TEXT DEFAULT '',
+			source_url  TEXT DEFAULT '',
+			anchor_text TEXT DEFAULT '',
+			first_seen  DATE,
+			last_seen   DATE,
+			UNIQUE(site_id, target_page, source_url)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_bil_site ON bing_inbound_links(site_id)`,
+
+		// 10. Bing URL status
+		`CREATE TABLE IF NOT EXISTS bing_url_status (
+			id              BIGSERIAL PRIMARY KEY,
+			site_id         INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			url             TEXT NOT NULL,
+			checked_at      TIMESTAMPTZ,
+			is_indexed      BOOLEAN DEFAULT FALSE,
+			last_crawled    TIMESTAMPTZ,
+			http_status     INT DEFAULT 0,
+			robots_state    TEXT DEFAULT '',
+			clicks_30d      INT DEFAULT 0,
+			impressions_30d INT DEFAULT 0,
+			UNIQUE(site_id, url)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_bus_site ON bing_url_status(site_id)`,
+
+		// 11. Bing keyword research
+		`CREATE TABLE IF NOT EXISTS bing_keyword_research (
+			id                BIGSERIAL PRIMARY KEY,
+			site_id           INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			seed_query        TEXT NOT NULL,
+			country           TEXT DEFAULT '',
+			language          TEXT DEFAULT '',
+			week_start        DATE NOT NULL,
+			keyword           TEXT NOT NULL,
+			impressions       BIGINT DEFAULT 0,
+			broad_impressions BIGINT DEFAULT 0,
+			is_related        BOOLEAN DEFAULT FALSE,
+			UNIQUE(site_id, seed_query, keyword, week_start)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_bkr_site ON bing_keyword_research(site_id, seed_query)`,
+
+		// 12. Bing sitemaps
+		`CREATE TABLE IF NOT EXISTS bing_sitemaps (
+			id              SERIAL PRIMARY KEY,
+			site_id         INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			sitemap_url     TEXT NOT NULL,
+			last_submitted  TIMESTAMPTZ,
+			last_downloaded TIMESTAMPTZ,
+			url_count       INT DEFAULT 0,
+			status          TEXT DEFAULT '',
+			UNIQUE(site_id, sitemap_url)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_bsm_site ON bing_sitemaps(site_id)`,
+
+		// ─── Yandex Deep Tables ──────────────────────────────────────────
+		// 13. Yandex query daily
+		`CREATE TABLE IF NOT EXISTS yandex_query_daily (
+			id                BIGSERIAL PRIMARY KEY,
+			site_id           INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date              DATE NOT NULL,
+			query             TEXT NOT NULL,
+			query_id          TEXT DEFAULT '',
+			device_type       TEXT DEFAULT 'ALL',
+			total_shows       INT DEFAULT 0,
+			total_clicks      INT DEFAULT 0,
+			total_ctr         DOUBLE PRECISION DEFAULT 0,
+			avg_show_position DOUBLE PRECISION DEFAULT 0,
+			avg_click_position DOUBLE PRECISION DEFAULT 0,
+			unique_users      INT DEFAULT 0,
+			UNIQUE(site_id, date, query, device_type)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_yqd_site_date ON yandex_query_daily(site_id, date DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_yqd_query ON yandex_query_daily(site_id, query)`,
+
+		// 14. Yandex index events daily
+		`CREATE TABLE IF NOT EXISTS yandex_index_events_daily (
+			id         BIGSERIAL PRIMARY KEY,
+			site_id    INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date       DATE NOT NULL,
+			event_type TEXT NOT NULL,
+			count      INT DEFAULT 0,
+			UNIQUE(site_id, date, event_type)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_yied_site ON yandex_index_events_daily(site_id, date DESC)`,
+
+		// 15. Yandex HTTP status daily
+		`CREATE TABLE IF NOT EXISTS yandex_http_status_daily (
+			id          BIGSERIAL PRIMARY KEY,
+			site_id     INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date        DATE NOT NULL,
+			status_code TEXT NOT NULL,
+			count       INT DEFAULT 0,
+			UNIQUE(site_id, date, status_code)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_yhsd_site ON yandex_http_status_daily(site_id, date DESC)`,
+
+		// 16. Yandex indexed URLs
+		`CREATE TABLE IF NOT EXISTS yandex_indexed_urls (
+			id          BIGSERIAL PRIMARY KEY,
+			site_id     INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			url         TEXT NOT NULL,
+			status      TEXT DEFAULT '',
+			http_code   INT DEFAULT 0,
+			access_date TIMESTAMPTZ,
+			fetched_at  TIMESTAMPTZ DEFAULT NOW(),
+			UNIQUE(site_id, url)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_yiu_site ON yandex_indexed_urls(site_id)`,
+
+		// 17. Yandex external links
+		`CREATE TABLE IF NOT EXISTS yandex_external_links (
+			id         BIGSERIAL PRIMARY KEY,
+			site_id    INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			target_url TEXT DEFAULT '',
+			source_url TEXT DEFAULT '',
+			first_seen DATE,
+			last_seen  DATE,
+			UNIQUE(site_id, target_url, source_url)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_yel_site ON yandex_external_links(site_id)`,
+
+		// ─── GA4 Deep Tables ─────────────────────────────────────────────
+		// 18. GA4 extended daily
+		`CREATE TABLE IF NOT EXISTS ga_daily_extended (
+			id                       BIGSERIAL PRIMARY KEY,
+			site_id                  INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date                     DATE NOT NULL,
+			total_users              INT DEFAULT 0,
+			active_users             INT DEFAULT 0,
+			new_users                INT DEFAULT 0,
+			scrolled_users           INT DEFAULT 0,
+			sessions                 INT DEFAULT 0,
+			engaged_sessions         INT DEFAULT 0,
+			sessions_per_user        DOUBLE PRECISION DEFAULT 0,
+			average_session_duration DOUBLE PRECISION DEFAULT 0,
+			engagement_rate          DOUBLE PRECISION DEFAULT 0,
+			bounce_rate              DOUBLE PRECISION DEFAULT 0,
+			user_engagement_duration BIGINT DEFAULT 0,
+			dau_per_mau              DOUBLE PRECISION DEFAULT 0,
+			wau_per_mau              DOUBLE PRECISION DEFAULT 0,
+			dau_per_wau              DOUBLE PRECISION DEFAULT 0,
+			screen_page_views        INT DEFAULT 0,
+			page_views_per_session   DOUBLE PRECISION DEFAULT 0,
+			page_views_per_user      DOUBLE PRECISION DEFAULT 0,
+			event_count              INT DEFAULT 0,
+			event_count_per_user     DOUBLE PRECISION DEFAULT 0,
+			events_per_session       DOUBLE PRECISION DEFAULT 0,
+			conversions              INT DEFAULT 0,
+			total_revenue            DOUBLE PRECISION DEFAULT 0,
+			purchase_revenue         DOUBLE PRECISION DEFAULT 0,
+			UNIQUE(site_id, date)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gde_site ON ga_daily_extended(site_id, date DESC)`,
+
+		// 19. GA4 landing pages daily
+		`CREATE TABLE IF NOT EXISTS ga_landing_pages_daily (
+			id                       BIGSERIAL PRIMARY KEY,
+			site_id                  INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date                     DATE NOT NULL,
+			landing_page             TEXT NOT NULL,
+			sessions                 INT DEFAULT 0,
+			users                    INT DEFAULT 0,
+			new_users                INT DEFAULT 0,
+			engaged_sessions         INT DEFAULT 0,
+			engagement_rate          DOUBLE PRECISION DEFAULT 0,
+			bounce_rate              DOUBLE PRECISION DEFAULT 0,
+			average_session_duration DOUBLE PRECISION DEFAULT 0,
+			screen_page_views        INT DEFAULT 0,
+			conversions              INT DEFAULT 0,
+			total_revenue            DOUBLE PRECISION DEFAULT 0,
+			UNIQUE(site_id, date, landing_page)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_glpd_site ON ga_landing_pages_daily(site_id, date DESC)`,
+
+		// 20. GA4 source medium daily
+		`CREATE TABLE IF NOT EXISTS ga_source_medium_daily (
+			id              BIGSERIAL PRIMARY KEY,
+			site_id         INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date            DATE NOT NULL,
+			source          TEXT DEFAULT '',
+			medium          TEXT DEFAULT '',
+			channel_group   TEXT DEFAULT '',
+			campaign        TEXT DEFAULT '',
+			sessions        INT DEFAULT 0,
+			users           INT DEFAULT 0,
+			new_users       INT DEFAULT 0,
+			engaged_sessions INT DEFAULT 0,
+			engagement_rate DOUBLE PRECISION DEFAULT 0,
+			conversions     INT DEFAULT 0,
+			total_revenue   DOUBLE PRECISION DEFAULT 0,
+			UNIQUE(site_id, date, source, medium, campaign)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gsmd_site ON ga_source_medium_daily(site_id, date DESC)`,
+
+		// 21. GA4 events daily
+		`CREATE TABLE IF NOT EXISTS ga_events_daily (
+			id                   BIGSERIAL PRIMARY KEY,
+			site_id              INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date                 DATE NOT NULL,
+			event_name           TEXT NOT NULL,
+			event_count          INT DEFAULT 0,
+			users_with_event     INT DEFAULT 0,
+			event_value_sum      DOUBLE PRECISION DEFAULT 0,
+			event_count_per_user DOUBLE PRECISION DEFAULT 0,
+			is_conversion        BOOLEAN DEFAULT FALSE,
+			UNIQUE(site_id, date, event_name)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_ged_site ON ga_events_daily(site_id, date DESC)`,
+
+		// 22. GA4 tech daily (device / os / browser)
+		`CREATE TABLE IF NOT EXISTS ga_tech_daily (
+			id              BIGSERIAL PRIMARY KEY,
+			site_id         INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date            DATE NOT NULL,
+			dimension_type  TEXT NOT NULL,
+			dimension_value TEXT NOT NULL,
+			sessions        INT DEFAULT 0,
+			users           INT DEFAULT 0,
+			bounce_rate     DOUBLE PRECISION DEFAULT 0,
+			engagement_rate DOUBLE PRECISION DEFAULT 0,
+			UNIQUE(site_id, date, dimension_type, dimension_value)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gtd_site ON ga_tech_daily(site_id, date DESC)`,
+
+		// 23. GA4 geo daily
+		`CREATE TABLE IF NOT EXISTS ga_geo_daily (
+			id               BIGSERIAL PRIMARY KEY,
+			site_id          INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date             DATE NOT NULL,
+			country          TEXT DEFAULT '',
+			region           TEXT DEFAULT '',
+			city             TEXT DEFAULT '',
+			sessions         INT DEFAULT 0,
+			users            INT DEFAULT 0,
+			new_users        INT DEFAULT 0,
+			engaged_sessions INT DEFAULT 0,
+			engagement_rate  DOUBLE PRECISION DEFAULT 0,
+			UNIQUE(site_id, date, country, region, city)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_ggd_site ON ga_geo_daily(site_id, date DESC)`,
+
+		// 24. GA4 hourly distribution
+		`CREATE TABLE IF NOT EXISTS ga_hourly (
+			id                BIGSERIAL PRIMARY KEY,
+			site_id           INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date              DATE NOT NULL,
+			hour              INT NOT NULL CHECK (hour BETWEEN 0 AND 23),
+			sessions          INT DEFAULT 0,
+			users             INT DEFAULT 0,
+			screen_page_views INT DEFAULT 0,
+			UNIQUE(site_id, date, hour)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gah_site ON ga_hourly(site_id, date DESC)`,
+
+		// 25. GA4 scroll depth daily
+		`CREATE TABLE IF NOT EXISTS ga_scroll_depth_daily (
+			id               BIGSERIAL PRIMARY KEY,
+			site_id          INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date             DATE NOT NULL,
+			page_path        TEXT DEFAULT '',
+			percent_scrolled INT DEFAULT 0,
+			users            INT DEFAULT 0,
+			event_count      INT DEFAULT 0,
+			UNIQUE(site_id, date, page_path, percent_scrolled)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gsdd_site ON ga_scroll_depth_daily(site_id, date DESC)`,
+
+		// 26. GA4 outbound clicks daily
+		`CREATE TABLE IF NOT EXISTS ga_outbound_clicks_daily (
+			id          BIGSERIAL PRIMARY KEY,
+			site_id     INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date        DATE NOT NULL,
+			link_domain TEXT DEFAULT '',
+			link_url    TEXT DEFAULT '',
+			event_count INT DEFAULT 0,
+			users       INT DEFAULT 0,
+			UNIQUE(site_id, date, link_url)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gocd_site ON ga_outbound_clicks_daily(site_id, date DESC)`,
+
+		// 27. GA4 conversions daily
+		`CREATE TABLE IF NOT EXISTS ga_conversions_daily (
+			id            BIGSERIAL PRIMARY KEY,
+			site_id       INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			date          DATE NOT NULL,
+			event_name    TEXT NOT NULL,
+			source        TEXT DEFAULT '',
+			medium        TEXT DEFAULT '',
+			conversions   INT DEFAULT 0,
+			total_revenue DOUBLE PRECISION DEFAULT 0,
+			UNIQUE(site_id, date, event_name, source, medium)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gcd_site ON ga_conversions_daily(site_id, date DESC)`,
+
+		// 27b. GA4 day of week distribution
+		`CREATE TABLE IF NOT EXISTS ga_day_of_week (
+			id                BIGSERIAL PRIMARY KEY,
+			site_id           INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			year_week         TEXT NOT NULL,
+			day_of_week       INT NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
+			sessions          INT DEFAULT 0,
+			users             INT DEFAULT 0,
+			screen_page_views INT DEFAULT 0,
+			conversions       INT DEFAULT 0,
+			UNIQUE(site_id, year_week, day_of_week)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gadow_site ON ga_day_of_week(site_id, year_week DESC)`,
+
+		// ─── Derived / Enrichment Tables ─────────────────────────────────
+		// 28. CTR baseline (global)
+		`CREATE TABLE IF NOT EXISTS ctr_baseline (
+			position   INT PRIMARY KEY,
+			ctr        DOUBLE PRECISION NOT NULL,
+			updated_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+
+		// 29. Query enrichment (keyword tagging)
+		`CREATE TABLE IF NOT EXISTS query_enrichment (
+			site_id        INT NOT NULL,
+			query          TEXT NOT NULL,
+			platform       TEXT NOT NULL DEFAULT 'gsc',
+			brand_category TEXT DEFAULT 'unknown',
+			intent         TEXT DEFAULT 'unknown',
+			length_cat     TEXT DEFAULT 'body',
+			word_count     INT DEFAULT 0,
+			char_count     INT DEFAULT 0,
+			is_question    BOOLEAN DEFAULT FALSE,
+			is_comparison  BOOLEAN DEFAULT FALSE,
+			first_seen_date DATE,
+			last_seen_date  DATE,
+			updated_at     TIMESTAMPTZ DEFAULT NOW(),
+			PRIMARY KEY (site_id, query, platform)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_qe_brand ON query_enrichment(site_id, brand_category)`,
+		`CREATE INDEX IF NOT EXISTS idx_qe_intent ON query_enrichment(site_id, intent)`,
+
+		// 30. GSC opportunities weekly
+		`CREATE TABLE IF NOT EXISTS gsc_opportunities_weekly (
+			id                    BIGSERIAL PRIMARY KEY,
+			site_id               INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			week_start            DATE NOT NULL,
+			query                 TEXT NOT NULL,
+			page_url              TEXT DEFAULT '',
+			impressions           INT DEFAULT 0,
+			clicks                INT DEFAULT 0,
+			actual_ctr            DOUBLE PRECISION DEFAULT 0,
+			baseline_ctr          DOUBLE PRECISION DEFAULT 0,
+			ctr_gap_ratio         DOUBLE PRECISION DEFAULT 0,
+			position              DOUBLE PRECISION DEFAULT 0,
+			opportunity_score     DOUBLE PRECISION DEFAULT 0,
+			estimated_extra_clicks INT DEFAULT 0,
+			opportunity_type      TEXT DEFAULT '',
+			UNIQUE(site_id, week_start, query, page_url)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gow_site ON gsc_opportunities_weekly(site_id, week_start DESC)`,
+
+		// 31. GSC cannibalization monthly
+		`CREATE TABLE IF NOT EXISTS gsc_cannibalization_monthly (
+			id                BIGSERIAL PRIMARY KEY,
+			site_id           INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			month             TEXT NOT NULL,
+			query             TEXT NOT NULL,
+			page_count        INT DEFAULT 0,
+			competing_pages   JSONB DEFAULT '[]',
+			severity          TEXT DEFAULT 'low',
+			total_impressions INT DEFAULT 0,
+			total_clicks      INT DEFAULT 0,
+			UNIQUE(site_id, month, query)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gcm_site ON gsc_cannibalization_monthly(site_id, month DESC)`,
+
+		// 32. GSC query diff weekly (lost / new / risen / fallen)
+		`CREATE TABLE IF NOT EXISTS gsc_query_diff_weekly (
+			id             BIGSERIAL PRIMARY KEY,
+			site_id        INT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+			week_start     DATE NOT NULL,
+			diff_type      TEXT NOT NULL,
+			query          TEXT NOT NULL,
+			page_url       TEXT DEFAULT '',
+			prev_clicks    INT DEFAULT 0,
+			curr_clicks    INT DEFAULT 0,
+			click_delta    INT DEFAULT 0,
+			prev_position  DOUBLE PRECISION DEFAULT 0,
+			curr_position  DOUBLE PRECISION DEFAULT 0,
+			position_delta DOUBLE PRECISION DEFAULT 0,
+			UNIQUE(site_id, week_start, diff_type, query, page_url)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gqdw_site ON gsc_query_diff_weekly(site_id, week_start DESC)`,
+
+		// Seed CTR baseline data
+		`INSERT INTO ctr_baseline (position, ctr) VALUES
+			(1, 0.27), (2, 0.15), (3, 0.10), (4, 0.07), (5, 0.06),
+			(6, 0.050), (7, 0.042), (8, 0.036), (9, 0.031), (10, 0.028),
+			(11, 0.024), (12, 0.022), (13, 0.020), (14, 0.018), (15, 0.017),
+			(16, 0.016), (17, 0.015), (18, 0.014), (19, 0.013), (20, 0.012),
+			(21, 0.011), (22, 0.011), (23, 0.010), (24, 0.010), (25, 0.009),
+			(26, 0.009), (27, 0.008), (28, 0.008), (29, 0.008), (30, 0.007),
+			(31, 0.007), (32, 0.007), (33, 0.006), (34, 0.006), (35, 0.006),
+			(36, 0.006), (37, 0.006), (38, 0.005), (39, 0.005), (40, 0.005),
+			(41, 0.005), (42, 0.005), (43, 0.005), (44, 0.005), (45, 0.005),
+			(46, 0.005), (47, 0.005), (48, 0.005), (49, 0.005), (50, 0.005),
+			(51, 0.005), (52, 0.004), (53, 0.004), (54, 0.004), (55, 0.004),
+			(56, 0.004), (57, 0.004), (58, 0.004), (59, 0.004), (60, 0.004),
+			(61, 0.003), (62, 0.003), (63, 0.003), (64, 0.003), (65, 0.003),
+			(66, 0.003), (67, 0.003), (68, 0.003), (69, 0.003), (70, 0.003),
+			(71, 0.003), (72, 0.003), (73, 0.003), (74, 0.003), (75, 0.003),
+			(76, 0.002), (77, 0.002), (78, 0.002), (79, 0.002), (80, 0.002),
+			(81, 0.002), (82, 0.002), (83, 0.002), (84, 0.002), (85, 0.002),
+			(86, 0.002), (87, 0.002), (88, 0.002), (89, 0.002), (90, 0.002),
+			(91, 0.002), (92, 0.002), (93, 0.002), (94, 0.002), (95, 0.002),
+			(96, 0.002), (97, 0.002), (98, 0.002), (99, 0.002), (100, 0.002)
+		ON CONFLICT DO NOTHING`,
 	}
 	for _, m := range migrations {
 		if _, err := DB.Exec(m); err != nil {

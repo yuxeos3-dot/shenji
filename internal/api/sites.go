@@ -26,6 +26,10 @@ type CreateSiteRequest struct {
 	AuditScheduleEnabled string `json:"audit_schedule_enabled"`
 	AuditIntervalHours   int    `json:"audit_interval_hours"`
 	AuditDailyHour       int    `json:"audit_daily_hour"`
+	BrandRegex           string `json:"brand_regex"`
+	SiteLanguage         string `json:"site_language"`
+	PrimaryCountry       string `json:"primary_country"`
+	SiteType             string `json:"site_type"`
 }
 
 func ListSites(c *gin.Context) {
@@ -157,17 +161,23 @@ func GetSite(c *gin.Context) {
 		AuditScheduleEnabled string `json:"audit_schedule_enabled"`
 		AuditIntervalHours   int    `json:"audit_interval_hours"`
 		AuditDailyHour       int    `json:"audit_daily_hour"`
+		BrandRegex           string `json:"brand_regex"`
+		SiteLanguage         string `json:"site_language"`
+		PrimaryCountry       string `json:"primary_country"`
+		SiteType             string `json:"site_type"`
 		CreatedAt            string `json:"created_at"`
 	}
 
 	err := db.DB.QueryRow(`SELECT id, domain, name, gsc_site_url, ga_property_id, yandex_host_id,
 		url_category, url_detail, url_news_list, url_news_detail, url_search, url_static,
 		status, COALESCE(audit_schedule_enabled,'false'), COALESCE(audit_interval_hours,0), COALESCE(audit_daily_hour,-1),
+		COALESCE(brand_regex,''), COALESCE(site_language,'zh'), COALESCE(primary_country,'chn'), COALESCE(site_type,''),
 		created_at FROM sites WHERE id = $1`, id).Scan(
 		&site.ID, &site.Domain, &site.Name, &site.GscSiteURL, &site.GaPropertyID, &site.YandexHostID,
 		&site.URLCategory, &site.URLDetail, &site.URLNewsList, &site.URLNewsDetail,
 		&site.URLSearch, &site.URLStatic, &site.Status,
 		&site.AuditScheduleEnabled, &site.AuditIntervalHours, &site.AuditDailyHour,
+		&site.BrandRegex, &site.SiteLanguage, &site.PrimaryCountry, &site.SiteType,
 		&site.CreatedAt,
 	)
 	if err != nil {
@@ -195,11 +205,13 @@ func UpdateSite(c *gin.Context) {
 	_, err := db.DB.Exec(
 		`UPDATE sites SET domain=$1, name=$2, gsc_site_url=$3, ga_property_id=$4, yandex_host_id=$5, bing_site_url=$6,
 		 url_category=$7, url_detail=$8, url_news_list=$9, url_news_detail=$10, url_search=$11, url_static=$12,
-		 audit_schedule_enabled=$13, audit_interval_hours=$14, audit_daily_hour=$15
-		 WHERE id=$16`,
+		 audit_schedule_enabled=$13, audit_interval_hours=$14, audit_daily_hour=$15,
+		 brand_regex=$16, site_language=$17, primary_country=$18, site_type=$19
+		 WHERE id=$20`,
 		req.Domain, req.Name, req.GscSiteURL, req.GaPropertyID, req.YandexHostID, req.BingSiteURL,
 		req.URLCategory, req.URLDetail, req.URLNewsList, req.URLNewsDetail, req.URLSearch, req.URLStatic,
-		req.AuditScheduleEnabled, req.AuditIntervalHours, req.AuditDailyHour, id,
+		req.AuditScheduleEnabled, req.AuditIntervalHours, req.AuditDailyHour,
+		req.BrandRegex, req.SiteLanguage, req.PrimaryCountry, req.SiteType, id,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "更新失败"})

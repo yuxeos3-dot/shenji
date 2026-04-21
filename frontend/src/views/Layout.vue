@@ -158,6 +158,7 @@ const groups = [
     items: [
       { path: '/sites',             icon: '🌐', label: '站点管理',   activePrefix: '/sites' },
       { path: '/data-management',   icon: '📡', label: '数据管理' },
+      { path: '/platform-data-deep', icon: '🔬', label: '深度数据' },
       { path: '/spider-management', icon: '🕷️', label: '蜘蛛管理' },
       { path: '/dead-links',        icon: '💀', label: '死链管理' },
       { path: '/push-management',  icon: '📤', label: '推送管理' },
