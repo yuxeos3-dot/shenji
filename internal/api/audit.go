@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"seo-system/internal/ai"
@@ -274,37 +275,61 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 		telegram.NotifyUser(ownerUserID, "审计失败", siteName+": 你尚未配置 AI API Key")
 		return
 	}
+	// Step 4: Run technical audit agents IN PARALLEL. Each agent focuses on
+	// specific categories — shorter prompts, deeper analysis, faster total time.
+	type agentResult struct {
+		idx      int
+		name     string
+		chapters []ai.V6Chapter
+		raw      string
+		model    string
+		err      error
+		duration time.Duration
+	}
 
-	// Step 4: Run the technical audit in batches (provider caps output at
-	// ~16k chars per call, so one call can't fit all 29 categories). Each
-	// batch returns its own chapters; we merge and renumber at the end.
-	allChapters := make([]ai.V6Chapter, 0, 8)
-	var lastModel string
-	var lastRaw string
-	// Per-batch failure log so the final error_msg can show EXACTLY which
-	// batch failed with what reason + how long it took — no more "all
-	// failed" black box.
-	var batchFailures []auditBatchFailure
-	batchTotal := len(ai.TechnicalBatches)
+	agentCount := len(ai.TechnicalBatches)
+	results := make([]agentResult, agentCount)
+	var wg sync.WaitGroup
+
 	for i, batch := range ai.TechnicalBatches {
-		log.Printf("[audit %d] 技术审计批次 %d/%d：%s", taskID, i+1, batchTotal, batch.Name)
-		batchStart := time.Now()
-		bp := ai.BuildTechPromptBatch(batch, site.Domain, sitePages, crawlPages, gscData, gaData, yandexData)
-		chs, raw, model, bErr := ai.CallAIChaptersWithConfig(aiURL, aiKey, aiModel, bp)
-		dur := time.Since(batchStart)
-		lastModel = model
-		if raw != "" {
-			lastRaw = raw
-		}
-		if bErr != nil {
-			log.Printf("[audit %d] 批次 %d「%s」失败（耗时 %s）: %v", taskID, i+1, batch.Name, dur.Round(time.Millisecond), bErr)
-			batchFailures = append(batchFailures, auditBatchFailure{idx: i + 1, name: batch.Name, err: bErr, duration: dur})
+		wg.Add(1)
+		go func(idx int, b ai.TechBatch) {
+			defer wg.Done()
+			start := time.Now()
+			log.Printf("[audit %d] Agent %d/%d 启动：%s", taskID, idx+1, agentCount, b.Name)
+			bp := ai.BuildTechPromptBatch(b, site.Domain, sitePages, crawlPages, gscData, gaData, yandexData)
+			chs, raw, model, err := ai.CallAIChaptersWithConfig(aiURL, aiKey, aiModel, bp)
+			dur := time.Since(start)
+			results[idx] = agentResult{
+				idx: idx + 1, name: b.Name,
+				chapters: chs, raw: raw, model: model,
+				err: err, duration: dur,
+			}
+			if err != nil {
+				log.Printf("[audit %d] Agent %d 失败（%s）: %v", taskID, idx+1, dur.Round(time.Millisecond), err)
+			} else {
+				log.Printf("[audit %d] Agent %d 完成: %d 章节（%s）", taskID, idx+1, len(chs), dur.Round(time.Millisecond))
+			}
+			updateProgress(30 + ((idx + 1) * 50 / agentCount))
+		}(i, batch)
+	}
+	wg.Wait()
+	updateProgress(80)
+
+	// Collect results from all agents
+	allChapters := make([]ai.V6Chapter, 0, 24)
+	var lastModel, lastRaw string
+	var batchFailures []auditBatchFailure
+	for _, r := range results {
+		if r.model != "" { lastModel = r.model }
+		if r.raw != "" { lastRaw = r.raw }
+		if r.err != nil {
+			batchFailures = append(batchFailures, auditBatchFailure{
+				idx: r.idx, name: r.name, err: r.err, duration: r.duration,
+			})
 			continue
 		}
-		log.Printf("[audit %d] 批次 %d 得到 %d 章节（耗时 %s）", taskID, i+1, len(chs), dur.Round(time.Millisecond))
-		allChapters = append(allChapters, chs...)
-		// Progress: spread 65 → 80 across batches.
-		updateProgress(65 + ((i + 1) * 15 / batchTotal))
+		allChapters = append(allChapters, r.chapters...)
 	}
 
 	if len(allChapters) == 0 {

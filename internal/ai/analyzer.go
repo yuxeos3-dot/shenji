@@ -246,105 +246,98 @@ func BuildStrategyPrompt(domain string, sitePages []SitePageForPrompt, crawlPage
 type TechBatch struct {
 	Name       string // human-readable, for logs
 	Categories string // markdown body describing which 大类 to check this round
+	PageTypes  []string // which crawled page types to include (empty = all)
 }
 
 // TechnicalBatches splits the 24 + 5 附加类 into two halves so each batch's
 // output fits comfortably under the 16k-char output cap.
+// TechnicalBatches defines 8 specialized audit agents running in parallel.
+// 39+ check categories across 8 expert domains. Each agent ~15KB prompt.
 var TechnicalBatches = []TechBatch{
-	{
-		Name: "技术审计A（基础 + 结构化 + 性能）",
-		Categories: `### 第1类 TDK 与基础 Meta
-- title 标签：长度(30-60 字)、是否含核心关键词、是否跨页面重复、是否含品牌词
-- description：长度(120-160 字)、是否有实质内容、是否与 title 重复
-- keywords、og:title/og:description/og:image、twitter:card、canonical
-
-### 第2类 H 标签结构
-- H1 是否唯一/存在/与 title 呼应/被 CSS 隐藏
-- H2-H6 层次是否合理、是否跳级、是否含目标关键词
-
-### 第3类 图片 SEO
-- img alt 完整性与有意义性、loading=lazy 是否误用于首屏、width/height、格式
-
-### 第4类 链接与内链
-- href 有效性、内链数量、重要页面是否在导航、nofollow 合理性、锚文本描述性、孤立页面
-
+	{Name: "Agent-1 TDK+Meta+Schema", PageTypes: nil, Categories: `
+### 第1类 TDK 与基础 Meta
+title(30-60字)、含核心关键词、跨页面重复、品牌词; description(120-160字); keywords; og:title/og:description/og:image/og:type; twitter:card; canonical自引用
+### 第2类 H 标签层级
+H1唯一/存在/与title呼应/CSS隐藏; H2-H6层次合理、跳级、含关键词
 ### 第5类 结构化数据 Schema
-- ld+json 存在性、Schema 类型与页面匹配、必填字段完整性、AggregateRating、BreadcrumbList、Organization/WebSite
-
-### 第6类 robots.txt & Sitemap
-- robots.txt 存在性、是否误屏蔽、Sitemap 声明、Sitemap 可访问性、lastmod 真实性
-
-### 第7类 Core Web Vitals HTML 信号
-- LCP 元素 fetchpriority、首屏 preload、render-blocking CSS/JS、滥用 lazy、font-display、关键 CSS 内联
-
-### 第8类 URL 结构
-- 简洁语义化、多余参数、大小写、尾斜杠、分页 URL
-
-### 第9类 安全响应头
-- HSTS、X-Frame-Options/CSP、X-Content-Type-Options、Server/X-Powered-By 泄露
-
-### 第16类 资源压缩与缓存
-- gzip/br、cache-control、WebP/AVIF、CSS/JS minify、第三方脚本数
-
-### 附加类E 页面加载速度
-- 同步 JS 未 async/defer、第三方脚本数、preconnect/dns-prefetch、font-display:swap、@import 串行、大型 JS 整体引入、iframe 阻塞
-
-### 第24类 HTTPS 与安全
-- 混合内容、证书、内部链接 HTTPS、form action HTTPS`,
-	},
-	{
-		Name: "技术审计B（内容 + 移动 + 影视 + 附加）",
-		Categories: `### 第10类 内容质量
-- 首页 >200 字实质内容、详情页正文充实度、模板重复、关键词堆砌、用户价值
-
-### 第11类 移动端适配
-- viewport、字号 ≥16px、水平滚动、点击目标 ≥48px
-
-### 第12类 JavaScript SEO
-- noscript 降级、重要内容依赖 JS、纯 CSR、JSON-LD 动态注入、模板语法暴露
-
-### 第13类 重定向规范化
-- HTTP→HTTPS、www 统一、多跳链、分页第 1 页规范化
-
-### 第14类 爬虫陷阱
-- 无限分页、分面 URL 组合、Session ID、日历归档
-
+ld+json存在性、类型匹配、必填字段; BreadcrumbList/Organization/WebSite/AggregateRating; VideoObject/Article/Product/FAQ
+### 第30类 Favicon与浏览器标记
+favicon.ico存在性、apple-touch-icon、manifest.json、theme-color`},
+	{Name: "Agent-2 内容+E-E-A-T", PageTypes: nil, Categories: `
+### 第10类 内容质量
+首页>200字实质内容; 详情页正文充实度/段落结构/图文比; 模板重复率; 薄内容(<100字); 内容新鲜度
 ### 第15类 E-E-A-T 信号
-- 作者信息、关于我们/联系方式、DMCA/版权、外链权威来源、组织信息完整性
-
-### 第17类 国际化
-- hreflang、HTML lang、UTF-8、canonical 与 hreflang 关系
-
-### 第18类 RSS Feed 质量
-- 存在性/可访问性、域名一致性、更新时效、URL canonical
-
-### 第19类 内链分析
-- 导航覆盖核心分类、footer 重要链接、面包屑、分页 rel=next/prev、推荐模块
-
-### 第20类 分页 SEO
-- 分页 title 差异化、canonical、第 2+ 页是否误 noindex、参数暴露
-
-### 第21类 视频/媒体 SEO（影视站专项）
-- 视频标题关键词、VideoObject Schema、缩略图 schema、视频 Sitemap、播出平台信息
-
-### 第22类 404 与软 404
-- 404 返回正确状态码、友好提示、软 404、noindex 页面被 sitemap 收录
-
+作者信息/作者页/作者Schema; 关于我们/联系方式; DMCA/隐私政策/服务条款; 组织信息完整性
 ### 第23类 重复内容
-- 多 URL 同内容、canonical 正确性、打印版/移动版 canonical、标签页重叠
-
-### 附加类A 隐藏文本与黑帽手法（Google 惩罚项）
-- position:-9999px、display:none 含关键词、同色文字、font-size:0、overflow:hidden 裁剪、clip 隐藏
-
-### 附加类B 关键词堆砌检测
-- meta keywords >200 字、正文密度异常、隐藏关键词列表、footer 堆砌
-
-### 附加类C 代码质量问题
-- HTML 嵌套合法性、重复 ID、内联 style 过度、注释泄露敏感信息、javascript:void(0)、form 无 action、空 alt/title、遗留 console.log、隐藏 input
-
+多URL同内容; canonical正确; 打印版/移动版canonical; 标签页重叠
+### 第31类 内容可读性
+段落长度>300字无分段; 长文目录/锚点; 字体可读性/行距; CTA清晰度`},
+	{Name: "Agent-3 链接+内链+导航", PageTypes: nil, Categories: `
+### 第4类 链接与内链
+内链数量/有效性/孤立页面; 锚文本描述性; nofollow合理性; 外链目标可疑检测
+### 第19类 内链架构
+导航覆盖核心分类; footer链接; 面包屑+Schema; 推荐模块; 页面深度(>3级警告)
+### 第20类 分页 SEO
+分页title差异化; canonical; rel=next/prev; 第2+页noindex误设
+### 第18类 RSS/Atom Feed
+存在性/可访问性; 域名一致; 更新时效
+### 第32类 网站地图覆盖率
+sitemap覆盖重要页面; 不含404/重定向; lastmod真实性`},
+	{Name: "Agent-4 技术SEO+爬虫", PageTypes: nil, Categories: `
+### 第6类 robots.txt & Sitemap
+存在性; 误屏蔽重要路径; Sitemap声明/格式/可访问性
+### 第12类 JavaScript SEO
+noscript降级; 重要内容依赖JS; 纯CSR致命; JSON-LD动态注入; 模板变量暴露
+### 第13类 重定向规范化
+HTTP->HTTPS; www统一; 多跳链(>2); 302应改301; 分页第1页
+### 第14类 爬虫陷阱
+无限分页; 分面URL爆炸; Session ID; 日历归档; 软404
+### 第11类 移动端适配
+viewport; 字号>=16px; 水平滚动; 点击目标>=48px
+### 第22类 404 与软 404
+状态码正确; 友好页面; noindex页面被sitemap收录
+### 第33类 服务器响应
+TTFB>200ms; HTTP 5xx; 重定向响应时间`},
+	{Name: "Agent-5 安全审计", PageTypes: nil, Categories: `
+### 第9类 安全响应头
+HSTS; CSP/X-Frame-Options; X-Content-Type-Options; Referrer-Policy; Permissions-Policy; Server版本泄露
+### 第24类 HTTPS 与传输安全
+混合内容; 内部链接HTTPS; form action HTTPS
 ### 附加类D 安全漏洞风险
-- Server/X-Powered-By/X-Generator 版本、API 密钥/Token 硬编码、敏感目录、混合内容、Cookie 属性、CORS、管理员路径`,
-	},
+API密钥硬编码; 敏感目录暴露; Cookie Secure/HttpOnly/SameSite; CORS; 管理员路径
+### 第34类 隐私合规
+Cookie Banner/声明; 隐私政策; 第三方追踪披露`},
+	{Name: "Agent-6 性能+速度", PageTypes: nil, Categories: `
+### 第7类 Core Web Vitals
+LCP: fetchpriority/preload; CLS: img width/height/font-display; INP: 关键CSS内联/render-blocking
+### 第16类 资源压缩与缓存
+gzip/brotli; Cache-Control/ETag; WebP/AVIF; CSS/JS minify; 第三方脚本数
+### 附加类E 页面加载速度
+同步JS阻塞; preconnect; @import串行; 大型JS; iframe阻塞
+### 第35类 页面体积
+HTML>100KB; 单图>200KB; 未使用CSS/JS; 总资源体积`},
+	{Name: "Agent-7 代码+黑帽+国际化", PageTypes: nil, Categories: `
+### 附加类C 代码质量
+未关闭标签/错误嵌套; 重复ID; 内联style过多; 注释泄露(TODO/密码); javascript:void(0); console.log残留
+### 附加类A 隐藏文本(Google惩罚项)
+position:-9999px; display:none含关键词; 同色文字; font-size:0; overflow:hidden裁剪
+### 附加类B 关键词堆砌
+meta keywords>200字; 正文密度>5%; 隐藏关键词列表; footer堆砌
+### 第17类 国际化
+hreflang正确性; HTML lang; UTF-8; canonical与hreflang关系
+### 第36类 无障碍访问
+form label; aria-label; 语义化标签(nav/main/article); 图片alt; 键盘导航; 颜色对比度
+### 第8类 URL 结构
+简洁语义化; 多余参数; 大小写统一; 尾斜杠; 中文URL编码`},
+	{Name: "Agent-8 全站一致性+专项", PageTypes: nil, Categories: `
+### 第21类 视频/影视 SEO 专项
+VideoObject必填字段; 视频Sitemap; TVSeries/Movie层级; 缩略图>=160x90
+### 第37类 全站一致性
+canonical一致性; og:image全覆盖; 导航/footer一致; logo链接首页; 多域名统一
+### 第38类 社交媒体
+og:image>=1200x630; Twitter Card; 分享按钮; GTM/GA追踪
+### 第39类 竞品差距
+缺少FAQ Schema; 缺少面包屑; 缺少站内搜索; 缺少相关推荐; 缺少评论/评分`},
 }
 
 // BuildTechPromptBatch builds a focused prompt for one technical batch.
@@ -414,12 +407,13 @@ func BuildTechPromptBatch(batch TechBatch, domain string, sitePages []SitePageFo
 
 输出结构极简：
 
-{"chapters":[{"title":"一、TDK与基础Meta","issues":[{"id":1,"severity":"严重","module":"TDK","title":"首页description缺失","scope":"首页","evidence_label":"首页 <head>","evidence_code":"<head>\n  <title>示例</title>\n</head>","current_status":"首页缺少 meta description","fix_suggestion":"在 <head> 中添加 <meta name=\"description\" content=\"...\">\n• 长度 120-160 字符\n• 每页唯一\n• 验收：用 GSC 覆盖率报告确认无缺失"}]}]}
+{"chapters":[{"title":"一、TDK与基础Meta","issues":[{"id":1,"severity":"严重","module":"TDK","title":"首页description缺失","scope":"首页 https://example.com/","evidence_label":"首页 <head>","evidence_code":"<head>\n  <title>示例</title>\n</head>","current_status":"首页缺少 meta description","fix_suggestion":"在 <head> 中添加 <meta name=\"description\" content=\"...\">\n• 长度 120-160 字符\n• 每页唯一\n• 验收：用 GSC 覆盖率报告确认无缺失"}]}]}
 
 **严格字段要求：**
 - severity 只能是：致命/严重/中等/低
 - id 在本批次内连续从 1 开始（不用担心跨批次冲突，后端会重排）
-- title ≤ 20 字、scope ≤ 15 字、evidence_label ≤ 20 字
+- title ≤ 20 字、evidence_label ≤ 20 字
+- scope：必须包含受影响页面的完整URL，格式为"页面类型 URL"（例如"首页 https://example.com/" 或"分类页 https://example.com/category"），禁止只写"首页"而不带URL
 - evidence_code：3-10 行真实源码，不得编造
 - current_status：**≤ 40 字**，只说缺什么/错什么，不解释原理不推断后果
 - fix_suggestion：**200-400 字详细**，必须含：① 可复制的 HTML/配置代码 ② 3-5 条关键参数 ③ 验收方式

@@ -29,7 +29,7 @@
           {{ coordAddedIds.has(String(issue.id)) ? '✓ 已加入' : '➕ 加入协同' }}
         </button>
       </div>
-      <div v-if="issue.scope" class="issue-scope">{{ issue.scope }}</div>
+      <div v-if="issue.scope" class="issue-scope" v-html="renderScope(issue.scope)"></div>
       <div v-if="issue.evidence_label" class="evidence-label">{{ issue.evidence_label }}</div>
       <pre v-if="issue.evidence_code" class="evidence-code">{{ issue.evidence_code }}</pre>
       <div v-if="issue.current_status" class="issue-section">
@@ -79,6 +79,18 @@ defineEmits(['download', 'add-to-coord'])
 const filterSev = ref('')
 const page = ref(1)
 const PAGE_SIZE = 20
+
+// renderScope parses URLs in the scope string and makes them clickable links.
+// Input examples: "首页 https://example.com/" or "分类页 https://example.com/cat"
+// Output: "首页 <a href=\"...\" target=\"_blank\">https://example.com/</a>"
+function renderScope(scope: string): string {
+  if (!scope) return ""
+  // Escape HTML first, then linkify URLs
+  const escaped = scope.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  return escaped.replace(/(https?://[^s<>"]+)/g, (url: string) => {
+    return "<a href=\"" + url + "\" target=\"_blank\" class=\"scope-link\">" + url + "</a>"
+  })
+}
 
 function severityClass(sev) {
   if (sev === '致命') return 'fatal'
@@ -151,7 +163,9 @@ function countBySev(sev) {
 .coord-btn { padding:4px 12px; border-radius:6px; font-size:11.5px; font-weight:700; cursor:pointer; background:var(--sun-light); color:var(--sun-deep); border:1.5px solid var(--peach); transition:all .15s; font-family:inherit; white-space:nowrap; }
 .coord-btn:hover:not(:disabled) { background:var(--sun); color:#fff; border-color:var(--sun); box-shadow:0 2px 8px rgba(249,115,22,.3); }
 .coord-btn:disabled { background:var(--ok-bg); color:var(--ok); border-color:var(--ok-border); cursor:not-allowed; opacity:.85; }
-.issue-scope { font-size:12.5px; color:var(--ink-soft); margin-bottom:10px; }
+.issue-scope { font-size:12.5px; color:var(--ink-soft); margin-bottom:10px;  }
+.issue-scope :deep(.scope-link) { color: var(--sun); text-decoration: underline; font-weight: 600; word-break: break-all; }
+.issue-scope :deep(.scope-link):hover { color: var(--sun-deep); }
 .evidence-label { font-size:12px; font-weight:700; color:#34495E; margin-bottom:6px; }
 .evidence-code { background:#2C3E50; color:#ECF0F1; padding:12px 16px; border-radius:var(--r-sm); font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.6; overflow-x:auto; white-space:pre-wrap; word-break:break-all; margin-bottom:10px; }
 .issue-section { margin-top:10px; }
