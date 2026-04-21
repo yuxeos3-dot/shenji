@@ -96,6 +96,7 @@ function renderScope(scope) {
 }
 
 
+function severityClass(sev) {
   if (sev === '致命') return 'fatal'
   if (sev === '严重') return 'serious'
   if (sev === '中等') return 'medium'
