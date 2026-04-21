@@ -57,6 +57,7 @@ func GAListProperties(c *gin.Context) {
 	}
 	raw, err := gaAdminGET(token, "https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200")
 	if err != nil {
+t	log.Printf("[ga4] Admin API error uid=%d: %v", c.GetInt64("user_id"), err)
 		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "error": "GA4 Admin API: " + err.Error()})
 		return
 	}
@@ -143,6 +144,7 @@ func GAOverview(c *gin.Context) {
 	// Reuse the Admin API once to get the property list.
 	rawProps, err := gaAdminGET(token, "https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200")
 	if err != nil {
+t	log.Printf("[ga4] Admin API error uid=%d: %v", c.GetInt64("user_id"), err)
 		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "error": "GA4 Admin API: " + err.Error()})
 		return
 	}
@@ -352,6 +354,7 @@ func GAPropertyDetail(c *gin.Context) {
 	wg.Wait()
 
 	if errs["overview"] != "" {
+t	log.Printf("[ga4] overview error uid=%d: %v", c.GetInt64("user_id"), errs)
 		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "error": "GA4 API: " + errs["overview"]})
 		return
 	}
