@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"seo-system/internal/ai"
 	"seo-system/internal/db"
 	"seo-system/internal/httpx"
 	"seo-system/internal/secure"
@@ -135,7 +136,7 @@ func testAISlot(slot AISlot) error {
 	body := map[string]interface{}{
 		"model":      model,
 		"messages":   []map[string]string{{"role": "user", "content": "Hi"}},
-		"max_tokens": 5,
+		ai.MaxTokensKey(model): 5,
 	}
 	bj, _ := json.Marshal(body)
 	req, _ := http.NewRequest("POST", strings.TrimRight(slot.APIURL, "/")+"/chat/completions", bytes.NewReader(bj))

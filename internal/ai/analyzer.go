@@ -1237,7 +1237,7 @@ func CallAIChaptersWithConfig(apiURL, apiKey, model, prompt string) ([]V6Chapter
 	reqBody := map[string]interface{}{
 		"model":       model,
 		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-		maxTokensKey(model):  maxTok,
+		MaxTokensKey(model):  maxTok,
 		"temperature": 0.2,
 	}
 	jsonBody, err := json.Marshal(reqBody)
@@ -1300,7 +1300,7 @@ func CallAIStrategyWithConfig(apiURL, apiKey, model, prompt string) (*V6Chapter,
 	reqBody := map[string]interface{}{
 		"model":       model,
 		"messages":    []map[string]string{{"role": "user", "content": prompt}},
-		maxTokensKey(model):  16000,
+		MaxTokensKey(model):  16000,
 		"temperature": 0.3,
 	}
 	jsonBody, err := json.Marshal(reqBody)
@@ -1442,7 +1442,7 @@ func BuildExternalVerifyPrompt(domain string, ev *ExternalVerification, issueCou
 
 // maxTokensKey returns the correct parameter name for the model.
 // OpenAI GPT-4o/GPT-5+ use max_completion_tokens; all others use max_tokens.
-func maxTokensKey(model string) string {
+func MaxTokensKey(model string) string {
 	m := strings.ToLower(model)
 	if strings.Contains(m, "gpt-4o") || strings.Contains(m, "gpt-5") || strings.Contains(m, "o1") || strings.Contains(m, "o3") || strings.Contains(m, "o4") {
 		return "max_completion_tokens"
