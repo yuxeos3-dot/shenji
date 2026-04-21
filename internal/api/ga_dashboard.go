@@ -59,7 +59,8 @@ func GAListProperties(c *gin.Context) {
 	raw, err := gaAdminGET(token, "https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200")
 	if err != nil {
 		log.Printf("[ga4] Admin API error uid=%d: %v", c.GetInt64("user_id"), err)
-		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "error": "GA4 Admin API: " + err.Error()})
+		msg := translateGAError(err.Error())
+		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "error": msg})
 		return
 	}
 	var resp struct {
@@ -146,7 +147,8 @@ func GAOverview(c *gin.Context) {
 	rawProps, err := gaAdminGET(token, "https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200")
 	if err != nil {
 		log.Printf("[ga4] Admin API error uid=%d: %v", c.GetInt64("user_id"), err)
-		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "error": "GA4 Admin API: " + err.Error()})
+		msg := translateGAError(err.Error())
+		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "error": msg})
 		return
 	}
 	var propsResp struct {
@@ -415,4 +417,25 @@ func saveGAOverviewAsSync(propertyID, date string, overviewRaw json.RawMessage) 
 			return 0
 		}(),
 	)
+}
+
+// translateGAError turns raw Google API errors into user-friendly Chinese messages.
+func translateGAError(raw string) string {
+	lower := strings.ToLower(raw)
+	if strings.Contains(lower, "admin api has not been used") || strings.Contains(lower, "service_disabled") {
+		return "GA4 Admin API 未启用：请在 Google Cloud Console 中启用 Google Analytics Admin API 和 Google Analytics Data API，然后等待几分钟后重试"
+	}
+	if strings.Contains(lower, "data api has not been used") {
+		return "GA4 Data API 未启用：请在 Google Cloud Console 中启用 Google Analytics Data API，然后等待几分钟后重试"
+	}
+	if strings.Contains(lower, "invalid_grant") || strings.Contains(lower, "token has been expired") {
+		return "GA4 授权已过期，请在个人中心重新授权 GA4"
+	}
+	if strings.Contains(lower, "permission_denied") {
+		return "GA4 权限不足：请确认 OAuth 应用已启用 Analytics Admin API 和 Analytics Data API"
+	}
+	if strings.Contains(lower, "quota") {
+		return "GA4 API 配额超限，请稍后重试"
+	}
+	return "GA4 接口错误：" + raw
 }
