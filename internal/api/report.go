@@ -73,9 +73,10 @@ func DownloadAuditReport(c *gin.Context) {
 		return
 	}
 
-	filename := fmt.Sprintf("%s_SEO审计报告_%s.docx", domain, time.Now().Format("20060102"))
-	encodedName := url.PathEscape(filename)
-	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, filename, encodedName))
+	displayName := fmt.Sprintf("%s_SEO审计报告_%s.docx", domain, time.Now().Format("20060102"))
+	asciiName := fmt.Sprintf("%s_SEO_Audit_%s.docx", domain, time.Now().Format("20060102"))
+	encodedName := url.PathEscape(displayName)
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, asciiName, encodedName))
 	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", docx)
 }
