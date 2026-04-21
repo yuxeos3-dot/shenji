@@ -80,19 +80,22 @@ const filterSev = ref('')
 const page = ref(1)
 const PAGE_SIZE = 20
 
-// renderScope parses URLs in the scope string and makes them clickable links.
-// Input examples: "首页 https://example.com/" or "分类页 https://example.com/cat"
-// Output: "首页 <a href=\"...\" target=\"_blank\">https://example.com/</a>"
-function renderScope(scope: string): string {
+function renderScope(scope) {
   if (!scope) return ""
-  // Escape HTML first, then linkify URLs
-  const escaped = scope.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-  return escaped.replace(/(https?://[^s<>"]+)/g, (url: string) => {
-    return "<a href=\"" + url + "\" target=\"_blank\" class=\"scope-link\">" + url + "</a>"
-  })
+  var s = scope.replace(/&/g, "\x26amp;").replace(/</g, "\x26lt;").replace(/>/g, "\x26gt;")
+  var parts = s.split(/(https?:\x2f\x2f\S+)/g)
+  var out = ""
+  for (var i = 0; i < parts.length; i++) {
+    if (parts[i].match(/^https?:/)) {
+      out += "\x3ca href=\x27" + parts[i] + "\x27 target=\x27_blank\x27 class=\x27scope-link\x27\x3e" + parts[i] + "\x3c/a\x3e"
+    } else {
+      out += parts[i]
+    }
+  }
+  return out
 }
 
-function severityClass(sev) {
+
   if (sev === '致命') return 'fatal'
   if (sev === '严重') return 'serious'
   if (sev === '中等') return 'medium'
