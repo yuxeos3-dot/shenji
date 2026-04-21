@@ -92,7 +92,7 @@ func CreateDepartment(c *gin.Context) {
 		name, uid).Scan(&id)
 	if err != nil {
 		// SQLite UNIQUE constraint violation → "UNIQUE constraint failed"
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") || strings.Contains(err.Error(), "23505") {
 			c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "部门名称已存在"})
 			return
 		}
@@ -118,7 +118,7 @@ func UpdateDepartment(c *gin.Context) {
 	}
 	res, err := db.DB.Exec(`UPDATE departments SET name = $1 WHERE id = $2`, name, id)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") || strings.Contains(err.Error(), "23505") {
 			c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "部门名称已存在"})
 			return
 		}
@@ -260,7 +260,7 @@ func CreateGroup(c *gin.Context) {
 		`INSERT INTO dept_groups (department_id, name, created_by) VALUES ($1, $2, $3) RETURNING id`,
 		req.DepartmentID, name, uid).Scan(&id)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") || strings.Contains(err.Error(), "23505") {
 			c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "该部门下已有同名组"})
 			return
 		}
@@ -289,7 +289,7 @@ func UpdateGroup(c *gin.Context) {
 		`UPDATE dept_groups SET department_id = $1, name = $2 WHERE id = $3`,
 		req.DepartmentID, name, id)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") || strings.Contains(err.Error(), "23505") {
 			c.JSON(http.StatusConflict, gin.H{"code": -1, "error": "该部门下已有同名组"})
 			return
 		}
