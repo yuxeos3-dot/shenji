@@ -1366,13 +1366,76 @@ type VerifyItem struct {
 	TTFB       int64             `json:"ttfb_ms"`
 }
 
-// BuildExternalVerifyPrompt constructs the Agent-9 prompt for external
-// verification analysis.
+// BuildExternalVerifyPrompt constructs the Agent-9 prompt.
 func BuildExternalVerifyPrompt(domain string, ev *ExternalVerification, issueCount int) string {
 	var b strings.Builder
-	
-	fmt.Fprintf(&b, "你是一位资深 SEO 技术审计专家。前面 8 个专项 Agent 已从源码层面发现了 %d 个问题。\n", issueCount)
-	fmt.Fprintf(&b, "现在你需要从【外部可访问性】角度补充审计，验证源码审计无法覆盖的问题。\n\n")
+	fmt.Fprintf(&b, "你是资深SEO审计专家。前8个Agent已从源码发现%d个问题。现在从外部可访问性角度补充审计。\n\n", issueCount)
 	fmt.Fprintf(&b, "## 站点: %s\n\n", domain)
-	
-	b.WriteString("## 外部验证数据（后端已实际请求并收集）\n\n")
+	b.WriteString("## 外部验证数据\n\n")
+
+	// robots.txt
+	fmt.Fprintf(&b, "### robots.txt\nURL: %s | 状态码: %d | TTFB: %dms\n", ev.RobotsTxt.URL, ev.RobotsTxt.StatusCode, ev.RobotsTxt.TTFB)
+	if ev.RobotsTxt.Error != "" { fmt.Fprintf(&b, "错误: %s\n", ev.RobotsTxt.Error) }
+	if ev.RobotsTxt.Snippet != "" { fmt.Fprintf(&b, "内容:\n%s\n", ev.RobotsTxt.Snippet) }
+	b.WriteString("\n")
+
+	// sitemap
+	fmt.Fprintf(&b, "### sitemap.xml\nURL: %s | 状态码: %d | TTFB: %dms\n", ev.SitemapXML.URL, ev.SitemapXML.StatusCode, ev.SitemapXML.TTFB)
+	if ev.SitemapXML.Error != "" { fmt.Fprintf(&b, "错误: %s\n", ev.SitemapXML.Error) }
+	if ev.SitemapXML.Snippet != "" { fmt.Fprintf(&b, "片段:\n%s\n", ev.SitemapXML.Snippet) }
+	b.WriteString("\n")
+
+	// Redirects
+	fmt.Fprintf(&b, "### HTTP->HTTPS 跳转\nURL: %s | 状态码: %d | 跳转到: %s\n\n", ev.HTTPRedirect.URL, ev.HTTPRedirect.StatusCode, ev.HTTPRedirect.RedirectTo)
+	fmt.Fprintf(&b, "### www->裸域\nURL: %s | 状态码: %d | 跳转到: %s\n\n", ev.WWWRedirect.URL, ev.WWWRedirect.StatusCode, ev.WWWRedirect.RedirectTo)
+
+	// Aux pages
+	b.WriteString("### 辅助页面\n")
+	for _, p := range ev.AuxPages {
+		fmt.Fprintf(&b, "- %s (%s): %d\n", p.Label, p.URL, p.StatusCode)
+	}
+	b.WriteString("\n")
+
+	// Sample pages
+	b.WriteString("### 抽样页面\n")
+	for _, p := range ev.SamplePages {
+		fmt.Fprintf(&b, "- %s (%s): %d TTFB:%dms\n", p.Label, p.URL, p.StatusCode, p.TTFB)
+	}
+	b.WriteString("\n")
+
+	// Resources
+	b.WriteString("### 资源可达性\n")
+	for _, r := range ev.Resources {
+		fmt.Fprintf(&b, "- %s (%s): %d\n", r.Label, r.URL, r.StatusCode)
+	}
+	b.WriteString("\n")
+
+	// Response headers
+	b.WriteString("### 首页响应头\n")
+	for _, h := range ev.ResponseHdrs {
+		for k, v := range h.Headers { fmt.Fprintf(&b, "%s: %s\n", k, v) }
+	}
+	b.WriteString("\n---\n\n")
+
+	// Check categories
+	b.WriteString("## 检查类别\n")
+	b.WriteString("1. robots.txt 内容审查\n")
+	b.WriteString("2. sitemap.xml 存在性与格式\n")
+	b.WriteString("3. HTTP->HTTPS 301跳转\n")
+	b.WriteString("4. www->裸域统一\n")
+	b.WriteString("5. 辅助页面可达性(/about /privacy /contact /terms)\n")
+	b.WriteString("6. 安全响应头实际值(HSTS/CSP/X-Frame-Options等)\n")
+	b.WriteString("7. Server版本泄露\n")
+	b.WriteString("8. Cache-Control/ETag 缓存策略\n")
+	b.WriteString("9. gzip/brotli 压缩(Content-Encoding)\n")
+	b.WriteString("10. og:image/favicon 可达性\n")
+	b.WriteString("11. 抽样页面TTFB和可用性\n")
+	b.WriteString("12. sitemap中URL的可访问性\n\n")
+
+	// Output format
+	b.WriteString("## 输出格式\n\n")
+	b.WriteString("只返回JSON。\n\n")
+	fmt.Fprintf(&b, "{\"chapters\":[{\"title\":\"外部验证与可访问性\",\"issues\":[{\"id\":1,\"severity\":\"严重\",\"module\":\"外部验证\",\"title\":\"示例\",\"scope\":\"全站 https://%s/\",\"evidence_label\":\"验证数据\",\"evidence_code\":\"...\",\"current_status\":\"问题\",\"fix_suggestion\":\"修复\"}]}]}\n\n", domain)
+	b.WriteString("severity只能是致命/严重/中等/低。scope必须含URL。每个类别至少1个issue，总计至少8个。\n")
+	return b.String()
+}
