@@ -364,7 +364,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	// Agent-9: AI analysis of external verification data
 	log.Printf("[audit %d] Agent-9 外部验证分析启动", taskID)
 	verifyPrompt := ai.BuildExternalVerifyPrompt(site.Domain, ev, len(allChapters))
-	if verifyChs, _, vErr := ai.CallAIChaptersWithConfig(aiURL, aiKey, aiModel, verifyPrompt); vErr == nil {
+	if verifyChs, _, _, vErr := ai.CallAIChaptersWithConfig(aiURL, aiKey, aiModel, verifyPrompt); vErr == nil {
 		log.Printf("[audit %d] Agent-9 完成: %d 章节", taskID, len(verifyChs))
 		allChapters = append(allChapters, verifyChs...)
 	} else {
