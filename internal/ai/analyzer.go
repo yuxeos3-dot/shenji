@@ -1341,3 +1341,38 @@ func CallAIStrategyWithConfig(apiURL, apiKey, model, prompt string) (*V6Chapter,
 	}
 	return nil, model, fmt.Errorf("策略 AI 返回格式异常")
 }
+
+// ExternalVerification holds all data collected during the external
+// verification phase of the audit pipeline.
+type ExternalVerification struct {
+	RobotsTxt    VerifyItem   `json:"robots_txt"`
+	SitemapXML   VerifyItem   `json:"sitemap_xml"`
+	HTTPRedirect VerifyItem   `json:"http_redirect"`
+	WWWRedirect  VerifyItem   `json:"www_redirect"`
+	AuxPages     []VerifyItem `json:"aux_pages"`     // /about, /privacy, /contact, /terms
+	SamplePages  []VerifyItem `json:"sample_pages"`  // random detail/play pages
+	Resources    []VerifyItem `json:"resources"`      // og:image, favicon, etc.
+	ResponseHdrs []VerifyItem `json:"response_headers"` // homepage response headers
+}
+
+type VerifyItem struct {
+	URL        string            `json:"url"`
+	Label      string            `json:"label"`
+	StatusCode int               `json:"status_code"`
+	Headers    map[string]string `json:"headers,omitempty"`
+	Snippet    string            `json:"snippet,omitempty"`
+	RedirectTo string            `json:"redirect_to,omitempty"`
+	Error      string            `json:"error,omitempty"`
+	TTFB       int64             `json:"ttfb_ms"`
+}
+
+// BuildExternalVerifyPrompt constructs the Agent-9 prompt for external
+// verification analysis.
+func BuildExternalVerifyPrompt(domain string, ev *ExternalVerification, issueCount int) string {
+	var b strings.Builder
+	
+	fmt.Fprintf(&b, "你是一位资深 SEO 技术审计专家。前面 8 个专项 Agent 已从源码层面发现了 %d 个问题。\n", issueCount)
+	fmt.Fprintf(&b, "现在你需要从【外部可访问性】角度补充审计，验证源码审计无法覆盖的问题。\n\n")
+	fmt.Fprintf(&b, "## 站点: %s\n\n", domain)
+	
+	b.WriteString("## 外部验证数据（后端已实际请求并收集）\n\n")

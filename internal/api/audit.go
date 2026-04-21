@@ -354,6 +354,25 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 		return
 	}
 
+	// Step 4c: External verification — fetch auxiliary pages, check redirects,
+	// validate response headers, and sample additional pages that were not
+	// in the original crawl set. This fills the blind spots of source-only audit.
+	log.Printf("[audit %d] 开始外部验证抓取...", taskID)
+	ev := collectExternalVerification(site.Domain, crawlPages)
+	updateProgress(78)
+
+	// Agent-9: AI analysis of external verification data
+	log.Printf("[audit %d] Agent-9 外部验证分析启动", taskID)
+	verifyPrompt := ai.BuildExternalVerifyPrompt(site.Domain, ev, len(allChapters))
+	if verifyChs, _, vErr := ai.CallAIChaptersWithConfig(aiURL, aiKey, aiModel, verifyPrompt); vErr == nil {
+		log.Printf("[audit %d] Agent-9 完成: %d 章节", taskID, len(verifyChs))
+		allChapters = append(allChapters, verifyChs...)
+	} else {
+		log.Printf("[audit %d] Agent-9 失败（不影响其他结果）: %v", taskID, vErr)
+	}
+	updateProgress(82)
+
+
 	// Step 4b: White-hat SEO strategy chapter.
 	var strategyChapter *ai.V6Chapter
 	log.Printf("[audit %d] 调用策略 AI 生成白帽 SEO 建议...", taskID)
@@ -666,4 +685,60 @@ func max(a, b int) int { // nolint:unused - kept for clarity against Go builtin 
 		return a
 	}
 	return b
+}
+
+// collectExternalVerification fetches auxiliary pages, checks redirects,
+// and validates resources that source-code-only analysis cannot cover.
+func collectExternalVerification(domain string, crawlPages []crawler.PageResult) *ai.ExternalVerification {
+	ev := &ai.ExternalVerification{}
+	timeout := 15 * time.Second
+	base := "https://" + domain
+
+	// 1. robots.txt
+	r := crawler.FetchVerification(base+"/robots.txt", "robots.txt", timeout)
+	ev.RobotsTxt = ai.VerifyItem{URL: r.URL, Label: r.Label, StatusCode: r.StatusCode, Headers: r.Headers, Snippet: r.Snippet, Error: r.Error, TTFB: r.TTFB}
+
+	// 2. sitemap.xml
+	r = crawler.FetchVerification(base+"/sitemap.xml", "sitemap.xml", timeout)
+	ev.SitemapXML = ai.VerifyItem{URL: r.URL, Label: r.Label, StatusCode: r.StatusCode, Headers: r.Headers, Snippet: r.Snippet, Error: r.Error, TTFB: r.TTFB}
+
+	// 3. HTTP redirect (no follow)
+	httpURL := "http://" + domain + "/"
+	r = crawler.FetchVerificationNoFollow(httpURL, "HTTP->HTTPS redirect", timeout)
+	ev.HTTPRedirect = ai.VerifyItem{URL: r.URL, Label: r.Label, StatusCode: r.StatusCode, Headers: r.Headers, RedirectTo: r.RedirectTo, Error: r.Error, TTFB: r.TTFB}
+
+	// 4. www redirect (no follow)
+	wwwURL := "https://www." + domain + "/"
+	r = crawler.FetchVerificationNoFollow(wwwURL, "www redirect", timeout)
+	ev.WWWRedirect = ai.VerifyItem{URL: r.URL, Label: r.Label, StatusCode: r.StatusCode, Headers: r.Headers, RedirectTo: r.RedirectTo, Error: r.Error, TTFB: r.TTFB}
+
+	// 5. Auxiliary pages
+	auxPaths := []struct{ path, label string }{{"about", "关于我们"}, {"privacy", "隐私政策"}, {"contact", "联系我们"}, {"terms", "服务条款"}, {"dmca", "DMCA"}, {"sitemap", "站点地图页"}}
+	for _, aux := range auxPaths {
+		r = crawler.FetchVerification(base+"/"+aux.path, aux.label, timeout)
+		ev.AuxPages = append(ev.AuxPages, ai.VerifyItem{URL: r.URL, Label: r.Label, StatusCode: r.StatusCode, Error: r.Error, TTFB: r.TTFB})
+	}
+
+	// 6. Sample additional pages from crawled page links
+	sampled := 0
+	for _, p := range crawlPages {
+		if sampled >= 5 { break }
+		if p.URL == "" || p.StatusCode != 200 { continue }
+		r = crawler.FetchVerification(p.URL, "抽样-"+p.PageType, timeout)
+		ev.SamplePages = append(ev.SamplePages, ai.VerifyItem{URL: r.URL, Label: r.Label, StatusCode: r.StatusCode, Headers: r.Headers, Snippet: r.Snippet, TTFB: r.TTFB})
+		sampled++
+	}
+
+	// 7. Resource checks
+	resURLs := []struct{ url, label string }{{base + "/favicon.ico", "favicon.ico"}, {base + "/static/web/image/logo.jpg", "og:image logo"}}
+	for _, res := range resURLs {
+		r = crawler.FetchVerification(res.url, res.label, timeout)
+		ev.Resources = append(ev.Resources, ai.VerifyItem{URL: r.URL, Label: r.Label, StatusCode: r.StatusCode, Headers: r.Headers, Error: r.Error, TTFB: r.TTFB})
+	}
+
+	// 8. Homepage response headers
+	r = crawler.FetchVerification(base+"/", "首页响应头", timeout)
+	ev.ResponseHdrs = append(ev.ResponseHdrs, ai.VerifyItem{URL: r.URL, Label: r.Label, StatusCode: r.StatusCode, Headers: r.Headers, TTFB: r.TTFB})
+
+	return ev
 }

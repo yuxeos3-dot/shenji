@@ -377,3 +377,134 @@ func SharedTransport() *http.Transport {
 func ValidateURL(raw string) error {
 	return validateURL(raw)
 }
+
+// VerifyResult holds the result of an external verification check.
+type VerifyResult struct {
+	URL        string            `json:"url"`
+	Label      string            `json:"label"` // human-readable description
+	StatusCode int               `json:"status_code"`
+	Headers    map[string]string `json:"headers"` // selected response headers
+	Snippet    string            `json:"snippet"`  // first 2KB of body
+	RedirectTo string            `json:"redirect_to"` // final URL after redirects
+	Error      string            `json:"error"`
+	TTFB       int64             `json:"ttfb_ms"`
+}
+
+// FetchVerification performs a lightweight GET request and captures
+// status code, selected response headers, redirect chain, and a body
+// snippet. Used by the audit pipeline's external verification phase.
+func FetchVerification(rawURL, label string, timeout time.Duration) VerifyResult {
+	result := VerifyResult{URL: rawURL, Label: label}
+	
+	if err := validateURL(rawURL); err != nil {
+		result.Error = err.Error()
+		return result
+	}
+
+	client := &http.Client{
+		Timeout: timeout,
+		Transport: sharedTransport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return errors.New("too many redirects")
+			}
+			return nil // follow redirects
+		},
+	}
+
+	req, err := http.NewRequest("GET", rawURL, nil)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	req.Header.Set("User-Agent", GooglebotUA)
+	req.Header.Set("Accept", "*/*")
+
+	start := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+
+	result.TTFB = time.Since(start).Milliseconds()
+	result.StatusCode = resp.StatusCode
+	result.RedirectTo = resp.Request.URL.String()
+
+	// Capture selected headers
+	result.Headers = make(map[string]string)
+	for _, h := range []string{
+		"Server", "Content-Type", "Cache-Control", "ETag",
+		"Strict-Transport-Security", "Content-Security-Policy",
+		"X-Frame-Options", "X-Content-Type-Options",
+		"Referrer-Policy", "Permissions-Policy",
+		"X-Powered-By", "X-Generator",
+		"Content-Encoding", "Vary",
+	} {
+		if v := resp.Header.Get(h); v != "" {
+			result.Headers[h] = v
+		}
+	}
+
+	// Read body snippet (first 2KB)
+	snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+	result.Snippet = string(snippet)
+
+	return result
+}
+
+// FetchVerificationNoFollow is like FetchVerification but does NOT follow redirects.
+// Used to verify HTTP→HTTPS and www→naked domain redirects.
+func FetchVerificationNoFollow(rawURL, label string, timeout time.Duration) VerifyResult {
+	result := VerifyResult{URL: rawURL, Label: label}
+
+	if err := validateURL(rawURL); err != nil {
+		result.Error = err.Error()
+		return result
+	}
+
+	client := &http.Client{
+		Timeout:   timeout,
+		Transport: sharedTransport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse // don't follow
+		},
+	}
+
+	req, err := http.NewRequest("GET", rawURL, nil)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	req.Header.Set("User-Agent", GooglebotUA)
+
+	start := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+
+	result.TTFB = time.Since(start).Milliseconds()
+	result.StatusCode = resp.StatusCode
+	if loc := resp.Header.Get("Location"); loc != "" {
+		result.RedirectTo = loc
+	}
+
+	result.Headers = make(map[string]string)
+	for _, h := range []string{"Location", "Server", "Strict-Transport-Security", "Content-Type"} {
+		if v := resp.Header.Get(h); v != "" {
+			result.Headers[h] = v
+		}
+	}
+
+	return result
+}
