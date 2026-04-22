@@ -100,6 +100,35 @@
         </div>
       </div>
 
+      <!-- ─── Reports ───────────────────────────────────────── -->
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3>📝 分析报告</h3>
+          <el-button type="success" size="small" :loading="generating" @click="generateReport">
+            {{ generating ? '生成中...' : '📝 生成月度报告' }}
+          </el-button>
+        </div>
+        <el-table :data="reports" stripe border size="small" v-if="reports.length">
+          <el-table-column prop="report_type" label="类型" width="70" />
+          <el-table-column prop="period_start" label="开始" width="100" />
+          <el-table-column prop="period_end" label="结束" width="100" />
+          <el-table-column prop="total_score" label="评分" width="60" />
+          <el-table-column prop="status" label="状态" width="80">
+            <template #default="{row}"><el-tag :type="row.status==='ready'?'success':row.status==='failed'?'danger':'warning'" size="small">{{ row.status }}</el-tag></template>
+          </el-table-column>
+          <el-table-column prop="generated_at" label="生成时间" width="140" :formatter="(_:any,__:any,___:any,r:any) => r.generated_at?.slice(0,16)||'-'" />
+          <el-table-column label="" width="70">
+            <template #default="{row}"><el-button v-if="row.status==='ready'" link size="small" @click="viewReport(row.id)">查看</el-button></template>
+          </el-table-column>
+        </el-table>
+        <p v-else style="color:#999;font-size:13px">暂无报告。点击上方按钮生成第一份分析报告。</p>
+      </div>
+
+      <!-- ─── Report viewer dialog ──────────────────────────── -->
+      <el-dialog v-model="reportDlg" title="📝 站点分析报告" width="900px" top="3vh">
+        <div v-if="reportContent" v-html="renderMD(reportContent.markdown_text)" class="report-md"></div>
+      </el-dialog>
+
       <!-- ─── Audit Info ────────────────────────────────────── -->
       <div class="panel info-row">
         <div class="info-item"><span class="info-label">最近审计</span><span class="info-val">{{ data.last_audit_date?.slice(0,10) || '从未' }}</span></div>
@@ -145,6 +174,46 @@ const sevType = (s: string): any => {
   return 'info'
 }
 
+const reports = ref<any[]>([])
+const generating = ref(false)
+const reportDlg = ref(false)
+const reportContent = ref<any>(null)
+
+// Simple markdown to HTML (basic)
+function renderMD(md: string): string {
+  if (!md) return ''
+  return md
+    .replace(/^### (.*$)/gm, '<h3>$1</h3>')
+    .replace(/^## (.*$)/gm, '<h2>$1</h2>')
+    .replace(/^# (.*$)/gm, '<h1>$1</h1>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/^- (.*$)/gm, '<li>$1</li>')
+    .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
+    .replace(/\n\n/g, '<br><br>')
+    .replace(/\n/g, '<br>')
+}
+
+async function generateReport() {
+  if (!siteId.value) return
+  generating.value = true
+  try {
+    await api.generateReport(siteId.value, 'monthly')
+    ElMessage.success('报告生成中，请稍后刷新查看')
+    setTimeout(loadReports, 5000)
+  } catch (e: any) { ElMessage.error(e?.message || '生成失败') }
+  finally { generating.value = false }
+}
+
+async function loadReports() {
+  if (!siteId.value) return
+  try { const r: any = await api.listSiteReports(siteId.value); reports.value = r.data || [] } catch {}
+}
+
+async function viewReport(id: number) {
+  try { const r: any = await api.getSiteReport(id); reportContent.value = r.data; reportDlg.value = true } catch {}
+}
+
 onMounted(async () => {
   try { const r: any = await api.listSites(); sites.value = r.data || [] } catch {}
 })
@@ -163,6 +232,7 @@ async function loadAnalysis() {
     }
   } catch (e: any) { error.value = e?.message || '加载失败' }
   finally { loading.value = false }
+  loadReports()
 }
 
 async function runPipeline() {
@@ -242,4 +312,11 @@ h3 { margin: 0 0 12px; font-size: 15px; font-weight: 700; }
 .info-item { }
 .info-label { font-size: 11px; color: #999; margin-right: 6px; }
 .info-val { font-size: 13px; font-weight: 600; }
+.report-md { font-size: 14px; line-height: 1.8; }
+.report-md h1 { font-size: 20px; margin: 16px 0 8px; border-bottom: 2px solid #eee; padding-bottom: 6px; }
+.report-md h2 { font-size: 17px; margin: 14px 0 6px; color: #333; }
+.report-md h3 { font-size: 15px; margin: 10px 0 4px; }
+.report-md ul { padding-left: 20px; margin: 6px 0; }
+.report-md li { margin: 3px 0; }
+.report-md strong { color: #e6a23c; }
 </style>

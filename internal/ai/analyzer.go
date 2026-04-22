@@ -1442,6 +1442,43 @@ func BuildExternalVerifyPrompt(domain string, ev *ExternalVerification, issueCou
 
 // maxTokensKey returns the correct parameter name for the model.
 // OpenAI GPT-4o/GPT-5+ use max_completion_tokens; all others use max_tokens.
+// CallSimple sends a simple prompt to the AI and returns the text response.
+// Used for report generation and other non-structured AI tasks.
+func CallSimple(apiURL, apiKey, model, prompt string, maxTokens int) (string, error) {
+	if maxTokens <= 0 {
+		maxTokens = 4096
+	}
+	tokKey := MaxTokensKey(model)
+	body, _ := json.Marshal(map[string]interface{}{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+		tokKey: maxTokens,
+	})
+
+	client := &http.Client{Timeout: 180 * time.Second}
+	resp, err := postAIWithRetry(client, apiURL, apiKey, body, "simple")
+	if err != nil {
+		return "", err
+	}
+
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(resp.body, &parsed); err != nil {
+		return "", fmt.Errorf("parse AI response: %w", err)
+	}
+	if len(parsed.Choices) == 0 {
+		return "", fmt.Errorf("AI returned no choices")
+	}
+	return parsed.Choices[0].Message.Content, nil
+}
+
 func MaxTokensKey(model string) string {
 	m := strings.ToLower(model)
 	if strings.Contains(m, "gpt-4o") || strings.Contains(m, "gpt-5") || strings.Contains(m, "o1") || strings.Contains(m, "o3") || strings.Contains(m, "o4") {

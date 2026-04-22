@@ -27,6 +27,10 @@ func RegisterRoutes(r *gin.Engine, authMW, csrfMW gin.HandlerFunc) {
 	registerFRWRoutes(v1)
 	registerAdminRoutes(v1)
 	registerDeepDataRoutes(v1)
+
+	// RUM beacon endpoints (public, no auth — used by client-side JS)
+	r.POST("/api/rum/beacon", RUMBeaconIngest)
+	r.POST("/api/rum/event", RUMEventIngest)
 }
 
 // registerPublicRoutes handles unauthenticated endpoints.

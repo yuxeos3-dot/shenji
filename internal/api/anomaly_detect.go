@@ -198,6 +198,10 @@ func RunFullAnalysisPipeline(siteID int64) {
 	log.Printf("[analysis] site %d: starting full pipeline", siteID)
 	start := time.Now()
 
+	// Get domain for probes
+	var domain string
+	db.DB.QueryRow("SELECT domain FROM sites WHERE id=$1", siteID).Scan(&domain)
+
 	// Step 1: Snapshot metrics
 	SnapshotMetricsFromPlatformData(siteID)
 
@@ -214,6 +218,11 @@ func RunFullAnalysisPipeline(siteID int64) {
 	ComputeOpportunities(siteID)
 	ComputeCannibalization(siteID)
 	ComputeQueryDiff(siteID)
+
+	// Step 6: Infrastructure probes (TLS/DNS/Security headers)
+	if domain != "" {
+		RunAllProbes(siteID, domain)
+	}
 
 	log.Printf("[analysis] site %d: pipeline complete in %s", siteID, time.Since(start).Round(time.Millisecond))
 }
