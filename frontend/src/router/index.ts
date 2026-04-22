@@ -14,7 +14,6 @@ const routes: RouteRecordRaw[] = [
       { path: 'sites/:id', name: 'SiteDetail', component: () => import('../views/SiteDetail.vue') },
       { path: 'sites/:id/audit/:taskId', name: 'AuditDetail', component: () => import('../views/AuditDetail.vue') },
       { path: 'sites/:id/data', name: 'DataCenter', component: () => import('../views/DataCenter.vue') },
-      { path: 'platform-data-deep', name: 'PlatformDataDeep', component: () => import('../views/PlatformDataDeep.vue') },
       { path: 'geo-management', name: 'GeoManagement', component: () => import('../views/GeoContent.vue') },
       { path: 'image-management', name: 'ImageManagement', component: () => import('../views/MediaGen.vue'), props: { kind: 'image' } },
       { path: 'video-management', name: 'VideoManagement', component: () => import('../views/MediaGen.vue'), props: { kind: 'video' } },
