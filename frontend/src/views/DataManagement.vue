@@ -31,8 +31,8 @@
             :disabled-date="disabledDate"
             @change="onDateChange"
           />
-          <button class="btn btn-refresh" @click="refreshCurrent(true)" :disabled="loading">
-            {{ loading ? '加载中...' : '🔄 刷新' }}
+          <button class="btn btn-refresh" @click="unifiedRefresh" :disabled="loading || syncing">
+            {{ syncing ? '同步中...' : loading ? '加载中...' : '🔄 刷新同步' }}
           </button>
         </div>
       </div>
@@ -133,8 +133,8 @@
           <span class="title-sep">·</span>
           <span class="title-site">{{ detail.siteName }}</span>
         </div>
-        <button class="btn btn-sync" @click="syncDeep" :disabled="syncing" v-if="resolvedSiteId">
-          {{ syncing ? '同步中...' : '🔄 同步深度数据' }}
+        <button class="btn btn-sync" @click="unifiedRefresh" :disabled="loading || syncing" v-if="resolvedSiteId">
+          {{ syncing ? '同步中...' : loading ? '加载中...' : '🔄 刷新同步' }}
         </button>
       </div>
 
@@ -222,23 +222,11 @@
             </div>
           </div>
 
-          <!-- Deep overview: trend bars (GSC) -->
-          <div class="panel" v-if="platform === 'gsc' && gscOverview?.trend?.length">
-            <div class="section-title">📈 每日趋势（点击 · 深度数据）</div>
-            <div class="mini-chart">
-              <div class="deep-bar-row" v-for="d in gscOverview.trend" :key="d.date">
-                <span class="deep-bar-date">{{ d.date?.slice(5) }}</span>
-                <div class="bar-track"><div class="bar-fill" :style="{width: barWidth(d.clicks, deepTrendMax)+'%'}"></div></div>
-                <span class="deep-bar-num">{{ d.clicks }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Top keywords + pages (basic) -->
+          <!-- Top keywords + pages (unified: deep data preferred, basic as fallback) -->
           <div class="two-col">
-            <div class="panel" v-if="detail.keywords.length">
+            <div class="panel" v-if="mergedKeywords.length">
               <div class="panel-head">
-                <div class="section-title" style="border:none;margin:0;padding:0">热门关键词 Top 20</div>
+                <div class="section-title" style="border:none;margin:0;padding:0">🔑 热门关键词 Top 20</div>
                 <button class="btn btn-link" @click="switchSubTab('keywords')" v-if="platform === 'gsc'">查看全部 →</button>
               </div>
               <table class="table">
@@ -246,7 +234,7 @@
                   <tr><th>#</th><th>关键词</th><th>点击</th><th>展示</th><th>CTR</th><th>排名</th></tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(r, i) in detail.keywords" :key="i">
+                  <tr v-for="(r, i) in mergedKeywords" :key="i">
                     <td class="rk">{{ i + 1 }}</td>
                     <td class="kw-cell" :title="r.query">
                       <a v-if="platform === 'gsc' && resolvedSiteId" class="link" @click="openKwDetail(r.query)">{{ r.query }}</a>
@@ -261,9 +249,9 @@
               </table>
             </div>
 
-            <div class="panel" v-if="detail.pages.length">
+            <div class="panel" v-if="mergedPages.length">
               <div class="panel-head">
-                <div class="section-title" style="border:none;margin:0;padding:0">热门页面 Top 20</div>
+                <div class="section-title" style="border:none;margin:0;padding:0">📄 热门页面 Top 20</div>
                 <button class="btn btn-link" @click="switchSubTab('pages')" v-if="platform === 'gsc'">查看全部 →</button>
               </div>
               <table class="table">
@@ -271,51 +259,15 @@
                   <tr><th>#</th><th>页面</th><th>点击</th><th>展示</th><th>CTR</th></tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(r, i) in detail.pages" :key="i">
+                  <tr v-for="(r, i) in mergedPages" :key="i">
                     <td class="rk">{{ i + 1 }}</td>
-                    <td class="path-cell" :title="r.page">{{ cleanPath(r.page) }}</td>
+                    <td class="path-cell" :title="r.page || r.page_url">{{ cleanPath(r.page || r.page_url) }}</td>
                     <td class="num sv-blue">{{ fmt(r.clicks) }}</td>
                     <td class="num sv-green">{{ fmt(r.impressions) }}</td>
                     <td class="num sv-orange">{{ ((r.ctr || 0) * 100).toFixed(2) }}%</td>
                   </tr>
                 </tbody>
               </table>
-            </div>
-          </div>
-
-          <!-- Deep overview: top keywords/pages from deep data (GSC) -->
-          <div class="two-col" v-if="platform === 'gsc' && gscOverview">
-            <div class="panel" v-if="gscOverview.top_keywords?.length">
-              <div class="panel-head">
-                <div class="section-title" style="border:none;margin:0;padding:0">🔑 TOP 关键词（深度）</div>
-                <button class="btn btn-link" @click="switchSubTab('keywords')">查看全部 →</button>
-              </div>
-              <el-table :data="gscOverview.top_keywords" stripe size="small" max-height="400">
-                <el-table-column type="index" label="#" width="40" />
-                <el-table-column prop="query" label="关键词" min-width="220" show-overflow-tooltip>
-                  <template #default="{row}">
-                    <a class="link" @click="openKwDetail(row.query)">{{ row.query }}</a>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="clicks" label="点击" width="80" sortable />
-                <el-table-column prop="impressions" label="曝光" width="90" sortable />
-                <el-table-column label="CTR" width="80" :formatter="(_:any,__:any,___:any,r:any) => pct(r.ctr)" />
-                <el-table-column label="排名" width="70" :formatter="(_:any,__:any,___:any,r:any) => r.position?.toFixed(1)" />
-              </el-table>
-            </div>
-            <div class="panel" v-if="gscOverview.top_pages?.length">
-              <div class="panel-head">
-                <div class="section-title" style="border:none;margin:0;padding:0">📄 TOP 页面（深度）</div>
-                <button class="btn btn-link" @click="switchSubTab('pages')">查看全部 →</button>
-              </div>
-              <el-table :data="gscOverview.top_pages" stripe size="small" max-height="400">
-                <el-table-column type="index" label="#" width="40" />
-                <el-table-column prop="page_url" label="页面 URL" min-width="320" show-overflow-tooltip />
-                <el-table-column prop="clicks" label="点击" width="80" sortable />
-                <el-table-column prop="impressions" label="曝光" width="90" sortable />
-                <el-table-column label="CTR" width="80" :formatter="(_:any,__:any,___:any,r:any) => pct(r.ctr)" />
-                <el-table-column label="排名" width="70" :formatter="(_:any,__:any,___:any,r:any) => r.position?.toFixed(1)" />
-              </el-table>
             </div>
           </div>
 
@@ -956,19 +908,34 @@ function switchSubTab(key: string) {
 const allSites = ref<any[]>([])
 const resolvedSiteId = computed<number | null>(() => {
   if (!detail.siteKey || !allSites.value.length) return null
-  // Extract domain from siteKey for matching
-  let domain = detail.siteKey
+  // Extract domain from siteKey for matching — handles sc-domain:, https://, trailing /
+  const cleanDomain = (s: string) => (s || '')
     .replace(/^sc-domain:/, '')
     .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
     .replace(/\/+$/, '')
+    .replace(/:.*$/, '')  // remove port
     .toLowerCase()
+    .trim()
+  const target = cleanDomain(detail.siteKey)
+  if (!target) return null
+
+  // 1. Exact domain match
   for (const s of allSites.value) {
-    const sd = (s.domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '').toLowerCase()
-    if (sd === domain || domain.includes(sd) || sd.includes(domain)) return s.id
+    const sd = cleanDomain(s.domain)
+    if (sd === target) return s.id
   }
-  // Fallback: try matching by name
+  // 2. Partial domain match (subdomain / parent domain)
   for (const s of allSites.value) {
-    if ((s.name || '').toLowerCase() === domain) return s.id
+    const sd = cleanDomain(s.domain)
+    if (target.endsWith('.' + sd) || sd.endsWith('.' + target) || target.includes(sd) || sd.includes(target)) return s.id
+  }
+  // 3. Match by site name (display_name from overview card)
+  const siteName = detail.siteName?.toLowerCase() || ''
+  for (const s of allSites.value) {
+    const sd = cleanDomain(s.domain)
+    if (siteName.includes(sd) || sd.includes(siteName)) return s.id
+    if ((s.name || '').toLowerCase() === siteName) return s.id
   }
   return null
 })
@@ -1013,6 +980,67 @@ async function refreshCurrent(bypassCache = false) {
     if (subTab.value !== 'overview') loadSubTabData(subTab.value)
   }
 }
+
+// Unified refresh: clears cache + refreshes basic data + triggers deep sync + reloads deep data
+async function unifiedRefresh() {
+  // Clear all cache
+  cache.clear()
+  if (view.value === 'overview') {
+    await loadOverview()
+    return
+  }
+  // In detail view: refresh basic + deep sync + deep data in one action
+  const sid = resolvedSiteId.value
+  loading.value = true
+  try {
+    // 1. Reload basic platform data
+    const baseParams = { start_date: dateRange.value[0], end_date: dateRange.value[1] }
+    let res: any
+    switch (platform.value) {
+      case 'gsc':    res = await api.dashGSCSiteDetail({ ...baseParams, site_url: detail.siteKey }); break
+      case 'ga4':    res = await api.dashGAPropertyDetail({ ...baseParams, property_id: detail.siteKey }); break
+      case 'bing':   res = await api.dashBingSiteDetail({ ...baseParams, site_url: detail.siteKey }); break
+      case 'yandex': res = await api.dashYandexHostDetail({ ...baseParams, host_id: detail.siteKey }); break
+    }
+    if (res?.data) digestDetail(res.data)
+  } catch {} finally { loading.value = false }
+
+  // 2. Trigger deep sync if site resolved
+  if (sid) {
+    syncing.value = true
+    try {
+      if (platform.value === 'gsc') await api.syncGSCDeep(sid)
+      else if (platform.value === 'ga4') await api.syncGA4Deep(sid)
+      else if (platform.value === 'bing') await api.syncBingDeep(sid)
+      else if (platform.value === 'yandex') await api.syncYandexDeep(sid)
+      ElMessage.success('数据刷新同步完成')
+    } catch (e: any) {
+      ElMessage.warning('基础数据已刷新，深度同步: ' + (e?.response?.data?.error || e?.message || '失败'))
+    } finally { syncing.value = false }
+
+    // 3. Reload deep data
+    loadDeepOverviewData()
+    if (subTab.value !== 'overview') loadSubTabData(subTab.value)
+  }
+}
+
+// Merged data: prefer deep data (gscOverview.top_keywords) over basic (detail.keywords)
+const mergedKeywords = computed(() => {
+  if (gscOverview.value?.top_keywords?.length) {
+    return gscOverview.value.top_keywords.map((k: any) => ({
+      query: k.query, clicks: k.clicks, impressions: k.impressions, ctr: k.ctr, position: k.position,
+    }))
+  }
+  return detail.keywords
+})
+const mergedPages = computed(() => {
+  if (gscOverview.value?.top_pages?.length) {
+    return gscOverview.value.top_pages.map((p: any) => ({
+      page: p.page_url || p.page, page_url: p.page_url, clicks: p.clicks, impressions: p.impressions, ctr: p.ctr, position: p.position,
+    }))
+  }
+  return detail.pages
+})
 
 function platformSiteKey(c: any): string {
   switch (platform.value) {
@@ -1435,11 +1463,18 @@ const yandexExtLinks = ref<any[]>([]); const yandexIndexedUrls = ref<any>({ item
 
 // ── Load deep overview data (called when entering detail view) ──
 async function loadDeepOverviewData() {
-  const sid = resolvedSiteId.value
+  let sid = resolvedSiteId.value
+  // If site ID not resolved yet (allSites still loading), wait and retry
+  if (!sid && allSites.value.length === 0) {
+    try {
+      const r: any = await api.listSites()
+      allSites.value = r.data || []
+      sid = resolvedSiteId.value
+    } catch {}
+  }
   if (!sid) return
 
   if (platform.value === 'gsc') {
-    // Load GSC deep overview + buckets in parallel
     Promise.all([
       api.getGSCOverviewDeep(sid, deepDays.value).then((r: any) => { gscOverview.value = r.data }).catch(() => {}),
       api.getGSCRankBuckets(sid, deepDays.value).then((r: any) => { gscBuckets.value = r.data || [] }).catch(() => {}),
