@@ -27,8 +27,17 @@ const (
 	PageTypeStatic     = "static"
 
 	MaxHTMLSize = 500 * 1024 // 500KB
-	GooglebotUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+	GooglebotUA = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
 )
+
+// uaFallbacks: if the first UA gets a non-2xx response, retry with the next.
+// Order: Googlebot → Chrome Desktop → Chrome Mobile → generic bot
+var uaFallbacks = []string{
+	"Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+	"Mozilla/5.0 (compatible; SEOSystemBot/1.0)",
+}
 
 type URLSpec struct {
 	PageType string
@@ -324,45 +333,51 @@ func FetchPage(spec URLSpec, timeout time.Duration) PageResult {
 
 	client := BuildHTTPClient(timeout)
 
-	req, err := http.NewRequest("GET", spec.URL, nil)
-	if err != nil {
-		result.Error = err.Error()
-		return result
-	}
-	req.Header.Set("User-Agent", GooglebotUA)
-	req.Header.Set("Accept", "text/html,application/xhtml+xml")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	// Try each UA in order; stop on first 2xx success
+	for _, ua := range uaFallbacks {
+		req, err := http.NewRequest("GET", spec.URL, nil)
+		if err != nil {
+			result.Error = err.Error()
+			return result
+		}
+		req.Header.Set("User-Agent", ua)
+		req.Header.Set("Accept", "text/html,application/xhtml+xml")
+		req.Header.Set("Accept-Language", "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7")
 
-	start := time.Now()
-	resp, err := client.Do(req)
-	if err != nil {
-		result.Error = err.Error()
-		return result
-	}
-	defer func() {
-		// Drain remaining body so the underlying TCP connection can be
-		// reused by the transport's idle pool. Otherwise concurrent
-		// crawls eventually exhaust the connection pool on errored
-		// reads.
+		start := time.Now()
+		resp, err := client.Do(req)
+		if err != nil {
+			result.Error = err.Error()
+			// Network error → try next UA
+			continue
+		}
+
+		result.TTFB = time.Since(start).Milliseconds()
+		result.StatusCode = resp.StatusCode
+
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, MaxHTMLSize))
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
-	}()
 
-	// TTFB is captured at the time the response headers arrive. `client.Do`
-	// returns when the HTTP response is available — the body is still
-	// streaming, so this is a faithful first-byte timing.
-	result.TTFB = time.Since(start).Milliseconds()
-	result.StatusCode = resp.StatusCode
+		if readErr != nil {
+			result.Error = "读取响应失败: " + readErr.Error()
+			continue
+		}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxHTMLSize))
-	if err != nil {
-		result.Error = "读取响应失败: " + err.Error()
-		return result
+		result.HTML = string(body)
+		result.HTMLSize = len(body)
+
+		// 2xx → success, stop retrying
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			result.Error = ""
+			return result
+		}
+
+		// 403/404/5xx → try next UA (site may be blocking this UA)
+		result.Error = ""
 	}
 
-	result.HTML = string(body)
-	result.HTMLSize = len(body)
-
+	// All UAs failed, return the last result (which has the status code from the last attempt)
 	return result
 }
 
