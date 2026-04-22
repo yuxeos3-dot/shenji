@@ -13,7 +13,16 @@ import (
 func RunAnomalyDetection(siteID int64) {
 	date := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 	metrics := []struct{ name, platform string }{
+		// GSC
 		{"clicks", "gsc"}, {"impressions", "gsc"}, {"ctr", "gsc"}, {"position", "gsc"},
+		// GA4
+		{"sessions", "ga"}, {"users", "ga"}, {"pageviews", "ga"}, {"bounce_rate", "ga"},
+		// Bing
+		{"clicks", "bing"}, {"impressions", "bing"},
+		// Yandex
+		{"clicks", "yandex"}, {"impressions", "yandex"},
+		// Cross-platform
+		{"dead_links", "all"},
 	}
 
 	for _, m := range metrics {
@@ -191,6 +200,23 @@ func AutoGenerateTimelineEvents(siteID int64) {
 		FROM site_incidents
 		WHERE site_id=$1
 		AND id NOT IN (SELECT related_incident_id FROM timeline_events WHERE site_id=$1 AND related_incident_id > 0)`, siteID)
+
+	// 4. From rule_findings (critical/high rules) → timeline
+	db.DB.Exec(`INSERT INTO timeline_events (site_id, event_category, event_type, title, severity, occurred_at, source_type, related_finding_id)
+		SELECT site_id, 'rule', 'rule_triggered',
+			rule_id || ': ' || LEFT(COALESCE(target_url, target_query, ''), 80),
+			severity, detected_at, 'auto', id
+		FROM rule_findings
+		WHERE site_id=$1 AND severity IN ('critical','high')
+		AND id NOT IN (SELECT related_finding_id FROM timeline_events WHERE site_id=$1 AND related_finding_id > 0)
+		AND detected_at >= CURRENT_DATE - INTERVAL '30 days'`, siteID)
+
+	// 5. From algorithm_updates (global events) → timeline
+	db.DB.Exec(`INSERT INTO timeline_events (site_id, event_category, event_type, title, severity, occurred_at, source_type)
+		SELECT 0, 'algorithm', engine || '_update', update_name, 'high', COALESCE(started_at, announced_at), 'auto'
+		FROM algorithm_updates
+		WHERE id NOT IN (SELECT source_id FROM timeline_events WHERE event_category='algorithm' AND source_id > 0)
+		AND announced_at >= CURRENT_DATE - INTERVAL '90 days'`)
 }
 
 // RunFullAnalysisPipeline runs all analysis steps for a site in order.

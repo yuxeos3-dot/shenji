@@ -145,11 +145,66 @@ func ComputeSiteHealthScore(siteID int64) {
 		siteID).Scan(&anomalyCount)
 	s.stabilityScore = clampScore(100 - anomalyCount*15)
 
-	// ── Compute total ──
+	// ── 11. Brand score (from query_enrichment brand queries) ──
+	var brandClicks int
+	db.DB.QueryRow(`SELECT COALESCE(SUM(q.clicks),0) FROM gsc_query_page_daily q
+		JOIN query_enrichment e ON e.site_id=q.site_id AND e.query=q.query AND e.platform='gsc'
+		WHERE q.site_id=$1 AND e.brand_category='brand' AND q.date>=CURRENT_DATE-30`, siteID).Scan(&brandClicks)
+	s.brandScore = clampScore(scoreFromTraffic(brandClicks))
+
+	// ── 12. E-E-A-T score (from eeat_signals_daily or page_content_snapshots) ──
+	var hasAbout, hasContact, hasPrivacy bool
+	var pagesWithAuthorPct float64
+	db.DB.QueryRow(`SELECT has_about_page, has_contact_page, has_privacy_policy, pages_with_author_pct
+		FROM eeat_signals_daily WHERE site_id=$1 ORDER BY date DESC LIMIT 1`,
+		siteID).Scan(&hasAbout, &hasContact, &hasPrivacy, &pagesWithAuthorPct)
+	eeatParts := 0
+	if hasAbout { eeatParts += 20 }
+	if hasContact { eeatParts += 20 }
+	if hasPrivacy { eeatParts += 20 }
+	eeatParts += int(pagesWithAuthorPct * 40) // 40% weight for author coverage
+	s.eeatScore = clampScore(eeatParts)
+	if eeatParts == 0 {
+		// Fallback: check content snapshots for E-E-A-T signals
+		var withAuthor, totalPCS int
+		db.DB.QueryRow(`SELECT COUNT(*) FILTER (WHERE has_author), COUNT(*)
+			FROM page_content_snapshots WHERE site_id=$1
+			AND snapshot_date=(SELECT MAX(snapshot_date) FROM page_content_snapshots WHERE site_id=$1)`,
+			siteID).Scan(&withAuthor, &totalPCS)
+		if totalPCS > 0 {
+			s.eeatScore = clampScore(int(float64(withAuthor)/float64(totalPCS)*60) + 20)
+		} else {
+			s.eeatScore = 30
+		}
+	}
+
+	// ── 13. AIO visibility score (from aio_observations + gsc_appearance) ──
+	var aioCited int
+	db.DB.QueryRow(`SELECT COUNT(*) FROM aio_observations WHERE site_id=$1 AND our_domain_cited=TRUE`, siteID).Scan(&aioCited)
+	var aioAppearance int
+	db.DB.QueryRow(`SELECT COALESCE(SUM(impressions),0) FROM gsc_appearance_daily WHERE site_id=$1 AND appearance='AI_OVERVIEW'`, siteID).Scan(&aioAppearance)
+	s.aioScore = clampScore(aioCited*10 + scoreFromTraffic(aioAppearance)/2)
+
+	// ── 14. Crawl budget score (from crawl_budget_daily) ──
+	var wasteRate float64
+	db.DB.QueryRow(`SELECT COALESCE(waste_rate,0) FROM crawl_budget_daily WHERE site_id=$1 ORDER BY date DESC LIMIT 1`, siteID).Scan(&wasteRate)
+	if wasteRate > 0 {
+		s.crawlBudgetScore = clampScore(int((1 - wasteRate) * 100))
+	} else {
+		s.crawlBudgetScore = 50
+	}
+
+	// ── 15. International score (from hreflang_errors) ──
+	var hreflangErrors int
+	db.DB.QueryRow(`SELECT COUNT(*) FROM hreflang_errors WHERE site_id=$1 AND resolved_at IS NULL`, siteID).Scan(&hreflangErrors)
+	s.internationalScore = clampScore(100 - hreflangErrors*15)
+
+	// ── Compute total (15 dimensions) ──
 	weights := map[string]float64{
-		"traffic": 0.15, "ranking": 0.15, "ctr": 0.10, "technical": 0.15,
-		"indexation": 0.10, "content": 0.10, "backlink": 0.08, "security": 0.05,
-		"ux": 0.07, "stability": 0.05,
+		"traffic": 0.12, "ranking": 0.12, "ctr": 0.08, "technical": 0.12,
+		"indexation": 0.08, "content": 0.08, "backlink": 0.07, "security": 0.04,
+		"ux": 0.05, "stability": 0.04, "brand": 0.05, "eeat": 0.05,
+		"aio": 0.03, "crawl_budget": 0.04, "international": 0.03,
 	}
 	total := weights["traffic"]*float64(s.trafficScore) +
 		weights["ranking"]*float64(s.rankingScore) +
@@ -160,7 +215,12 @@ func ComputeSiteHealthScore(siteID int64) {
 		weights["backlink"]*float64(s.backlinkScore) +
 		weights["security"]*float64(s.securityScore) +
 		weights["ux"]*float64(s.uxScore) +
-		weights["stability"]*float64(s.stabilityScore)
+		weights["stability"]*float64(s.stabilityScore) +
+		weights["brand"]*float64(s.brandScore) +
+		weights["eeat"]*float64(s.eeatScore) +
+		weights["aio"]*float64(s.aioScore) +
+		weights["crawl_budget"]*float64(s.crawlBudgetScore) +
+		weights["international"]*float64(s.internationalScore)
 	s.totalScore = clampScore(int(total))
 
 	// Grade
@@ -186,10 +246,24 @@ func ComputeSiteHealthScore(siteID int64) {
 	s.delta = s.totalScore - prevScore
 
 	// Save
-	subJSON, _ := json.Marshal(map[string]int{
-		"traffic": s.trafficScore, "ranking": s.rankingScore, "ctr": s.ctrScore,
-		"technical": s.technicalScore, "indexation": s.indexationScore, "content": s.contentScore,
-		"backlink": s.backlinkScore, "security": s.securityScore, "ux": s.uxScore, "stability": s.stabilityScore,
+	// Data coverage tracking: which data sources have actual data vs fallback
+	coverage := map[string]string{}
+	if gscClicks > 0 { coverage["gsc"] = "full" } else { coverage["gsc"] = "none" }
+	if pagesCount > 0 { coverage["content_snapshot"] = "full" } else { coverage["content_snapshot"] = "none" }
+	if totalBacklinks > 0 { coverage["backlinks"] = "full" } else { coverage["backlinks"] = "partial" }
+	if totalInspected > 0 { coverage["url_inspection"] = "full" } else { coverage["url_inspection"] = "none" }
+	if anomalyCount >= 0 { coverage["anomaly_detection"] = "full" }
+	if deadLinks >= 0 { coverage["dead_links"] = "full" }
+
+	subJSON, _ := json.Marshal(map[string]interface{}{
+		"scores": map[string]int{
+			"traffic": s.trafficScore, "ranking": s.rankingScore, "ctr": s.ctrScore,
+			"technical": s.technicalScore, "indexation": s.indexationScore, "content": s.contentScore,
+			"backlink": s.backlinkScore, "security": s.securityScore, "ux": s.uxScore, "stability": s.stabilityScore,
+			"brand": s.brandScore, "eeat": s.eeatScore, "aio": s.aioScore,
+			"crawl_budget": s.crawlBudgetScore, "international": s.internationalScore,
+		},
+		"coverage": coverage,
 	})
 
 	db.DB.Exec(`INSERT INTO site_health_scores (site_id, date, total_score, indexation_score, ranking_score,
@@ -231,6 +305,7 @@ type healthScoreBuilder struct {
 	date                                                                            string
 	totalScore, trafficScore, rankingScore, ctrScore, technicalScore                int
 	indexationScore, contentScore, backlinkScore, uxScore, securityScore, stabilityScore int
+	brandScore, eeatScore, aioScore, crawlBudgetScore, internationalScore           int
 	delta                                                                           int
 	grade                                                                           string
 }
@@ -399,6 +474,48 @@ func GetSiteAnalysisSummary(c *gin.Context) {
 	var cannibalCount int
 	db.DB.QueryRow(`SELECT COUNT(*) FROM gsc_cannibalization_monthly WHERE site_id=$1`, siteID).Scan(&cannibalCount)
 
+	// Data source freshness (last sync dates)
+	dataSources := map[string]interface{}{}
+	var lastDate string
+	if db.DB.QueryRow(`SELECT MAX(date) FROM gsc_data WHERE site_id=$1`, siteID).Scan(&lastDate) == nil && lastDate != "" {
+		dataSources["gsc"] = lastDate
+	}
+	if db.DB.QueryRow(`SELECT MAX(date) FROM ga_data WHERE site_id=$1`, siteID).Scan(&lastDate) == nil && lastDate != "" {
+		dataSources["ga4"] = lastDate
+	}
+	if db.DB.QueryRow(`SELECT MAX(date) FROM bing_data WHERE site_id=$1`, siteID).Scan(&lastDate) == nil && lastDate != "" {
+		dataSources["bing"] = lastDate
+	}
+	if db.DB.QueryRow(`SELECT MAX(date) FROM yandex_data WHERE site_id=$1`, siteID).Scan(&lastDate) == nil && lastDate != "" {
+		dataSources["yandex"] = lastDate
+	}
+	if db.DB.QueryRow(`SELECT MAX(snapshot_date)::text FROM page_content_snapshots WHERE site_id=$1`, siteID).Scan(&lastDate) == nil && lastDate != "" {
+		dataSources["content_snapshot"] = lastDate
+	}
+	if db.DB.QueryRow(`SELECT MAX(date)::text FROM backlink_profile_daily WHERE site_id=$1`, siteID).Scan(&lastDate) == nil && lastDate != "" {
+		dataSources["backlinks"] = lastDate
+	}
+	if db.DB.QueryRow(`SELECT MAX(date)::text FROM tls_checks_daily WHERE site_id=$1`, siteID).Scan(&lastDate) == nil && lastDate != "" {
+		dataSources["tls_dns"] = lastDate
+	}
+	if db.DB.QueryRow(`SELECT MAX(date)::text FROM crawl_budget_daily WHERE site_id=$1`, siteID).Scan(&lastDate) == nil && lastDate != "" {
+		dataSources["crawl_budget"] = lastDate
+	}
+
+	// Rule findings count
+	var ruleFindings int
+	db.DB.QueryRow(`SELECT COUNT(*) FROM rule_findings WHERE site_id=$1 AND status='open'`, siteID).Scan(&ruleFindings)
+
+	// Query diff (lost/new counts)
+	var lostCount, newCount int
+	db.DB.QueryRow(`SELECT COUNT(*) FROM gsc_query_diff_weekly WHERE site_id=$1 AND diff_type='lost'`, siteID).Scan(&lostCount)
+	db.DB.QueryRow(`SELECT COUNT(*) FROM gsc_query_diff_weekly WHERE site_id=$1 AND diff_type='new'`, siteID).Scan(&newCount)
+
+	// Orphan pages
+	var orphanCount int
+	db.DB.QueryRow(`SELECT COUNT(*) FROM internal_link_stats WHERE site_id=$1 AND is_orphan=TRUE
+		AND computed_date=(SELECT MAX(computed_date) FROM internal_link_stats WHERE site_id=$1)`, siteID).Scan(&orphanCount)
+
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
 		"health_score":    totalScore,
 		"grade":           grade,
@@ -412,5 +529,10 @@ func GetSiteAnalysisSummary(c *gin.Context) {
 		"dead_links":      deadLinks,
 		"opportunities":   oppCount,
 		"cannibalization":  cannibalCount,
+		"data_sources":    dataSources,
+		"rule_findings":   ruleFindings,
+		"lost_queries":    lostCount,
+		"new_queries":     newCount,
+		"orphan_pages":    orphanCount,
 	}})
 }

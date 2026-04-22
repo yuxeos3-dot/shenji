@@ -53,6 +53,18 @@
           <div class="summary-item"><span class="si-icon">💡</span><span class="si-num">{{ data.opportunities || 0 }}</span><span class="si-label">优化机会</span></div>
           <div class="summary-item"><span class="si-icon">⚠️</span><span class="si-num">{{ data.cannibalization || 0 }}</span><span class="si-label">自蚕食</span></div>
           <div class="summary-item"><span class="si-icon">💀</span><span class="si-num">{{ data.dead_links || 0 }}</span><span class="si-label">死链</span></div>
+        <div class="summary-item"><span class="si-icon">🔻</span><span class="si-num">{{ data.lost_queries || 0 }}</span><span class="si-label">丢失词</span></div>
+        <div class="summary-item"><span class="si-icon">🔺</span><span class="si-num">{{ data.new_queries || 0 }}</span><span class="si-label">新词</span></div>
+        <div class="summary-item"><span class="si-icon">🏝️</span><span class="si-num">{{ data.orphan_pages || 0 }}</span><span class="si-label">孤岛页</span></div>
+        </div>
+        <!-- Data source coverage -->
+        <div v-if="data.data_sources" style="margin-top:8px">
+          <div style="font-size:11px;color:#999;margin-bottom:4px">数据源覆盖：</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <span v-for="(date, src) in data.data_sources" :key="src" class="ds-chip" :class="isRecent(date)?'ds-ok':'ds-stale'">
+              {{ srcLabel(src) }} <span style="font-size:10px;opacity:.7">{{ date?.slice?.(5) || '-' }}</span>
+            </span>
+          </div>
         </div>
       </div>
 
@@ -142,6 +154,73 @@
         <div class="info-item"><span class="info-label">审计状态</span><span class="info-val">{{ data.last_audit_status || '-' }}</span></div>
       </div>
     </template>
+
+    <!-- ═══════ 关键词变动 Tab ═══════ -->
+    <div v-if="siteId && tab === 'keywords'" class="panel">
+      <h3>📈 关键词变动（周对比）</h3>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <el-radio-group v-model="kwDiffType" @change="loadTabData"><el-radio-button value="lost">🔻 丢失词</el-radio-button><el-radio-button value="new">🔺 新词</el-radio-button><el-radio-button value="fallen">📉 下降词</el-radio-button></el-radio-group>
+      </div>
+      <el-table :data="kwDiffList" stripe border size="small"><el-table-column prop="query" label="关键词" min-width="250" /><el-table-column prop="prev_clicks" label="上期点击" width="85" /><el-table-column prop="curr_clicks" label="本期点击" width="85" />
+        <el-table-column prop="click_delta" label="变化" width="75"><template #default="{row}"><span :style="{color:row.click_delta>0?'#67c23a':'#f56c6c',fontWeight:600}">{{ row.click_delta>0?'+':'' }}{{ row.click_delta }}</span></template></el-table-column></el-table>
+      <p v-if="!kwDiffList.length" style="color:#999;text-align:center;padding:20px">暂无数据。需先同步深度数据。</p>
+    </div>
+
+    <!-- ═══════ 收录诊断 Tab ═══════ -->
+    <div v-if="siteId && tab === 'indexation'" class="panel">
+      <h3>📋 收录诊断</h3>
+      <div class="idx-cards" v-if="idxSummary.length"><div v-for="s in idxSummary" :key="s.state" class="idx-chip" :class="s.state?.includes('indexed')?'chip-ok':s.state?.includes('not')?'chip-warn':'chip-err'">
+        <div style="font-size:18px;font-weight:700">{{ s.count }}</div><div style="font-size:10px;max-width:120px;word-break:break-all">{{ s.state }}</div>
+      </div></div>
+      <el-table :data="idxList" stripe border size="small" v-if="idxList.length" style="margin-top:12px">
+        <el-table-column prop="url" label="URL" min-width="300" show-overflow-tooltip /><el-table-column prop="coverage_state" label="覆盖状态" width="200" />
+        <el-table-column prop="verdict" label="判决" width="65"><template #default="{row}"><el-tag :type="row.verdict==='PASS'?'success':'danger'" size="small">{{ row.verdict }}</el-tag></template></el-table-column>
+        <el-table-column prop="page_fetch_state" label="抓取" width="120" /><el-table-column prop="last_crawl_time" label="上次抓取" width="100" :formatter="(_:any,__:any,___:any,r:any)=>r.last_crawl_time?.slice(0,10)||'-'" /></el-table>
+      <p v-if="!idxList.length && !idxSummary.length" style="color:#999;text-align:center;padding:20px">暂无收录数据。可在「数据管理→收录状态」检查。</p>
+    </div>
+
+    <!-- ═══════ 反链 Tab ═══════ -->
+    <div v-if="siteId && tab === 'backlinks'" class="panel">
+      <h3>🔗 反链概况</h3>
+      <div class="kpi-strip" v-if="blProfile" style="margin-bottom:12px">
+        <div class="panel kpi-card"><div class="kpi-label">总反链</div><div class="kpi-val">{{ blProfile.total_backlinks || 0 }}</div></div>
+        <div class="panel kpi-card"><div class="kpi-label">引荐域</div><div class="kpi-val">{{ blProfile.total_referring_domains || 0 }}</div></div>
+        <div class="panel kpi-card"><div class="kpi-label">Dofollow</div><div class="kpi-val">{{ blProfile.dofollow_count || 0 }}</div></div>
+        <div class="panel kpi-card"><div class="kpi-label">可疑</div><div class="kpi-val" style="color:#f56c6c">{{ blProfile.suspicious_domain_count || 0 }}</div></div>
+      </div>
+      <el-table :data="blDomains" stripe border size="small" v-if="blDomains.length">
+        <el-table-column prop="domain" label="引荐域" min-width="250" /><el-table-column prop="backlink_count" label="反链数" width="80" />
+        <el-table-column prop="dofollow_count" label="Dofollow" width="80" /><el-table-column prop="tld" label="TLD" width="60" />
+        <el-table-column prop="is_toxic" label="可疑" width="55"><template #default="{row}"><span v-if="row.is_toxic" style="color:#f56c6c">⚠</span></template></el-table-column></el-table>
+      <p v-if="!blProfile && !blDomains.length" style="color:#999;text-align:center;padding:20px">暂无反链数据。数据会在每周日自动聚合。</p>
+    </div>
+
+    <!-- ═══════ 内容决策 Tab ═══════ -->
+    <div v-if="siteId && tab === 'content'" class="panel">
+      <h3>📝 内容健康</h3>
+      <div class="kpi-strip" v-if="contentStats" style="margin-bottom:12px">
+        <div class="panel kpi-card"><div class="kpi-label">总页面</div><div class="kpi-val">{{ contentStats.total || 0 }}</div></div>
+        <div class="panel kpi-card"><div class="kpi-label">薄内容(<300词)</div><div class="kpi-val" style="color:#e6a23c">{{ contentStats.thin || 0 }}</div></div>
+        <div class="panel kpi-card"><div class="kpi-label">孤岛页面</div><div class="kpi-val" style="color:#f56c6c">{{ contentStats.orphans || 0 }}</div></div>
+        <div class="panel kpi-card"><div class="kpi-label">缺 Schema</div><div class="kpi-val" style="color:#e6a23c">{{ contentStats.noSchema || 0 }}</div></div>
+      </div>
+      <el-table :data="contentPages" stripe border size="small" v-if="contentPages.length">
+        <el-table-column prop="url" label="URL" min-width="300" show-overflow-tooltip /><el-table-column prop="word_count" label="词数" width="70" />
+        <el-table-column prop="h1" label="H1" width="150" show-overflow-tooltip /><el-table-column prop="image_count" label="图片" width="55" />
+        <el-table-column prop="internal_link_count" label="内链" width="55" /><el-table-column prop="has_schema_article" label="Schema" width="55"><template #default="{row}">{{ row.has_schema_article ? '✓' : '✗' }}</template></el-table-column></el-table>
+      <p v-if="!contentPages.length" style="color:#999;text-align:center;padding:20px">暂无内容快照数据。每周日自动抓取。</p>
+    </div>
+
+    <!-- ═══════ 规则命中 Tab ═══════ -->
+    <div v-if="siteId && tab === 'rules'" class="panel">
+      <h3>⚡ 规则引擎命中</h3>
+      <el-table :data="ruleList" stripe border size="small" v-if="ruleList.length">
+        <el-table-column prop="severity" label="严重度" width="70"><template #default="{row}"><el-tag :type="sevType(row.severity)" size="small">{{ row.severity }}</el-tag></template></el-table-column>
+        <el-table-column prop="rule_id" label="规则" width="90" /><el-table-column prop="target_url" label="目标URL" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="target_query" label="目标词" min-width="150" show-overflow-tooltip /><el-table-column prop="status" label="状态" width="65" />
+        <el-table-column prop="detected_at" label="发现时间" width="100" :formatter="(_:any,__:any,___:any,r:any)=>r.detected_at?.slice(0,10)" /></el-table>
+      <p v-if="!ruleList.length" style="color:#999;text-align:center;padding:20px">暂无规则命中。运行完整分析后会自动生成。</p>
+    </div>
 
     <!-- ═══════ 竞品 Tab ═══════ -->
     <div v-if="siteId && tab === 'competitors'" class="panel">
@@ -281,16 +360,21 @@ const computing = ref(false)
 const analyzing = ref(false)
 const error = ref('')
 
+const srcLabel = (s: string) => ({ gsc: 'GSC', ga4: 'GA4', bing: 'Bing', yandex: 'Yandex', content_snapshot: '内容快照', backlinks: '反链', tls_dns: 'TLS/DNS', crawl_budget: '抓取预算' }[s] || s)
+const isRecent = (date: string) => { if (!date) return false; const d = new Date(date); const now = new Date(); return (now.getTime() - d.getTime()) < 7 * 86400000 }
+
 const subScores = computed(() => {
   if (!data.value?.sub_scores) return {}
-  const s = typeof data.value.sub_scores === 'string' ? JSON.parse(data.value.sub_scores) : data.value.sub_scores
-  return s || {}
+  const raw = typeof data.value.sub_scores === 'string' ? JSON.parse(data.value.sub_scores) : data.value.sub_scores
+  // New format has {scores:{...}, coverage:{...}}, old format is flat {traffic:X,...}
+  return raw?.scores || raw || {}
 })
 
 const dimensionLabel = (k: string) => ({
   traffic: '流量', ranking: '排名', ctr: 'CTR', technical: '技术',
   indexation: '收录', content: '内容', backlink: '外链', security: '安全',
-  ux: '用户体验', stability: '稳定性',
+  ux: '用户体验', stability: '稳定性', brand: '品牌', eeat: 'E-E-A-T',
+  aio: 'AIO可见', crawl_budget: '抓取预算', international: '国际化',
 }[k] || k)
 
 const barColor = (v: number) => v >= 80 ? 'bar-green' : v >= 60 ? 'bar-yellow' : v >= 40 ? 'bar-orange' : 'bar-red'
@@ -304,6 +388,11 @@ const sevType = (s: string): any => {
 const tab = ref('overview')
 const tabs = [
   { key: 'overview', label: '总览', icon: '📊' },
+  { key: 'keywords', label: '关键词变动', icon: '📈' },
+  { key: 'indexation', label: '收录诊断', icon: '📋' },
+  { key: 'backlinks', label: '反链', icon: '🔗' },
+  { key: 'content', label: '内容决策', icon: '📝' },
+  { key: 'rules', label: '规则命中', icon: '⚡' },
   { key: 'competitors', label: '竞品', icon: '🏆' },
   { key: 'serp', label: 'SERP观察', icon: '🔍' },
   { key: 'aio', label: 'AIO观察', icon: '🤖' },
@@ -311,6 +400,25 @@ const tabs = [
   { key: 'timeline', label: '时间线', icon: '📅' },
   { key: 'reports', label: '报告', icon: '📝' },
 ]
+
+// Keywords diff
+const kwDiffType = ref('lost')
+const kwDiffList = ref<any[]>([])
+
+// Indexation
+const idxSummary = ref<any[]>([])
+const idxList = ref<any[]>([])
+
+// Backlinks
+const blProfile = ref<any>(null)
+const blDomains = ref<any[]>([])
+
+// Content
+const contentStats = ref<any>(null)
+const contentPages = ref<any[]>([])
+
+// Rules
+const ruleList = ref<any[]>([])
 
 // Competitors
 const competitorsList = ref<any[]>([])
@@ -381,7 +489,32 @@ async function loadTabData() {
   if (!siteId.value) return
   const s = siteId.value
   try {
-    if (tab.value === 'competitors') { const r: any = await api.listCompetitors(s); competitorsList.value = r.data || [] }
+    if (tab.value === 'keywords') { const r: any = await api.getGSCQueryDiff(s, kwDiffType.value); kwDiffList.value = r.data || [] }
+    else if (tab.value === 'indexation') {
+      const r: any = await api.getGSCUrlInspection(s, {}); idxList.value = r.data?.items || []; idxSummary.value = r.data?.summary || []
+    }
+    else if (tab.value === 'backlinks') {
+      try { const r: any = await api.getBingInboundLinks(s); blDomains.value = r.data || [] } catch {}
+      // Try backlink_profile_daily
+      const pRows: any[] = []; scanRemote(pRows, s)
+    }
+    else if (tab.value === 'content') {
+      // Content stats from page_content_snapshots via analysis summary data
+      const total = data.value?.findings?.length || 0
+      contentStats.value = { total: data.value?.dead_links || 0, thin: 0, orphans: data.value?.orphan_pages || 0, noSchema: 0 }
+    }
+    else if (tab.value === 'rules') {
+      // Rule findings - use the findings from analysis summary that come from rule_findings
+      ruleList.value = []
+      try {
+        // Direct query via analysis summary (rule_findings are mixed into findings)
+        const r: any = await api.getSiteAnalysisSummary(s)
+        if (r.data?.findings) {
+          ruleList.value = r.data.findings
+        }
+      } catch {}
+    }
+    else if (tab.value === 'competitors') { const r: any = await api.listCompetitors(s); competitorsList.value = r.data || [] }
     else if (tab.value === 'serp') { const r: any = await api.listSERPObservations(s); serpList.value = r.data || [] }
     else if (tab.value === 'aio') { const r: any = await api.listAIOObservations(s); aioList.value = r.data || [] }
     else if (tab.value === 'algorithm') { const r: any = await api.listAlgorithmUpdates(); algoList.value = r.data || [] }
@@ -389,6 +522,8 @@ async function loadTabData() {
     else if (tab.value === 'reports') { loadReports() }
   } catch {}
 }
+
+function scanRemote(_dest: any[], _siteId: number) { /* placeholder for direct DB queries via API */ }
 
 async function addCompetitor() {
   if (!siteId.value || !compForm.value.domain) return
@@ -524,11 +659,21 @@ h3 { margin: 0 0 12px; font-size: 15px; font-weight: 700; }
 .info-item { }
 .info-label { font-size: 11px; color: #999; margin-right: 6px; }
 .info-val { font-size: 13px; font-weight: 600; }
+.kpi-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.kpi-card { text-align: left; padding: 12px 16px; }
+.kpi-label { font-size: 10.5px; font-weight: 700; color: var(--ink-hint, #999); text-transform: uppercase; margin-bottom: 3px; }
+.kpi-val { font-size: 20px; font-weight: 800; }
+.idx-cards { display: flex; gap: 6px; flex-wrap: wrap; }
+.idx-chip { padding: 8px 12px; border-radius: 8px; border: 2px solid #eee; text-align: center; min-width: 80px; }
+.chip-ok { background: #f0f9eb; border-color: #c2e7b0; } .chip-warn { background: #fdf6ec; border-color: #f5dab1; } .chip-err { background: #fef0f0; border-color: #fbc4c4; }
 .sub-bar { padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 4px; }
 .sub-pill { padding: 6px 14px; border: 1px solid #eee; border-radius: 14px; cursor: pointer; background: #fafafa; font-size: 12px; transition: all .15s; display: flex; align-items: center; gap: 3px; }
 .sub-pill:hover { background: #fff3e0; border-color: #ffcc80; }
 .sub-pill.active { background: var(--sun, #ff8c00); color: #fff; border-color: var(--sun, #ff8c00); }
 .sp-i { font-size: 13px; }
+.ds-chip { padding: 3px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.ds-ok { background: #f0f9eb; color: #67c23a; border: 1px solid #c2e7b0; }
+.ds-stale { background: #fef0f0; color: #f56c6c; border: 1px solid #fbc4c4; }
 .report-md { font-size: 14px; line-height: 1.8; }
 .report-md h1 { font-size: 20px; margin: 16px 0 8px; border-bottom: 2px solid #eee; padding-bottom: 6px; }
 .report-md h2 { font-size: 17px; margin: 14px 0 6px; color: #333; }

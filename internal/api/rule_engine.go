@@ -38,6 +38,43 @@ func SeedInitialRules() {
 			`SELECT hostname as target_url, days_until_expiry as evidence FROM tls_checks_daily WHERE site_id=$1 AND date=(SELECT MAX(date) FROM tls_checks_daily WHERE site_id=$1) AND days_until_expiry<30 AND days_until_expiry>0`, 80},
 		{"RSK_003", "risk", "site", "high", "缺少 SPF 或 DMARC",
 			`SELECT hostname as target_url FROM dns_checks_daily WHERE site_id=$1 AND date=(SELECT MAX(date) FROM dns_checks_daily WHERE site_id=$1) AND (has_spf=FALSE OR has_dmarc=FALSE)`, 60},
+		// Extended rules (URG_006-010)
+		{"URG_006", "urgent", "page", "critical", "Canonical 指向不同域",
+			`SELECT url as target_url, google_canonical as evidence FROM gsc_url_inspection WHERE site_id=$1 AND google_canonical!='' AND google_canonical NOT LIKE '%' || (SELECT REPLACE(REPLACE(domain,'https://',''),'http://','') FROM sites WHERE id=$1) || '%'`, 85},
+		{"URG_007", "urgent", "page", "high", "Sitemap 有错误",
+			`SELECT sitemap_path as target_url, errors as evidence FROM gsc_sitemaps WHERE site_id=$1 AND errors > 0`, 75},
+		{"URG_008", "urgent", "page", "high", "Title 与 H1 完全相同",
+			`SELECT url as target_url FROM page_content_snapshots WHERE site_id=$1 AND snapshot_date=(SELECT MAX(snapshot_date) FROM page_content_snapshots WHERE site_id=$1) AND title!='' AND h1!='' AND LOWER(TRIM(title))=LOWER(TRIM(h1))`, 55},
+		{"URG_009", "urgent", "page", "medium", "缺少 Canonical 标签",
+			`SELECT url as target_url FROM page_content_snapshots WHERE site_id=$1 AND snapshot_date=(SELECT MAX(snapshot_date) FROM page_content_snapshots WHERE site_id=$1) AND (canonical='' OR canonical IS NULL)`, 60},
+		{"URG_010", "urgent", "page", "high", "图片缺少 Alt 属性（>50% 图片无 Alt）",
+			`SELECT url as target_url, image_count, images_with_alt_count FROM page_content_snapshots WHERE site_id=$1 AND snapshot_date=(SELECT MAX(snapshot_date) FROM page_content_snapshots WHERE site_id=$1) AND image_count > 3 AND images_with_alt_count::float/GREATEST(image_count,1) < 0.5`, 55},
+		// Extended OPP rules
+		{"OPP_003", "opportunity", "query", "medium", "品牌词有曝光但无点击",
+			`SELECT query as target_query, SUM(impressions) as evidence FROM gsc_query_page_daily q JOIN query_enrichment e ON e.site_id=q.site_id AND e.query=q.query AND e.platform='gsc' WHERE q.site_id=$1 AND e.brand_category='brand' AND q.date>=CURRENT_DATE-30 GROUP BY q.query HAVING SUM(clicks)=0 AND SUM(impressions)>50`, 50},
+		{"OPP_004", "opportunity", "query", "medium", "排名下滑词（WoW 位置变差 > 5 位）",
+			`SELECT query as target_query, position_delta as evidence FROM gsc_query_diff_weekly WHERE site_id=$1 AND diff_type='fallen' AND position_delta > 5 ORDER BY ABS(click_delta) DESC LIMIT 30`, 65},
+		{"OPP_005", "opportunity", "query", "medium", "丢失词（上周有流量本周没了）",
+			`SELECT query as target_query, prev_clicks as evidence FROM gsc_query_diff_weekly WHERE site_id=$1 AND diff_type='lost' AND prev_clicks > 5 ORDER BY prev_clicks DESC LIMIT 30`, 70},
+		// Extended OPT rules
+		{"OPT_004", "optimization", "page", "medium", "外部链接过多（>50个外链）",
+			`SELECT url as target_url, external_link_count as evidence FROM page_content_snapshots WHERE site_id=$1 AND snapshot_date=(SELECT MAX(snapshot_date) FROM page_content_snapshots WHERE site_id=$1) AND external_link_count > 50`, 40},
+		{"OPT_005", "optimization", "page", "low", "内容过于陈旧（>180天未更新）",
+			`SELECT url as target_url FROM content_freshness_stats WHERE site_id=$1 AND stale_over_180d > 0`, 35},
+		{"OPT_006", "optimization", "page", "medium", "无 Schema Breadcrumb",
+			`SELECT url as target_url FROM page_content_snapshots WHERE site_id=$1 AND snapshot_date=(SELECT MAX(snapshot_date) FROM page_content_snapshots WHERE site_id=$1) AND has_breadcrumb=FALSE`, 40},
+		// Strategy rules
+		{"STR_001", "strategy", "site", "info", "内容更新频率低（30天内修改<10%页面）",
+			`SELECT computed_date::text as target_url, modified_last_30d, total_pages FROM content_freshness_stats WHERE site_id=$1 AND total_pages > 10 AND modified_last_30d::float/GREATEST(total_pages,1) < 0.1 ORDER BY computed_date DESC LIMIT 1`, 30},
+		{"STR_002", "strategy", "site", "info", "反链增长停滞（30天无新反链）",
+			`SELECT date::text as target_url, new_links_24h FROM backlink_profile_daily WHERE site_id=$1 ORDER BY date DESC LIMIT 1`, 30},
+		// Extended RSK rules
+		{"RSK_004", "risk", "site", "medium", "安全头评分低（<50/100）",
+			`SELECT url as target_url, score as evidence FROM security_headers_daily WHERE site_id=$1 AND date=(SELECT MAX(date) FROM security_headers_daily WHERE site_id=$1) AND score < 50`, 55},
+		{"RSK_005", "risk", "site", "high", "死链数量过多（>20个）",
+			`SELECT COUNT(*) as evidence FROM dead_link_results WHERE site_id=$1 AND status_code >= 400 HAVING COUNT(*) > 20`, 65},
+		{"RSK_006", "risk", "page", "medium", "抓取浪费率高（>30%）",
+			`SELECT crawler as target_url, waste_rate as evidence FROM crawl_budget_daily WHERE site_id=$1 AND date=(SELECT MAX(date) FROM crawl_budget_daily WHERE site_id=$1) AND waste_rate > 0.3`, 50},
 	}
 
 	for _, r := range rules {
