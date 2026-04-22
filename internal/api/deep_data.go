@@ -2191,3 +2191,248 @@ func syncGSCURLInspectionInternal(siteID int64, token, gscSiteURL string) (int, 
 
 	return inspected, nil
 }
+
+// GetDataSourceStatus returns the connection status, last sync date, and data counts
+// for all platforms and analysis data sources for a given site.
+func GetDataSourceStatus(c *gin.Context) {
+	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
+	userID := c.GetInt64("user_id")
+
+	// Build platform status
+	platforms := gin.H{}
+
+	// GSC
+	gscStatus := gin.H{"connected": false}
+	if token, err := getGoogleAccessToken(userID); err == nil && token != "" {
+		gscStatus["connected"] = true
+		var lastSync, rowCount interface{}
+		if db.DB.QueryRow(`SELECT MAX(date)::text, COUNT(*) FROM gsc_query_page_daily WHERE site_id=$1`, siteID).Scan(&lastSync, &rowCount) == nil {
+			gscStatus["last_sync"] = lastSync
+			gscStatus["row_count"] = rowCount
+			gscStatus["deep_synced"] = rowCount != nil && rowCount != 0
+		}
+		// Also check basic data
+		var basicDate interface{}
+		db.DB.QueryRow(`SELECT MAX(date)::text FROM gsc_data WHERE site_id=$1`, siteID).Scan(&basicDate)
+		if basicDate != nil {
+			gscStatus["basic_last_sync"] = basicDate
+		}
+	}
+	platforms["gsc"] = gscStatus
+
+	// GA4
+	ga4Status := gin.H{"connected": false}
+	if token, err := getGAAccessToken(userID); err == nil && token != "" {
+		ga4Status["connected"] = true
+		var lastSync interface{}
+		var rowCount int
+		db.DB.QueryRow(`SELECT MAX(date)::text, COUNT(*) FROM ga_daily_extended WHERE site_id=$1`, siteID).Scan(&lastSync, &rowCount)
+		ga4Status["last_sync"] = lastSync
+		ga4Status["row_count"] = rowCount
+		ga4Status["deep_synced"] = rowCount > 0
+		// Basic fallback
+		var basicDate interface{}
+		db.DB.QueryRow(`SELECT MAX(date)::text FROM ga_data WHERE site_id=$1`, siteID).Scan(&basicDate)
+		if basicDate != nil {
+			ga4Status["basic_last_sync"] = basicDate
+		}
+	}
+	platforms["ga4"] = ga4Status
+
+	// Bing
+	bingStatus := gin.H{"connected": false}
+	if key, _ := LoadUserBingKey(userID); key != "" {
+		bingStatus["connected"] = true
+		var lastSync interface{}
+		var rowCount int
+		db.DB.QueryRow(`SELECT MAX(date)::text, COUNT(*) FROM bing_query_daily WHERE site_id=$1`, siteID).Scan(&lastSync, &rowCount)
+		bingStatus["last_sync"] = lastSync
+		bingStatus["row_count"] = rowCount
+		bingStatus["deep_synced"] = rowCount > 0
+		var basicDate interface{}
+		db.DB.QueryRow(`SELECT MAX(date)::text FROM bing_data WHERE site_id=$1`, siteID).Scan(&basicDate)
+		if basicDate != nil {
+			bingStatus["basic_last_sync"] = basicDate
+		}
+	}
+	platforms["bing"] = bingStatus
+
+	// Yandex
+	yandexStatus := gin.H{"connected": false}
+	if token, err := getYandexAccessToken(userID); err == nil && token != "" {
+		yandexStatus["connected"] = true
+		var lastSync interface{}
+		var rowCount int
+		db.DB.QueryRow(`SELECT MAX(date)::text, COUNT(*) FROM yandex_query_daily WHERE site_id=$1`, siteID).Scan(&lastSync, &rowCount)
+		yandexStatus["last_sync"] = lastSync
+		yandexStatus["row_count"] = rowCount
+		yandexStatus["deep_synced"] = rowCount > 0
+		var basicDate interface{}
+		db.DB.QueryRow(`SELECT MAX(date)::text FROM yandex_data WHERE site_id=$1`, siteID).Scan(&basicDate)
+		if basicDate != nil {
+			yandexStatus["basic_last_sync"] = basicDate
+		}
+	}
+	platforms["yandex"] = yandexStatus
+
+	// Content snapshot
+	contentSnapshot := gin.H{}
+	var csDate interface{}
+	var csCount int
+	db.DB.QueryRow(`SELECT MAX(snapshot_date)::text, COUNT(*) FROM page_content_snapshots WHERE site_id=$1`, siteID).Scan(&csDate, &csCount)
+	contentSnapshot["last_date"] = csDate
+	contentSnapshot["page_count"] = csCount
+	
+	// Backlinks
+	backlinks := gin.H{}
+	var blDate interface{}
+	var blTotal int
+	db.DB.QueryRow(`SELECT MAX(date)::text, COALESCE(MAX(total_backlinks),0) FROM backlink_profile_daily WHERE site_id=$1`, siteID).Scan(&blDate, &blTotal)
+	backlinks["last_date"] = blDate
+	backlinks["total"] = blTotal
+
+	// Audit
+	audit := gin.H{}
+	var auditDate, auditStatus interface{}
+	db.DB.QueryRow(`SELECT created_at::text, status FROM audit_tasks WHERE site_id=$1 ORDER BY id DESC LIMIT 1`, siteID).Scan(&auditDate, &auditStatus)
+	audit["last_date"] = auditDate
+	audit["status"] = auditStatus
+
+	// TLS/DNS
+	tlsDns := gin.H{}
+	var tlsDate interface{}
+	db.DB.QueryRow(`SELECT MAX(date)::text FROM tls_checks_daily WHERE site_id=$1`, siteID).Scan(&tlsDate)
+	tlsDns["last_date"] = tlsDate
+
+	// Health score
+	healthScore := gin.H{}
+	var hsDate interface{}
+	var hsScore int
+	db.DB.QueryRow(`SELECT date::text, total_score FROM site_health_scores WHERE site_id=$1 ORDER BY date DESC LIMIT 1`, siteID).Scan(&hsDate, &hsScore)
+	healthScore["last_date"] = hsDate
+	healthScore["score"] = hsScore
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": gin.H{
+			"platforms":        platforms,
+			"content_snapshot": contentSnapshot,
+			"backlinks":        backlinks,
+			"audit":            audit,
+			"tls_dns":          tlsDns,
+			"health_score":     healthScore,
+		},
+	})
+}
+
+// SyncSinglePlatform triggers a sync (basic + deep) for a single platform.
+// POST /v1/sites/:id/sync-platform?platform=gsc|ga4|bing|yandex
+func SyncSinglePlatform(c *gin.Context) {
+	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
+	sid, err := strconv.ParseInt(siteID, 10, 64)
+	if err != nil {
+		c.JSON(400, gin.H{"code": -1, "error": "无效站点ID"})
+		return
+	}
+	userID := c.GetInt64("user_id")
+	plat := c.DefaultQuery("platform", "gsc")
+
+	var domain string
+	db.DB.QueryRow("SELECT domain FROM sites WHERE id=$1", sid).Scan(&domain)
+	if domain == "" {
+		c.JSON(400, gin.H{"code": -1, "error": "站点域名为空"})
+		return
+	}
+
+	var syncErr error
+	var msg string
+
+	switch plat {
+	case "gsc":
+		token, err := getGoogleAccessToken(userID)
+		if err != nil {
+			c.JSON(400, gin.H{"code": -1, "error": "GSC未授权: " + err.Error()})
+			return
+		}
+		gscURL, err := resolveGSCProperty(token, domain, userID)
+		if err != nil {
+			c.JSON(400, gin.H{"code": -1, "error": "GSC属性解析失败: " + err.Error()})
+			return
+		}
+		// Basic sync first
+		syncGSCBasic(sid, token, gscURL)
+		// Deep sync
+		rows, err := syncGSCDeepInternal(sid, token, gscURL, 7)
+		if err != nil {
+			syncErr = err
+		} else {
+			msg = fmt.Sprintf("GSC同步完成: %d行数据", rows)
+		}
+
+	case "ga4":
+		token, err := getGAAccessToken(userID)
+		if err != nil {
+			c.JSON(400, gin.H{"code": -1, "error": "GA4未授权"})
+			return
+		}
+		gaID, err := resolveGAProperty(token, domain, userID)
+		if err != nil {
+			c.JSON(400, gin.H{"code": -1, "error": "GA4属性解析失败"})
+			return
+		}
+		syncGA4Basic(sid, token, gaID)
+		syncErr = syncGA4DeepInternal(sid, token, gaID)
+		msg = "GA4同步完成"
+
+	case "bing":
+		apiKey, _ := LoadUserBingKey(userID)
+		if apiKey == "" {
+			c.JSON(400, gin.H{"code": -1, "error": "Bing未配置API Key"})
+			return
+		}
+		bingURL, err := resolveBingSiteURL(apiKey, domain, userID)
+		if err != nil {
+			c.JSON(400, gin.H{"code": -1, "error": "Bing站点解析失败"})
+			return
+		}
+		syncBingBasic(sid, apiKey, bingURL)
+		syncErr = syncBingDeepInternal(sid, apiKey, bingURL)
+		msg = "Bing同步完成"
+
+	case "yandex":
+		token, err := getYandexAccessToken(userID)
+		if err != nil {
+			c.JSON(400, gin.H{"code": -1, "error": "Yandex未授权"})
+			return
+		}
+		yID, err := getYandexUserIDCached(userID, token)
+		if err != nil {
+			c.JSON(400, gin.H{"code": -1, "error": "Yandex用户ID获取失败"})
+			return
+		}
+		hostID, err := resolveYandexHost(token, yID, domain, userID)
+		if err != nil {
+			c.JSON(400, gin.H{"code": -1, "error": "Yandex主机解析失败"})
+			return
+		}
+		syncYandexBasic(sid, token, yID, hostID)
+		syncErr = syncYandexDeepInternal(sid, token, yID, hostID)
+		msg = "Yandex同步完成"
+
+	default:
+		c.JSON(400, gin.H{"code": -1, "error": "不支持的平台: " + plat})
+		return
+	}
+
+	if syncErr != nil {
+		c.JSON(500, gin.H{"code": -1, "error": plat + "同步失败"})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "data": msg})
+}

@@ -456,6 +456,8 @@ const api = {
   getContentStats: (siteId: Id) => instance.get(`/v1/sites/${siteId}/content-stats`),
   getRuleFindings: (siteId: Id) => instance.get(`/v1/sites/${siteId}/rule-findings`),
   getBacklinkProfile: (siteId: Id) => instance.get(`/v1/sites/${siteId}/backlink-profile`),
+  getDataSourceStatus: (siteId: Id) => instance.get(`/v1/sites/${siteId}/data-source-status`),
+  syncPlatform: (siteId: Id, platform: string) => instance.post(`/v1/sites/${siteId}/sync-platform?platform=${platform}`, {}, { timeout: 300000 }),
 
   // Unified platform data (single endpoint for everything)
   getUnifiedData: (siteId: Id, platform: string, days?: number) =>

@@ -26,6 +26,42 @@
     </div>
 
     <template v-if="siteId && tab === 'overview' && data">
+      <!-- 数据源状态面板 -->
+      <div class="ds-panel" v-if="dsStatus">
+        <div class="ds-header">
+          <h3>📡 数据源状态</h3>
+          <button class="btn-sync-all" @click="runPipeline" :disabled="analyzing">
+            {{ analyzing ? '同步分析中...' : '🔄 一键同步全部数据' }}
+          </button>
+        </div>
+        <div class="ds-grid">
+          <div class="ds-card" v-for="(p, key) in (dsStatus.platforms || {})" :key="key">
+            <div class="ds-card-head">
+              <span class="ds-name">{{ {gsc:'Google Search Console',ga4:'Google Analytics',bing:'Bing Webmaster',yandex:'Yandex Webmaster'}[key] || key }}</span>
+              <span class="ds-badge" :class="p.connected ? 'ds-connected' : 'ds-off'">{{ p.connected ? '已连接' : '未配置' }}</span>
+            </div>
+            <template v-if="p.connected">
+              <div class="ds-meta">最后同步: {{ p.last_sync || p.basic_last_sync || '从未' }}</div>
+              <div class="ds-meta" v-if="p.row_count">深度数据: {{ p.row_count }} 行</div>
+              <button class="ds-sync-btn" @click="syncOnePlatform(key)" :disabled="!!syncingPlatform">
+                {{ syncingPlatform === key ? '同步中...' : '同步' }}
+              </button>
+            </template>
+            <template v-else>
+              <div class="ds-meta ds-hint">请在系统设置中配置授权</div>
+              <button class="ds-sync-btn ds-config-btn" @click="$router.push('/settings')">去配置</button>
+            </template>
+          </div>
+        </div>
+        <div class="ds-extra" v-if="dsStatus">
+          <span v-if="dsStatus.content_snapshot?.last_date">内容快照: {{ dsStatus.content_snapshot.last_date }} ({{ dsStatus.content_snapshot.page_count }}页)</span>
+          <span v-if="dsStatus.backlinks?.last_date">反链: {{ dsStatus.backlinks.last_date }} ({{ dsStatus.backlinks.total }}条)</span>
+          <span v-if="dsStatus.audit?.last_date">审计: {{ dsStatus.audit.last_date?.slice(0,10) }} ({{ dsStatus.audit.status }})</span>
+          <span v-if="dsStatus.tls_dns?.last_date">TLS/DNS: {{ dsStatus.tls_dns.last_date }}</span>
+          <span v-if="dsStatus.health_score?.last_date">健康分: {{ dsStatus.health_score.score }}分 ({{ dsStatus.health_score.last_date }})</span>
+        </div>
+      </div>
+
       <!-- ─── Health Score Hero ─────────────────────────────── -->
       <div class="hero-row">
         <div class="panel hero-score">
@@ -164,7 +200,7 @@
       </div>
       <el-table :data="kwDiffList" stripe border size="small"><el-table-column prop="query" label="关键词" min-width="250" /><el-table-column prop="prev_clicks" label="上期点击" width="85" /><el-table-column prop="curr_clicks" label="本期点击" width="85" />
         <el-table-column prop="click_delta" label="变化" width="75"><template #default="{row}"><span :style="{color:row.click_delta>0?'#67c23a':'#f56c6c',fontWeight:600}">{{ row.click_delta>0?'+':'' }}{{ row.click_delta }}</span></template></el-table-column></el-table>
-      <p v-if="!kwDiffList.length" style="color:#999;text-align:center;padding:20px">暂无数据。需先同步深度数据。</p>
+      <p v-if="!kwDiffList.length" style="color:#999;text-align:center;padding:20px">暂无数据。<a href="#" @click.prevent="tab='overview'" style="color:#f97316;font-weight:600">去总览页同步数据</a> 或等待定时任务自动同步。</p>
     </div>
 
     <!-- ═══════ 收录诊断 Tab ═══════ -->
@@ -177,7 +213,7 @@
         <el-table-column prop="url" label="URL" min-width="300" show-overflow-tooltip /><el-table-column prop="coverage_state" label="覆盖状态" width="200" />
         <el-table-column prop="verdict" label="判决" width="65"><template #default="{row}"><el-tag :type="row.verdict==='PASS'?'success':'danger'" size="small">{{ row.verdict }}</el-tag></template></el-table-column>
         <el-table-column prop="page_fetch_state" label="抓取" width="120" /><el-table-column prop="last_crawl_time" label="上次抓取" width="100" :formatter="(_:any,__:any,___:any,r:any)=>r.last_crawl_time?.slice(0,10)||'-'" /></el-table>
-      <p v-if="!idxList.length && !idxSummary.length" style="color:#999;text-align:center;padding:20px">暂无收录数据。可在「数据管理→收录状态」检查。</p>
+      <p v-if="!idxList.length && !idxSummary.length" style="color:#999;text-align:center;padding:20px">暂无收录数据。<a href="#" @click.prevent="tab='overview'" style="color:#f97316;font-weight:600">去总览页同步数据</a> 或等待定时任务自动同步。</p>
     </div>
 
     <!-- ═══════ 反链 Tab ═══════ -->
@@ -193,7 +229,7 @@
         <el-table-column prop="domain" label="引荐域" min-width="250" /><el-table-column prop="backlink_count" label="反链数" width="80" />
         <el-table-column prop="dofollow_count" label="Dofollow" width="80" /><el-table-column prop="tld" label="TLD" width="60" />
         <el-table-column prop="is_toxic" label="可疑" width="55"><template #default="{row}"><span v-if="row.is_toxic" style="color:#f56c6c">⚠</span></template></el-table-column></el-table>
-      <p v-if="!blProfile && !blDomains.length" style="color:#999;text-align:center;padding:20px">暂无反链数据。数据会在每周日自动聚合。</p>
+      <p v-if="!blProfile && !blDomains.length" style="color:#999;text-align:center;padding:20px">暂无反链数据。<a href="#" @click.prevent="tab='overview'" style="color:#f97316;font-weight:600">去总览页同步数据</a> 或等待定时任务自动同步。</p>
     </div>
 
     <!-- ═══════ 内容决策 Tab ═══════ -->
@@ -213,7 +249,7 @@
         <el-table-column prop="url" label="URL" min-width="300" show-overflow-tooltip /><el-table-column prop="word_count" label="词数" width="70" />
         <el-table-column prop="h1" label="H1" width="150" show-overflow-tooltip /><el-table-column prop="image_count" label="图片" width="55" />
         <el-table-column prop="internal_link_count" label="内链" width="55" /><el-table-column prop="has_schema_article" label="Schema" width="55"><template #default="{row}">{{ row.has_schema_article ? '✓' : '✗' }}</template></el-table-column></el-table>
-      <p v-if="!contentPages.length" style="color:#999;text-align:center;padding:20px">暂无内容快照数据。每周日自动抓取。</p>
+      <p v-if="!contentPages.length" style="color:#999;text-align:center;padding:20px">暂无内容快照数据。<a href="#" @click.prevent="tab='overview'" style="color:#f97316;font-weight:600">去总览页同步数据</a> 或等待定时任务自动同步。</p>
     </div>
 
     <!-- ═══════ 规则命中 Tab ═══════ -->
@@ -224,7 +260,7 @@
         <el-table-column prop="rule_id" label="规则" width="90" /><el-table-column prop="target_url" label="目标URL" min-width="200" show-overflow-tooltip />
         <el-table-column prop="target_query" label="目标词" min-width="150" show-overflow-tooltip /><el-table-column prop="status" label="状态" width="65" />
         <el-table-column prop="detected_at" label="发现时间" width="100" :formatter="(_:any,__:any,___:any,r:any)=>r.detected_at?.slice(0,10)" /></el-table>
-      <p v-if="!ruleList.length" style="color:#999;text-align:center;padding:20px">暂无规则命中。运行完整分析后会自动生成。</p>
+      <p v-if="!ruleList.length" style="color:#999;text-align:center;padding:20px">暂无规则命中。<a href="#" @click.prevent="tab='overview'" style="color:#f97316;font-weight:600">去总览页同步数据</a> 或等待定时任务自动同步。</p>
     </div>
 
     <!-- ═══════ 竞品 Tab ═══════ -->
@@ -364,6 +400,8 @@ const loading = ref(false)
 const computing = ref(false)
 const analyzing = ref(false)
 const error = ref('')
+const dsStatus = ref<any>(null)
+const syncingPlatform = ref<string>('')
 
 const srcLabel = (s: string) => ({ gsc: 'GSC', ga4: 'GA4', bing: 'Bing', yandex: 'Yandex', content_snapshot: '内容快照', backlinks: '反链', tls_dns: 'TLS/DNS', crawl_budget: '抓取预算' }[s] || s)
 const isRecent = (date: string) => { if (!date) return false; const d = new Date(date); const now = new Date(); return (now.getTime() - d.getTime()) < 7 * 86400000 }
@@ -594,6 +632,29 @@ onMounted(async () => {
   try { const r: any = await api.listSites(); sites.value = r.data || [] } catch {}
 })
 
+async function loadDataSourceStatus() {
+  if (!siteId.value) return
+  try {
+    const r: any = await api.getDataSourceStatus(siteId.value)
+    dsStatus.value = r.data
+  } catch {}
+}
+
+async function syncOnePlatform(platform: string) {
+  if (!siteId.value || syncingPlatform.value) return
+  syncingPlatform.value = platform
+  try {
+    await api.syncPlatform(siteId.value, platform)
+    ElMessage.success(platform.toUpperCase() + ' 同步完成')
+    await loadDataSourceStatus()
+    await loadAnalysis()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || platform + ' 同步失败')
+  } finally {
+    syncingPlatform.value = ''
+  }
+}
+
 async function loadAnalysis() {
   if (!siteId.value) return
   loading.value = true; error.value = ''; data.value = null
@@ -609,6 +670,7 @@ async function loadAnalysis() {
   } catch (e: any) { error.value = e?.message || '加载失败' }
   finally { loading.value = false }
   loadReports()
+  loadDataSourceStatus()
 }
 
 async function runPipeline() {
@@ -725,4 +787,25 @@ h3 { margin: 0 0 12px; font-size: 15px; font-weight: 700; }
 .report-md ul { padding-left: 20px; margin: 6px 0; }
 .report-md li { margin: 3px 0; }
 .report-md strong { color: #e6a23c; }
+.ds-panel { background: var(--surface); border: 1.5px solid var(--border-light); border-radius: var(--r, 12px); padding: 20px 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(150,60,0,.05); }
+.ds-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.ds-header h3 { font-size: 15px; font-weight: 700; margin: 0; }
+.btn-sync-all { padding: 8px 20px; background: linear-gradient(135deg, #f97316, #ea580c); color: #fff; border: none; border-radius: 8px; font-weight: 700; font-size: 13px; cursor: pointer; transition: all .2s; }
+.btn-sync-all:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(249,115,22,.4); }
+.btn-sync-all:disabled { opacity: .6; cursor: not-allowed; transform: none; }
+.ds-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.ds-card { border: 1.5px solid var(--border-light); border-radius: 10px; padding: 14px; background: var(--surface-2, #fafafa); }
+.ds-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.ds-name { font-size: 13px; font-weight: 700; color: var(--ink); }
+.ds-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
+.ds-connected { background: #dcfce7; color: #16a34a; }
+.ds-off { background: #fee2e2; color: #dc2626; }
+.ds-meta { font-size: 12px; color: var(--ink-soft, #888); margin-bottom: 4px; }
+.ds-hint { color: var(--ink-hint, #aaa); font-style: italic; }
+.ds-sync-btn { margin-top: 8px; width: 100%; padding: 6px 0; border: 1.5px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s; color: var(--ink-mid); }
+.ds-sync-btn:hover { border-color: #f97316; color: #f97316; background: #fff7ed; }
+.ds-sync-btn:disabled { opacity: .5; cursor: not-allowed; }
+.ds-config-btn { border-color: #3b82f6; color: #3b82f6; }
+.ds-config-btn:hover { background: #eff6ff; }
+.ds-extra { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--ink-soft, #888); padding-top: 8px; border-top: 1px solid var(--border-light); }
 </style>

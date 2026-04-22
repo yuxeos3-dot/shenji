@@ -5,6 +5,9 @@ import "github.com/gin-gonic/gin"
 // registerDeepDataRoutes wires up the "Platform Data Deep" endpoints.
 // These supplement (not replace) the existing data routes.
 func registerDeepDataRoutes(v1 *gin.RouterGroup) {
+	// ── Data Source Status & Sync ─────────────────────────────────
+	v1.GET("/sites/:id/data-source-status", RequirePermission("data.view"), GetDataSourceStatus)
+	v1.POST("/sites/:id/sync-platform", RequirePermission("data.sync_gsc"), SyncSinglePlatform)
 	// ── Unified data (single endpoint for all platform data) ─────
 	v1.GET("/sites/:id/platform-data", RequirePermission("data.view"), GetUnifiedPlatformData)
 	v1.POST("/sites/:id/sync-and-load", RequirePermission("data.sync_gsc"), SyncAndLoad)
