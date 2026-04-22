@@ -431,6 +431,11 @@ const api = {
     instance.put(`/v1/push/schedules/${id}/toggle`),
 
   // ── Platform Data Deep ─────────────────────────────────────────
+  // Site Analysis (全站分析)
+  getSiteHealthScore: (siteId: Id) => instance.get(`/v1/sites/${siteId}/health-score`),
+  computeHealthScore: (siteId: Id) => instance.post(`/v1/sites/${siteId}/health-score/compute`),
+  getSiteAnalysisSummary: (siteId: Id) => instance.get(`/v1/sites/${siteId}/analysis-summary`),
+
   // Unified platform data (single endpoint for everything)
   getUnifiedData: (siteId: Id, platform: string, days?: number) =>
     instance.get(`/v1/sites/${siteId}/platform-data`, { params: { platform, days } }),
