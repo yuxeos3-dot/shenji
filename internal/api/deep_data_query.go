@@ -13,60 +13,52 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ResolveSiteID resolves a platform site key (domain/URL) to a numeric site_id.
-// This is the bridge between the platform overview (which uses site_url/property_id/host_id)
-// and the deep data endpoints (which use site_id from the sites table).
-func ResolveSiteID(c *gin.Context) {
-	domain := c.Query("domain")
-	if domain == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "缺少 domain 参数"})
-		return
-	}
-
-	// Clean the domain for matching
+// resolveSiteIDByDomain finds the site_id matching a platform domain/URL.
+// Exported for use by other handlers.
+func resolveSiteIDByDomain(domain string, userID int64, isAdmin bool) int64 {
 	clean := strings.TrimPrefix(domain, "sc-domain:")
 	clean = strings.TrimPrefix(clean, "https://")
 	clean = strings.TrimPrefix(clean, "http://")
 	clean = strings.TrimPrefix(clean, "www.")
 	clean = strings.TrimRight(clean, "/")
 	clean = strings.ToLower(clean)
-	// Remove port
 	if idx := strings.Index(clean, ":"); idx > 0 {
 		clean = clean[:idx]
 	}
-
-	uid := c.GetInt64("user_id")
-	role, _ := c.Get("role")
-
-	// Try multiple matching strategies
-	var siteID int64
-
-	// 1. Exact match on cleaned domain
-	queries := []string{
-		`SELECT id FROM sites WHERE LOWER(REPLACE(REPLACE(REPLACE(REPLACE(domain, 'https://', ''), 'http://', ''), 'www.', ''), '/', '')) = $1`,
-		`SELECT id FROM sites WHERE LOWER(domain) LIKE '%' || $1 || '%'`,
-		`SELECT id FROM sites WHERE $1 LIKE '%' || LOWER(REPLACE(REPLACE(domain, 'https://', ''), 'http://', '')) || '%'`,
+	if clean == "" {
+		return 0
 	}
 
-	for _, q := range queries {
-		if role == "admin" {
-			err := db.DB.QueryRow(q, clean).Scan(&siteID)
-			if err == nil && siteID > 0 {
-				break
-			}
-		} else {
-			err := db.DB.QueryRow(q+" AND created_by = $2", clean, uid).Scan(&siteID)
-			if err == nil && siteID > 0 {
-				break
-			}
+	var siteID int64
+	likePattern := "%" + clean + "%"
+
+	if isAdmin {
+		db.DB.QueryRow(`SELECT id FROM sites WHERE LOWER(REPLACE(REPLACE(REPLACE(REPLACE(domain,'https://',''),'http://',''),'www.',''),'/','')) = $1 LIMIT 1`, clean).Scan(&siteID)
+		if siteID == 0 {
+			db.DB.QueryRow(`SELECT id FROM sites WHERE LOWER(domain) LIKE $1 LIMIT 1`, likePattern).Scan(&siteID)
+		}
+	} else {
+		db.DB.QueryRow(`SELECT id FROM sites WHERE LOWER(REPLACE(REPLACE(REPLACE(REPLACE(domain,'https://',''),'http://',''),'www.',''),'/','')) = $1 AND created_by = $2 LIMIT 1`, clean, userID).Scan(&siteID)
+		if siteID == 0 {
+			db.DB.QueryRow(`SELECT id FROM sites WHERE LOWER(domain) LIKE $1 AND created_by = $2 LIMIT 1`, likePattern, userID).Scan(&siteID)
 		}
 	}
+	return siteID
+}
 
-	if siteID == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "未找到匹配的站点", "domain": domain, "cleaned": clean})
+// ResolveSiteID is the HTTP endpoint for resolving domain → site_id.
+func ResolveSiteID(c *gin.Context) {
+	domain := c.Query("domain")
+	if domain == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "缺少 domain 参数"})
 		return
 	}
-
+	role, _ := c.Get("role")
+	siteID := resolveSiteIDByDomain(domain, c.GetInt64("user_id"), role == "admin")
+	if siteID == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "未找到匹配的站点"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"site_id": siteID}})
 }
 
@@ -747,6 +739,10 @@ func GetGSCQueryDiff(c *gin.Context) {
 }
 
 // GetGSCOverviewDeep returns a high-level summary from deep data
+// GetGSCOverviewDeep is the UNIFIED overview endpoint for GSC.
+// It queries the deep tables (gsc_query_page_daily) first. If those are empty,
+// it falls back to gsc_data (basic sync). This is the single source of truth
+// for the detail view — no separate "basic" call is needed.
 func GetGSCOverviewDeep(c *gin.Context) {
 	siteID := c.Param("id")
 	if !canAccessSite(c, siteID) {
@@ -754,19 +750,19 @@ func GetGSCOverviewDeep(c *gin.Context) {
 	}
 	days, _ := strconv.Atoi(c.DefaultQuery("days", "30"))
 
-	// Check if deep data exists
 	var deepCount int
-	db.DB.QueryRow("SELECT COUNT(*) FROM gsc_query_page_daily WHERE site_id = $1 LIMIT 1", siteID).Scan(&deepCount)
-
+	db.DB.QueryRow("SELECT COUNT(*) FROM gsc_query_page_daily WHERE site_id = $1", siteID).Scan(&deepCount)
 	hasDeepData := deepCount > 0
+
 	var totalClicks, totalImpressions, totalQueries, totalPages int
 	var avgCTR, avgPosition float64
-	var trend []map[string]interface{}
-	var topKeywords []map[string]interface{}
-	var topPages []map[string]interface{}
+	var trend, topKeywords, topPages []map[string]interface{}
+	var devices, countries []map[string]interface{}
+
+	src := "gsc_data" // which table we got data from
 
 	if hasDeepData {
-		// Use deep tables
+		src = "gsc_query_page_daily"
 		db.DB.QueryRow(`
 			SELECT COALESCE(SUM(clicks),0), COALESCE(SUM(impressions),0),
 				CASE WHEN SUM(impressions)>0 THEN SUM(clicks)::float/SUM(impressions) ELSE 0 END,
@@ -776,117 +772,65 @@ func GetGSCOverviewDeep(c *gin.Context) {
 			WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day' AND search_type = 'web'`,
 			siteID, days).Scan(&totalClicks, &totalImpressions, &avgCTR, &avgPosition, &totalQueries, &totalPages)
 
-		trendRows, _ := db.DB.Query(`
-			SELECT date, SUM(clicks), SUM(impressions),
-				CASE WHEN SUM(impressions)>0 THEN SUM(clicks)::float/SUM(impressions) ELSE 0 END,
-				CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE 0 END
-			FROM gsc_query_page_daily
-			WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day' AND search_type = 'web'
+		// Daily trend
+		scanMapRows(&trend, `SELECT date, SUM(clicks) as clicks, SUM(impressions) as impressions,
+			CASE WHEN SUM(impressions)>0 THEN SUM(clicks)::float/SUM(impressions) ELSE 0 END as ctr,
+			CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE 0 END as position
+			FROM gsc_query_page_daily WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day' AND search_type = 'web'
 			GROUP BY date ORDER BY date`, siteID, days)
-		if trendRows != nil {
-			defer trendRows.Close()
-			for trendRows.Next() {
-				var date string
-				var clicks, imp int
-				var ctr, pos float64
-				trendRows.Scan(&date, &clicks, &imp, &ctr, &pos)
-				trend = append(trend, map[string]interface{}{"date": date, "clicks": clicks, "impressions": imp, "ctr": ctr, "position": pos})
-			}
-		}
-		// Top 20 keywords
-		kwRows, _ := db.DB.Query(`
-			SELECT query, SUM(clicks) as c, SUM(impressions) as i,
-				CASE WHEN SUM(impressions)>0 THEN SUM(clicks)::float/SUM(impressions) ELSE 0 END,
-				CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE 0 END
-			FROM gsc_query_page_daily
-			WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day' AND search_type = 'web'
-			GROUP BY query ORDER BY c DESC LIMIT 20`, siteID, days)
-		if kwRows != nil {
-			defer kwRows.Close()
-			for kwRows.Next() {
-				var q string
-				var c, i int
-				var ctr, pos float64
-				kwRows.Scan(&q, &c, &i, &ctr, &pos)
-				topKeywords = append(topKeywords, map[string]interface{}{"query": q, "clicks": c, "impressions": i, "ctr": ctr, "position": pos})
-			}
-		}
-		// Top 20 pages
-		pgRows, _ := db.DB.Query(`
-			SELECT page_url, SUM(clicks) as c, SUM(impressions) as i,
-				CASE WHEN SUM(impressions)>0 THEN SUM(clicks)::float/SUM(impressions) ELSE 0 END,
-				CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE 0 END
-			FROM gsc_query_page_daily
-			WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day' AND search_type = 'web'
-			GROUP BY page_url ORDER BY c DESC LIMIT 20`, siteID, days)
-		if pgRows != nil {
-			defer pgRows.Close()
-			for pgRows.Next() {
-				var u string
-				var c, i int
-				var ctr, pos float64
-				pgRows.Scan(&u, &c, &i, &ctr, &pos)
-				topPages = append(topPages, map[string]interface{}{"page_url": u, "clicks": c, "impressions": i, "ctr": ctr, "position": pos})
-			}
-		}
+
+		// Top keywords
+		scanMapRows(&topKeywords, `SELECT query, SUM(clicks) as clicks, SUM(impressions) as impressions,
+			CASE WHEN SUM(impressions)>0 THEN SUM(clicks)::float/SUM(impressions) ELSE 0 END as ctr,
+			CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE 0 END as position
+			FROM gsc_query_page_daily WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day' AND search_type = 'web'
+			GROUP BY query ORDER BY SUM(clicks) DESC LIMIT 20`, siteID, days)
+
+		// Top pages
+		scanMapRows(&topPages, `SELECT page_url, SUM(clicks) as clicks, SUM(impressions) as impressions,
+			CASE WHEN SUM(impressions)>0 THEN SUM(clicks)::float/SUM(impressions) ELSE 0 END as ctr,
+			CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE 0 END as position
+			FROM gsc_query_page_daily WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day' AND search_type = 'web'
+			GROUP BY page_url ORDER BY SUM(clicks) DESC LIMIT 20`, siteID, days)
+
+		// Device breakdown
+		scanMapRows(&devices, `SELECT device as label, SUM(clicks) as clicks, SUM(impressions) as impressions
+			FROM gsc_query_page_daily WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day'
+			AND search_type = 'web' AND device != 'all'
+			GROUP BY device ORDER BY SUM(clicks) DESC`, siteID, days)
+
+		// Country breakdown
+		scanMapRows(&countries, `SELECT country as label, SUM(clicks) as clicks, SUM(impressions) as impressions
+			FROM gsc_query_page_daily WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day'
+			AND search_type = 'web' AND country != 'all'
+			GROUP BY country ORDER BY SUM(clicks) DESC LIMIT 10`, siteID, days)
+
 	} else {
-		// FALLBACK: use existing gsc_data table
-		rows, _ := db.DB.Query(`
-			SELECT date, clicks, impressions, ctr, position, keywords_json, pages_json
-			FROM gsc_data WHERE site_id = $1
-			ORDER BY date DESC LIMIT $2`, siteID, days)
+		// FALLBACK: gsc_data table
+		rows, _ := db.DB.Query(`SELECT date, clicks, impressions, ctr, position, keywords_json, pages_json, devices_json, countries_json
+			FROM gsc_data WHERE site_id = $1 ORDER BY date DESC LIMIT $2`, siteID, days)
 		if rows != nil {
 			defer rows.Close()
 			for rows.Next() {
-				var date string
+				var date, kwJSON, pgJSON, devJSON, ctryJSON string
 				var clicks, imp int
 				var ctr, pos float64
-				var kwJSON, pgJSON string
-				rows.Scan(&date, &clicks, &imp, &ctr, &pos, &kwJSON, &pgJSON)
+				rows.Scan(&date, &clicks, &imp, &ctr, &pos, &kwJSON, &pgJSON, &devJSON, &ctryJSON)
 				totalClicks += clicks
 				totalImpressions += imp
 				trend = append(trend, map[string]interface{}{"date": date, "clicks": clicks, "impressions": imp, "ctr": ctr, "position": pos})
-
-				// Parse keywords from first (latest) row
-				if len(topKeywords) == 0 && kwJSON != "" && kwJSON != "[]" {
-					var kws []struct {
-						Keys        []string `json:"keys"`
-						Clicks      int      `json:"clicks"`
-						Impressions int      `json:"impressions"`
-						CTR         float64  `json:"ctr"`
-						Position    float64  `json:"position"`
-					}
-					if json.Unmarshal([]byte(kwJSON), &kws) == nil {
-						for _, k := range kws {
-							q := ""
-							if len(k.Keys) > 0 {
-								q = k.Keys[0]
-							}
-							if q != "" {
-								topKeywords = append(topKeywords, map[string]interface{}{"query": q, "clicks": k.Clicks, "impressions": k.Impressions, "ctr": k.CTR, "position": k.Position})
-							}
-						}
-					}
+				// Parse keyword/page/device/country JSON from first (latest) row
+				if len(topKeywords) == 0 {
+					parseGSCRows(&topKeywords, kwJSON, "query")
 				}
-				if len(topPages) == 0 && pgJSON != "" && pgJSON != "[]" {
-					var pgs []struct {
-						Keys        []string `json:"keys"`
-						Clicks      int      `json:"clicks"`
-						Impressions int      `json:"impressions"`
-						CTR         float64  `json:"ctr"`
-						Position    float64  `json:"position"`
-					}
-					if json.Unmarshal([]byte(pgJSON), &pgs) == nil {
-						for _, p := range pgs {
-							u := ""
-							if len(p.Keys) > 0 {
-								u = p.Keys[0]
-							}
-							if u != "" {
-								topPages = append(topPages, map[string]interface{}{"page_url": u, "clicks": p.Clicks, "impressions": p.Impressions, "ctr": p.CTR, "position": p.Position})
-							}
-						}
-					}
+				if len(topPages) == 0 {
+					parseGSCRows(&topPages, pgJSON, "page_url")
+				}
+				if len(devices) == 0 {
+					parseGSCDeviceCountry(&devices, devJSON)
+				}
+				if len(countries) == 0 {
+					parseGSCDeviceCountry(&countries, ctryJSON)
 				}
 			}
 		}
@@ -895,7 +839,6 @@ func GetGSCOverviewDeep(c *gin.Context) {
 		}
 		totalQueries = len(topKeywords)
 		totalPages = len(topPages)
-		// Reverse trend so oldest first
 		for i, j := 0, len(trend)-1; i < j; i, j = i+1, j-1 {
 			trend[i], trend[j] = trend[j], trend[i]
 		}
@@ -910,11 +853,98 @@ func GetGSCOverviewDeep(c *gin.Context) {
 		"total_clicks": totalClicks, "total_impressions": totalImpressions,
 		"avg_ctr": avgCTR, "avg_position": avgPosition,
 		"total_queries": totalQueries, "total_pages": totalPages,
-		"trend":         trend,
-		"top_keywords":  topKeywords,
-		"top_pages":     topPages,
-		"has_deep_data": hasDeepData,
+		"trend": trend, "top_keywords": topKeywords, "top_pages": topPages,
+		"devices": devices, "countries": countries,
+		"has_deep_data": hasDeepData, "source": src,
 	}})
+}
+
+// helper: scan SQL rows into a slice of maps (2-5 column results)
+func scanMapRows(dest *[]map[string]interface{}, query string, args ...interface{}) {
+	rows, err := db.DB.Query(query, args...)
+	if err != nil || rows == nil {
+		return
+	}
+	defer rows.Close()
+	cols, _ := rows.Columns()
+	for rows.Next() {
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if rows.Scan(ptrs...) != nil {
+			continue
+		}
+		m := make(map[string]interface{})
+		for i, col := range cols {
+			switch v := vals[i].(type) {
+			case []byte:
+				m[col] = string(v)
+			default:
+				m[col] = v
+			}
+		}
+		*dest = append(*dest, m)
+	}
+}
+
+func parseGSCRows(dest *[]map[string]interface{}, jsonStr, keyName string) {
+	if jsonStr == "" || jsonStr == "[]" || jsonStr == "null" {
+		return
+	}
+	var rows []struct {
+		Keys        []string `json:"keys"`
+		Clicks      int      `json:"clicks"`
+		Impressions int      `json:"impressions"`
+		CTR         float64  `json:"ctr"`
+		Position    float64  `json:"position"`
+	}
+	if json.Unmarshal([]byte(jsonStr), &rows) != nil {
+		return
+	}
+	for _, r := range rows {
+		k := ""
+		if len(r.Keys) > 0 {
+			k = r.Keys[0]
+		}
+		if k != "" {
+			*dest = append(*dest, map[string]interface{}{keyName: k, "clicks": r.Clicks, "impressions": r.Impressions, "ctr": r.CTR, "position": r.Position})
+		}
+	}
+}
+
+func parseGSCDeviceCountry(dest *[]map[string]interface{}, jsonStr string) {
+	if jsonStr == "" || jsonStr == "{}" || jsonStr == "[]" || jsonStr == "null" {
+		return
+	}
+	// Try array format first [{keys:["MOBILE"], clicks:...}]
+	var rows []struct {
+		Keys   []string `json:"keys"`
+		Clicks int      `json:"clicks"`
+	}
+	if json.Unmarshal([]byte(jsonStr), &rows) == nil && len(rows) > 0 {
+		for _, r := range rows {
+			if len(r.Keys) > 0 {
+				*dest = append(*dest, map[string]interface{}{"label": r.Keys[0], "clicks": r.Clicks})
+			}
+		}
+		return
+	}
+	// Try object format {MOBILE: 123, DESKTOP: 456}
+	var obj map[string]interface{}
+	if json.Unmarshal([]byte(jsonStr), &obj) == nil {
+		for k, v := range obj {
+			clicks := 0
+			switch val := v.(type) {
+			case float64:
+				clicks = int(val)
+			case int:
+				clicks = val
+			}
+			*dest = append(*dest, map[string]interface{}{"label": k, "clicks": clicks})
+		}
+	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════

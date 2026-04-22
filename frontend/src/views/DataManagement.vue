@@ -224,7 +224,7 @@
 
           <!-- Top keywords + pages (unified: deep data preferred, basic as fallback) -->
           <div class="two-col">
-            <div class="panel" v-if="mergedKeywords.length">
+            <div class="panel" v-if="detail.keywords.length">
               <div class="panel-head">
                 <div class="section-title" style="border:none;margin:0;padding:0">🔑 热门关键词 Top 20</div>
                 <button class="btn btn-link" @click="switchSubTab('keywords')" v-if="platform === 'gsc'">查看全部 →</button>
@@ -234,7 +234,7 @@
                   <tr><th>#</th><th>关键词</th><th>点击</th><th>展示</th><th>CTR</th><th>排名</th></tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(r, i) in mergedKeywords" :key="i">
+                  <tr v-for="(r, i) in detail.keywords" :key="i">
                     <td class="rk">{{ i + 1 }}</td>
                     <td class="kw-cell" :title="r.query">
                       <a v-if="platform === 'gsc' && resolvedSiteId" class="link" @click="openKwDetail(r.query)">{{ r.query }}</a>
@@ -249,7 +249,7 @@
               </table>
             </div>
 
-            <div class="panel" v-if="mergedPages.length">
+            <div class="panel" v-if="detail.pages.length">
               <div class="panel-head">
                 <div class="section-title" style="border:none;margin:0;padding:0">📄 热门页面 Top 20</div>
                 <button class="btn btn-link" @click="switchSubTab('pages')" v-if="platform === 'gsc'">查看全部 →</button>
@@ -259,7 +259,7 @@
                   <tr><th>#</th><th>页面</th><th>点击</th><th>展示</th><th>CTR</th></tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(r, i) in mergedPages" :key="i">
+                  <tr v-for="(r, i) in detail.pages" :key="i">
                     <td class="rk">{{ i + 1 }}</td>
                     <td class="path-cell" :title="r.page || r.page_url">{{ cleanPath(r.page || r.page_url) }}</td>
                     <td class="num sv-blue">{{ fmt(r.clicks) }}</td>
@@ -969,32 +969,18 @@ async function refreshCurrent(bypassCache = false) {
   }
 }
 
-// Unified refresh: clears cache + refreshes basic data + triggers deep sync + reloads deep data
+// Unified refresh: one button does everything
+// 1. Trigger deep sync (pulls latest from GSC/GA/Bing/Yandex API into DB)
+// 2. Reload the unified detail view (reads from DB)
 async function unifiedRefresh() {
-  // Clear all cache
   cache.clear()
   if (view.value === 'overview') {
     await loadOverview()
     return
   }
-  // In detail view: first resolve site_id, then refresh basic + deep sync
-  await resolveSiteIdFromBackend()
-  const sid = resolvedSiteId.value
-  loading.value = true
-  try {
-    // 1. Reload basic platform data
-    const baseParams = { start_date: dateRange.value[0], end_date: dateRange.value[1] }
-    let res: any
-    switch (platform.value) {
-      case 'gsc':    res = await api.dashGSCSiteDetail({ ...baseParams, site_url: detail.siteKey }); break
-      case 'ga4':    res = await api.dashGAPropertyDetail({ ...baseParams, property_id: detail.siteKey }); break
-      case 'bing':   res = await api.dashBingSiteDetail({ ...baseParams, site_url: detail.siteKey }); break
-      case 'yandex': res = await api.dashYandexHostDetail({ ...baseParams, host_id: detail.siteKey }); break
-    }
-    if (res?.data) digestDetail(res.data)
-  } catch {} finally { loading.value = false }
 
-  // 2. Trigger deep sync if site resolved
+  // In detail view: sync deep data first, then reload
+  const sid = resolvedSiteId.value
   if (sid) {
     syncing.value = true
     try {
@@ -1002,34 +988,19 @@ async function unifiedRefresh() {
       else if (platform.value === 'ga4') await api.syncGA4Deep(sid)
       else if (platform.value === 'bing') await api.syncBingDeep(sid)
       else if (platform.value === 'yandex') await api.syncYandexDeep(sid)
-      ElMessage.success('数据刷新同步完成')
+      ElMessage.success('数据同步完成')
     } catch (e: any) {
-      ElMessage.warning('基础数据已刷新，深度同步: ' + (e?.response?.data?.error || e?.message || '失败'))
+      ElMessage.warning(e?.response?.data?.error || e?.message || '同步失败')
     } finally { syncing.value = false }
-
-    // 3. Reload deep data
-    loadDeepOverviewData()
-    if (subTab.value !== 'overview') loadSubTabData(subTab.value)
   }
+
+  // Reload everything from DB
+  await loadDetail(detail.siteKey, detail.siteName)
+  if (subTab.value !== 'overview') loadSubTabData(subTab.value)
 }
 
-// Merged data: prefer deep data (gscOverview.top_keywords) over basic (detail.keywords)
-const mergedKeywords = computed(() => {
-  if (gscOverview.value?.top_keywords?.length) {
-    return gscOverview.value.top_keywords.map((k: any) => ({
-      query: k.query, clicks: k.clicks, impressions: k.impressions, ctr: k.ctr, position: k.position,
-    }))
-  }
-  return detail.keywords
-})
-const mergedPages = computed(() => {
-  if (gscOverview.value?.top_pages?.length) {
-    return gscOverview.value.top_pages.map((p: any) => ({
-      page: p.page_url || p.page, page_url: p.page_url, clicks: p.clicks, impressions: p.impressions, ctr: p.ctr, position: p.position,
-    }))
-  }
-  return detail.pages
-})
+// detail.keywords and detail.pages are always populated from the unified source
+// (GetGSCOverviewDeep which combines deep + fallback data) — no merge needed
 
 function platformSiteKey(c: any): string {
   switch (platform.value) {
@@ -1140,37 +1111,71 @@ async function loadDetail(siteKey: string, siteName: string) {
   detail.pages = []
   detail.devices = []
   detail.countries = []
+  gscOverview.value = null
+  gscBuckets.value = []
 
-  const key = cacheKey(siteKey)
-  const cached = cacheGet(key)
-  if (cached) {
-    digestDetail(cached)
-    loading.value = false
-    // Resolve site_id then load deep data
-    resolveSiteIdFromBackend().then(() => loadDeepOverviewData())
-    return
-  }
-
-  const baseParams = { start_date: dateRange.value[0], end_date: dateRange.value[1] }
-  try {
-    let res: any
-    switch (platform.value) {
-      case 'gsc':    res = await api.dashGSCSiteDetail({ ...baseParams, site_url: siteKey }); break
-      case 'ga4':    res = await api.dashGAPropertyDetail({ ...baseParams, property_id: siteKey }); break
-      case 'bing':   res = await api.dashBingSiteDetail({ ...baseParams, site_url: siteKey }); break
-      case 'yandex': res = await api.dashYandexHostDetail({ ...baseParams, host_id: siteKey }); break
-    }
-    cacheSet(key, res.data)
-    digestDetail(res.data)
-  } catch (e: any) {
-    error.value = e?.response?.data?.error || e?.message || '加载详情失败'
-  } finally {
-    loading.value = false
-  }
-
-  // Resolve site_id then load deep data
+  // Step 1: Resolve site_id from backend
   await resolveSiteIdFromBackend()
-  loadDeepOverviewData()
+  const sid = resolvedSiteId.value
+
+  // Step 2: Load unified overview (deep data + fallback to gsc_data)
+  // This is the SINGLE data source — no separate "basic" call needed
+  if (sid) {
+    try {
+      const [overviewRes, bucketsRes] = await Promise.all([
+        api.getGSCOverviewDeep(sid, deepDays.value),
+        api.getGSCRankBuckets(sid, deepDays.value).catch(() => ({ data: [] })),
+      ])
+      const ov = (overviewRes as any).data
+      gscOverview.value = ov
+      gscBuckets.value = (bucketsRes as any).data || []
+
+      // Fill detail.* from the unified response so the UI renders
+      if (ov) {
+        detail.kpis = {
+          clicks: ov.total_clicks || 0, impressions: ov.total_impressions || 0,
+          ctr: ov.avg_ctr || 0, position: ov.avg_position || 0,
+        }
+        detail.trendRows = (ov.trend || []).map((r: any) => ({
+          date: r.date, clicks: r.clicks, impressions: r.impressions, ctr: r.ctr,
+        }))
+        detail.keywords = (ov.top_keywords || []).map((r: any) => ({
+          query: r.query, clicks: r.clicks, impressions: r.impressions,
+          ctr: r.ctr, position: r.position,
+        }))
+        detail.pages = (ov.top_pages || []).map((r: any) => ({
+          page: r.page_url || r.page, clicks: r.clicks, impressions: r.impressions,
+          ctr: r.ctr, position: r.position,
+        }))
+        // Devices & countries from unified response
+        detail.devices = barize((ov.devices || []).map((d: any) => ({
+          label: deviceLabel(d.label || ''), clicks: Number(d.clicks || 0),
+        })))
+        detail.countries = barize((ov.countries || []).map((c: any) => ({
+          label: String(c.label || ''), clicks: Number(c.clicks || 0),
+        })))
+      }
+    } catch (e: any) {
+      error.value = e?.response?.data?.error || e?.message || '加载详情失败'
+    }
+  } else {
+    // No site_id resolved — fall back to direct platform API call
+    const baseParams = { start_date: dateRange.value[0], end_date: dateRange.value[1] }
+    try {
+      let res: any
+      switch (platform.value) {
+        case 'gsc':    res = await api.dashGSCSiteDetail({ ...baseParams, site_url: siteKey }); break
+        case 'ga4':    res = await api.dashGAPropertyDetail({ ...baseParams, property_id: siteKey }); break
+        case 'bing':   res = await api.dashBingSiteDetail({ ...baseParams, site_url: siteKey }); break
+        case 'yandex': res = await api.dashYandexHostDetail({ ...baseParams, host_id: siteKey }); break
+      }
+      digestDetail(res.data)
+    } catch (e: any) {
+      error.value = e?.response?.data?.error || e?.message || '加载详情失败'
+    }
+  }
+
+  loading.value = false
 }
 
 function digestDetail(d: any) {
@@ -1451,18 +1456,7 @@ const yandexLoading = ref(false)
 const yandexKeywords = ref<any>({ items: [], total: 0 }); const yandexIndexEvents = ref<any[]>([]); const yandexHttpStatus = ref<any[]>([])
 const yandexExtLinks = ref<any[]>([]); const yandexIndexedUrls = ref<any>({ items: [], total: 0 })
 
-// ── Load deep overview data (called after site_id is resolved) ──
-async function loadDeepOverviewData() {
-  const sid = resolvedSiteId.value
-  if (!sid) return
-
-  if (platform.value === 'gsc') {
-    Promise.all([
-      api.getGSCOverviewDeep(sid, deepDays.value).then((r: any) => { gscOverview.value = r.data }).catch(() => {}),
-      api.getGSCRankBuckets(sid, deepDays.value).then((r: any) => { gscBuckets.value = r.data || [] }).catch(() => {}),
-    ])
-  }
-}
+// Deep overview data is loaded as part of loadDetail() — no separate call needed
 
 // ── Sub-tab data loader ──
 function loadSubTabData(tab: string) {
