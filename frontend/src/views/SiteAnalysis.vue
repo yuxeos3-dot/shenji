@@ -560,7 +560,7 @@ async function addCompetitor() {
   showAddCompetitor.value = false; compForm.value = { domain: '', name: '', tier: 'direct', notes: '' }
   ElMessage.success('已添加'); loadTabData()
 }
-async function delCompetitor(id: number) { await api.deleteCompetitor(id); loadTabData() }
+async function delCompetitor(id: number) { await api.deleteCompetitor(siteId.value, id); loadTabData() }
 
 async function addSerp() {
   if (!siteId.value || !serpForm.value.query) return
@@ -616,10 +616,23 @@ async function runPipeline() {
   analyzing.value = true
   try {
     await api.runAnalysisPipeline(siteId.value)
-    ElMessage.success('分析管道已启动，3秒后刷新...')
-    setTimeout(() => loadAnalysis(), 3000)
-  } catch (e: any) { ElMessage.error(e?.message || '启动失败') }
-  finally { analyzing.value = false }
+    ElMessage.success('分析管道已启动（含数据同步），预计3~5分钟完成')
+    let attempts = 0
+    const poll = setInterval(async () => {
+      attempts++
+      try { await loadAnalysis() } catch {}
+      if ((data.value && data.value.health_score > 0) || attempts >= 20) {
+        clearInterval(poll)
+        analyzing.value = false
+        if (data.value && data.value.health_score > 0) {
+          ElMessage.success('分析完成！')
+        }
+      }
+    }, 15000)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '启动失败')
+    analyzing.value = false
+  }
 }
 
 async function computeScore() {

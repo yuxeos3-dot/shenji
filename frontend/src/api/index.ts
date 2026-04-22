@@ -444,7 +444,7 @@ const api = {
   // Management CRUD
   listCompetitors: (siteId: Id) => instance.get(`/v1/sites/${siteId}/competitors`),
   createCompetitor: (siteId: Id, data: Record<string, any>) => instance.post(`/v1/sites/${siteId}/competitors`, data),
-  deleteCompetitor: (id: Id) => instance.delete(`/v1/competitors/${id}`),
+  deleteCompetitor: (siteId: Id, competitorId: Id) => instance.delete(`/v1/sites/${siteId}/competitors/${competitorId}`),
   listAlgorithmUpdates: () => instance.get('/v1/algorithm-updates'),
   createAlgorithmUpdate: (data: Record<string, any>) => instance.post('/v1/algorithm-updates', data),
   listSERPObservations: (siteId: Id) => instance.get(`/v1/sites/${siteId}/serp-observations`),

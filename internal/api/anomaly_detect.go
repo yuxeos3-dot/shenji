@@ -3,6 +3,7 @@ package api
 import (
 	"log"
 	"math"
+	"sync"
 	"time"
 
 	"seo-system/internal/db"
@@ -220,13 +221,188 @@ func AutoGenerateTimelineEvents(siteID int64) {
 }
 
 // RunFullAnalysisPipeline runs all analysis steps for a site in order.
-func RunFullAnalysisPipeline(siteID int64) {
-	log.Printf("[analysis] site %d: starting full pipeline", siteID)
+// optUserID allows passing the requesting user's ID for OAuth token resolution.
+// If not provided, falls back to the site's created_by user.
+func RunFullAnalysisPipeline(siteID int64, optUserID ...int64) {
+	log.Printf("[analysis] site %d: starting full pipeline (with data sync)", siteID)
 	start := time.Now()
 
-	// Get domain for probes
+	// Resolve user ID for OAuth token access
+	var uid int64
+	if len(optUserID) > 0 && optUserID[0] > 0 {
+		uid = optUserID[0]
+	} else {
+		db.DB.QueryRow("SELECT COALESCE(created_by,0) FROM sites WHERE id=$1", siteID).Scan(&uid)
+	}
+
+	// Get domain for syncs and probes
 	var domain string
 	db.DB.QueryRow("SELECT domain FROM sites WHERE id=$1", siteID).Scan(&domain)
+
+	// ════════════════════════════════════════════════════════════════
+	// Phase A: Basic platform syncs (parallel, best-effort)
+	// ════════════════════════════════════════════════════════════════
+	var gscToken, gscProp string
+	var gaToken, gaProp string
+	var bingKey, bingURL string
+	var yandexToken, yandexUID, yandexHostID string
+
+	if uid > 0 && domain != "" {
+		log.Printf("[analysis] site %d: phase A — basic syncs (user %d)", siteID, uid)
+		var wgA sync.WaitGroup
+
+		// Resolve GSC
+		if token, err := getGoogleAccessToken(uid); err == nil {
+			if prop, err := resolveGSCProperty(token, domain, uid); err == nil {
+				gscToken, gscProp = token, prop
+				wgA.Add(1)
+				go func() {
+					defer wgA.Done()
+					defer func() { if r := recover(); r != nil { log.Printf("[analysis] site %d: GSC basic sync panic: %v", siteID, r) } }()
+					syncGSCBasic(siteID, token, prop)
+				}()
+			}
+		}
+
+		// Resolve GA4
+		if token, err := getGAAccessToken(uid); err == nil {
+			if prop, err := resolveGAProperty(token, domain, uid); err == nil {
+				gaToken, gaProp = token, prop
+				wgA.Add(1)
+				go func() {
+					defer wgA.Done()
+					defer func() { if r := recover(); r != nil { log.Printf("[analysis] site %d: GA4 basic sync panic: %v", siteID, r) } }()
+					syncGA4Basic(siteID, token, prop)
+				}()
+			}
+		}
+
+		// Resolve Bing
+		if key, _ := LoadUserBingKey(uid); key != "" {
+			if bURL, err := resolveBingSiteURL(key, domain, uid); err == nil {
+				bingKey, bingURL = key, bURL
+				wgA.Add(1)
+				go func() {
+					defer wgA.Done()
+					defer func() { if r := recover(); r != nil { log.Printf("[analysis] site %d: Bing basic sync panic: %v", siteID, r) } }()
+					syncBingBasic(siteID, key, bURL)
+				}()
+			}
+		}
+
+		// Resolve Yandex
+		if token, err := getYandexAccessToken(uid); err == nil {
+			if yID, err := getYandexUserIDCached(uid, token); err == nil {
+				if hID, err := resolveYandexHost(token, yID, domain, uid); err == nil {
+					yandexToken, yandexUID, yandexHostID = token, yID, hID
+					wgA.Add(1)
+					go func() {
+						defer wgA.Done()
+						defer func() { if r := recover(); r != nil { log.Printf("[analysis] site %d: Yandex basic sync panic: %v", siteID, r) } }()
+						syncYandexBasic(siteID, token, yID, hID)
+					}()
+				}
+			}
+		}
+
+		wgA.Wait()
+		log.Printf("[analysis] site %d: phase A complete (%s)", siteID, time.Since(start).Round(time.Millisecond))
+	}
+
+	// ════════════════════════════════════════════════════════════════
+	// Phase B: GSC deep sync (serial, most critical, 2-3 min)
+	// ════════════════════════════════════════════════════════════════
+	if gscToken != "" && gscProp != "" {
+		log.Printf("[analysis] site %d: phase B — GSC deep sync", siteID)
+		if rows, err := syncGSCDeepInternal(siteID, gscToken, gscProp, 7); err != nil {
+			log.Printf("[analysis] site %d: GSC deep sync failed: %v", siteID, err)
+		} else {
+			log.Printf("[analysis] site %d: GSC deep sync done (%d rows)", siteID, rows)
+		}
+	}
+
+	// ════════════════════════════════════════════════════════════════
+	// Phase C: Other deep syncs + URL inspection (parallel)
+	// ════════════════════════════════════════════════════════════════
+	log.Printf("[analysis] site %d: phase C — deep syncs", siteID)
+	var wgC sync.WaitGroup
+
+	if gscToken != "" && gscProp != "" {
+		wgC.Add(1)
+		go func() {
+			defer wgC.Done()
+			defer func() { if r := recover(); r != nil { log.Printf("[analysis] site %d: URL inspection panic: %v", siteID, r) } }()
+			if n, err := syncGSCURLInspectionInternal(siteID, gscToken, gscProp); err != nil {
+				log.Printf("[analysis] site %d: URL inspection failed: %v", siteID, err)
+			} else {
+				log.Printf("[analysis] site %d: URL inspection done (%d URLs)", siteID, n)
+			}
+		}()
+	}
+
+	if gaToken != "" && gaProp != "" {
+		wgC.Add(1)
+		go func() {
+			defer wgC.Done()
+			defer func() { if r := recover(); r != nil { log.Printf("[analysis] site %d: GA4 deep sync panic: %v", siteID, r) } }()
+			if err := syncGA4DeepInternal(siteID, gaToken, gaProp); err != nil {
+				log.Printf("[analysis] site %d: GA4 deep sync failed: %v", siteID, err)
+			}
+		}()
+	}
+
+	if bingKey != "" && bingURL != "" {
+		wgC.Add(1)
+		go func() {
+			defer wgC.Done()
+			defer func() { if r := recover(); r != nil { log.Printf("[analysis] site %d: Bing deep sync panic: %v", siteID, r) } }()
+			if err := syncBingDeepInternal(siteID, bingKey, bingURL); err != nil {
+				log.Printf("[analysis] site %d: Bing deep sync failed: %v", siteID, err)
+			}
+		}()
+	}
+
+	if yandexToken != "" && yandexUID != "" && yandexHostID != "" {
+		wgC.Add(1)
+		go func() {
+			defer wgC.Done()
+			defer func() { if r := recover(); r != nil { log.Printf("[analysis] site %d: Yandex deep sync panic: %v", siteID, r) } }()
+			if err := syncYandexDeepInternal(siteID, yandexToken, yandexUID, yandexHostID); err != nil {
+				log.Printf("[analysis] site %d: Yandex deep sync failed: %v", siteID, err)
+			}
+		}()
+	}
+
+	wgC.Wait()
+	log.Printf("[analysis] site %d: phase C complete (%s)", siteID, time.Since(start).Round(time.Millisecond))
+
+	// ════════════════════════════════════════════════════════════════
+	// Phase D: Content snapshot + backlink aggregation (parallel)
+	// ════════════════════════════════════════════════════════════════
+	log.Printf("[analysis] site %d: phase D — content + backlinks", siteID)
+	var wgD sync.WaitGroup
+
+	wgD.Add(1)
+	go func() {
+		defer wgD.Done()
+		defer func() { if r := recover(); r != nil { log.Printf("[analysis] site %d: content snapshot panic: %v", siteID, r) } }()
+		CrawlAndSnapshotPages(siteID)
+	}()
+
+	wgD.Add(1)
+	go func() {
+		defer wgD.Done()
+		defer func() { if r := recover(); r != nil { log.Printf("[analysis] site %d: backlink aggregation panic: %v", siteID, r) } }()
+		AggregateBacklinks(siteID)
+	}()
+
+	wgD.Wait()
+	log.Printf("[analysis] site %d: phase D complete (%s)", siteID, time.Since(start).Round(time.Millisecond))
+
+	// ════════════════════════════════════════════════════════════════
+	// Phase E: Analysis (same as before)
+	// ════════════════════════════════════════════════════════════════
+	log.Printf("[analysis] site %d: phase E — analysis computations", siteID)
 
 	// Step 1: Snapshot metrics
 	SnapshotMetricsFromPlatformData(siteID)
@@ -253,5 +429,5 @@ func RunFullAnalysisPipeline(siteID int64) {
 	// Step 7: Rule engine (execute all enabled rules → rule_findings)
 	RunRuleEngine(siteID)
 
-	log.Printf("[analysis] site %d: pipeline complete in %s", siteID, time.Since(start).Round(time.Millisecond))
+	log.Printf("[analysis] site %d: full pipeline complete in %s", siteID, time.Since(start).Round(time.Millisecond))
 }

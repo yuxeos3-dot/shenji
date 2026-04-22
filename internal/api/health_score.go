@@ -418,8 +418,8 @@ func RunAnalysisPipelineHandler(c *gin.Context) {
 		return
 	}
 	sid, _ := strconv.ParseInt(siteID, 10, 64)
-	go RunFullAnalysisPipeline(sid)
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "分析管道已启动，请稍后刷新查看结果"})
+	go RunFullAnalysisPipeline(sid, c.GetInt64("user_id"))
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "分析管道已启动（含数据同步），预计3~5分钟完成，请稍后刷新查看结果"})
 }
 
 // GetSiteAnalysisSummary returns a comprehensive analysis summary for a site

@@ -46,17 +46,34 @@ func SyncGSCDeep(c *gin.Context) {
 		return
 	}
 
-	// Determine date range: default pulls last 7 days of stable data (delay 3 days)
-	// For first-time sync, pull 30 days. For subsequent syncs, pull 3 days.
 	daysToSync := 7
 	if d := c.Query("days"); d != "" {
 		if n, err := strconv.Atoi(d); err == nil && n > 0 && n <= 90 {
 			daysToSync = n
 		}
 	}
+
+	totalRows, err := syncGSCDeepInternal(sid, token, gscSiteURL, daysToSync)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": gin.H{
+			"message":    "GSC 深度数据同步成功",
+			"total_rows": totalRows,
+		},
+	})
+}
+
+func syncGSCDeepInternal(siteID int64, token, gscSiteURL string, days int) (int, error) {
+	// Determine date range: default pulls last 7 days of stable data (delay 3 days)
+	// For first-time sync, pull 30 days. For subsequent syncs, use provided days.
+	daysToSync := days
 	// Check if we already have data — if not, pull 30 days
 	var existingCount int
-	db.DB.QueryRow("SELECT COUNT(*) FROM gsc_query_page_daily WHERE site_id = $1", sid).Scan(&existingCount)
+	db.DB.QueryRow("SELECT COUNT(*) FROM gsc_query_page_daily WHERE site_id = $1", siteID).Scan(&existingCount)
 	if existingCount == 0 {
 		daysToSync = 30 // First sync: pull 30 days of history
 	}
@@ -79,7 +96,7 @@ func SyncGSCDeep(c *gin.Context) {
 
 		// Check if we already have data for this date (skip if so)
 		var dateCount int
-		db.DB.QueryRow("SELECT COUNT(*) FROM gsc_query_page_daily WHERE site_id = $1 AND date = $2", sid, date).Scan(&dateCount)
+		db.DB.QueryRow("SELECT COUNT(*) FROM gsc_query_page_daily WHERE site_id = $1 AND date = $2", siteID, date).Scan(&dateCount)
 		if dateCount > 0 {
 			continue // already synced this day
 		}
@@ -90,7 +107,7 @@ func SyncGSCDeep(c *gin.Context) {
 		go func(d string) {
 			defer wg.Done()
 			rows := fetchGSCPaged(token, baseURL, d, []string{"query", "page", "country", "device"}, "web")
-			n := persistGSCQueryPageDaily(sid, d, rows, "web")
+			n := persistGSCQueryPageDaily(siteID, d, rows, "web")
 			mu.Lock()
 			totalRows += n
 			mu.Unlock()
@@ -109,7 +126,7 @@ func SyncGSCDeep(c *gin.Context) {
 						rows[i].Keys = append(rows[i].Keys, "all", "all")
 					}
 				}
-				n := persistGSCQueryPageDaily(sid, d, rows, searchType)
+				n := persistGSCQueryPageDaily(siteID, d, rows, searchType)
 				mu.Lock()
 				totalRows += n
 				mu.Unlock()
@@ -120,14 +137,14 @@ func SyncGSCDeep(c *gin.Context) {
 		wg.Add(1)
 		go func(d string) {
 			defer wg.Done()
-			fetchGSCSearchAppearance(token, baseURL, sid, d)
+			fetchGSCSearchAppearance(token, baseURL, siteID, d)
 		}(date)
 
 		// searchAppearance × query × page cross (AI_OVERVIEW, FEATURED_SNIPPET, etc.)
 		wg.Add(1)
 		go func(d string) {
 			defer wg.Done()
-			fetchGSCAppearanceQueryCross(token, baseURL, sid, d)
+			fetchGSCAppearanceQueryCross(token, baseURL, siteID, d)
 		}(date)
 
 		// Throttle: process 2 days at a time to stay under 1200 QPM
@@ -143,35 +160,26 @@ func SyncGSCDeep(c *gin.Context) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		fetchGSCSitemaps(token, gscSiteURL, sid, time.Now().Format("2006-01-02"))
+		fetchGSCSitemaps(token, gscSiteURL, siteID, time.Now().Format("2006-01-02"))
 	}()
 
 	wg.Wait()
 
 	// 5. Compute rank buckets for the most recent synced date
 	latestDate := time.Now().AddDate(0, 0, -3).Format("2006-01-02")
-	computeRankBuckets(sid, latestDate)
+	computeRankBuckets(siteID, latestDate)
 
 	// 6. Enrich queries (brand/intent/length/question/comparison)
-	enrichQueries(sid)
+	enrichQueries(siteID)
 
 	// 7. Compute derived data immediately (don't wait for nightly cron)
 	go func() {
-		ComputeOpportunities(sid)
-		ComputeCannibalization(sid)
-		ComputeQueryDiff(sid)
+		ComputeOpportunities(siteID)
+		ComputeCannibalization(siteID)
+		ComputeQueryDiff(siteID)
 	}()
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"message":       "GSC 深度数据同步成功",
-			"days_synced":   daysToSync,
-			"total_rows":    totalRows,
-			"search_types":  searchTypes,
-			"first_sync":    existingCount == 0,
-		},
-	})
+	return totalRows, nil
 }
 
 type gscRow struct {
@@ -907,6 +915,14 @@ func SyncGA4Deep(c *gin.Context) {
 		return
 	}
 
+	if err := syncGA4DeepInternal(sid, token, gaPropertyID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"message": "GA4 深度数据同步成功"}})
+}
+
+func syncGA4DeepInternal(siteID int64, token, gaPropertyID string) error {
 	date := "yesterday"
 	dateRange := []map[string]string{{"startDate": date, "endDate": date}}
 
@@ -1079,40 +1095,40 @@ func SyncGA4Deep(c *gin.Context) {
 
 	// Parse and store extended overview
 	if results["extended"] != nil {
-		persistGA4Extended(sid, dateStr, results["extended"])
+		persistGA4Extended(siteID, dateStr, results["extended"])
 	}
 	if results["landing_pages"] != nil {
-		persistGA4LandingPages(sid, dateStr, results["landing_pages"])
+		persistGA4LandingPages(siteID, dateStr, results["landing_pages"])
 	}
 	if results["source_medium"] != nil {
-		persistGA4SourceMedium(sid, dateStr, results["source_medium"])
+		persistGA4SourceMedium(siteID, dateStr, results["source_medium"])
 	}
 	if results["events"] != nil {
-		persistGA4Events(sid, dateStr, results["events"])
+		persistGA4Events(siteID, dateStr, results["events"])
 	}
 	if results["tech"] != nil {
-		persistGA4Tech(sid, dateStr, results["tech"])
+		persistGA4Tech(siteID, dateStr, results["tech"])
 	}
 	if results["geo"] != nil {
-		persistGA4Geo(sid, dateStr, results["geo"])
+		persistGA4Geo(siteID, dateStr, results["geo"])
 	}
 	if results["hourly"] != nil {
-		persistGA4Hourly(sid, dateStr, results["hourly"])
+		persistGA4Hourly(siteID, dateStr, results["hourly"])
 	}
 	if results["day_of_week"] != nil {
-		persistGA4DayOfWeek(sid, dateStr, results["day_of_week"])
+		persistGA4DayOfWeek(siteID, dateStr, results["day_of_week"])
 	}
 	if results["scroll_depth"] != nil {
-		persistGA4ScrollDepth(sid, dateStr, results["scroll_depth"])
+		persistGA4ScrollDepth(siteID, dateStr, results["scroll_depth"])
 	}
 	if results["outbound_clicks"] != nil {
-		persistGA4OutboundClicks(sid, dateStr, results["outbound_clicks"])
+		persistGA4OutboundClicks(siteID, dateStr, results["outbound_clicks"])
 	}
 	if results["conversions"] != nil {
-		persistGA4Conversions(sid, dateStr, results["conversions"])
+		persistGA4Conversions(siteID, dateStr, results["conversions"])
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"message": "GA4 深度数据同步成功"}})
+	return nil
 }
 
 // GA4 row parser helper
@@ -1383,6 +1399,14 @@ func SyncBingDeep(c *gin.Context) {
 		return
 	}
 
+	if err := syncBingDeepInternal(sid, apiKey, bingSiteURL); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"message": "Bing 深度数据同步成功"}})
+}
+
+func syncBingDeepInternal(siteID int64, apiKey, bingSiteURL string) error {
 	date := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 	sd := time.Now().AddDate(0, 0, -30).Format("2006-01-02T00:00:00")
 	ed := time.Now().AddDate(0, 0, -1).Format("2006-01-02T00:00:00")
@@ -1418,7 +1442,7 @@ func SyncBingDeep(c *gin.Context) {
 			db.DB.Exec(`INSERT INTO bing_query_daily (site_id, date, query, clicks, impressions, ctr, avg_impression_position, avg_click_position)
 				VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 				ON CONFLICT (site_id,date,query) DO UPDATE SET clicks=EXCLUDED.clicks,impressions=EXCLUDED.impressions,ctr=EXCLUDED.ctr,avg_impression_position=EXCLUDED.avg_impression_position,avg_click_position=EXCLUDED.avg_click_position`,
-				sid, date, r.Query, r.Clicks, r.Impressions, r.CTR, r.AvgImprPos, r.AvgClickPos,
+				siteID, date, r.Query, r.Clicks, r.Impressions, r.CTR, r.AvgImprPos, r.AvgClickPos,
 			)
 		}
 	}()
@@ -1452,7 +1476,7 @@ func SyncBingDeep(c *gin.Context) {
 			db.DB.Exec(`INSERT INTO bing_page_daily (site_id, date, page_url, clicks, impressions, ctr, avg_impression_position, avg_click_position)
 				VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 				ON CONFLICT (site_id,date,page_url) DO UPDATE SET clicks=EXCLUDED.clicks,impressions=EXCLUDED.impressions,ctr=EXCLUDED.ctr,avg_impression_position=EXCLUDED.avg_impression_position,avg_click_position=EXCLUDED.avg_click_position`,
-				sid, date, r.URL, r.Clicks, r.Impressions, r.CTR, r.AvgImprPos, r.AvgClickPos,
+				siteID, date, r.URL, r.Clicks, r.Impressions, r.CTR, r.AvgImprPos, r.AvgClickPos,
 			)
 		}
 	}()
@@ -1473,7 +1497,7 @@ func SyncBingDeep(c *gin.Context) {
 		}
 		if json.Unmarshal(data, &resp) == nil {
 			db.DB.Exec(`UPDATE bing_data SET url_submission_quota_daily=$1, url_submission_quota_monthly=$2 WHERE site_id=$3 AND date=$4`,
-				resp.D.DailyQuota, resp.D.MonthlyQuota, sid, date)
+				resp.D.DailyQuota, resp.D.MonthlyQuota, siteID, date)
 		}
 	}()
 
@@ -1502,7 +1526,7 @@ func SyncBingDeep(c *gin.Context) {
 			db.DB.Exec(`INSERT INTO bing_sitemaps (site_id, sitemap_url, url_count, status)
 				VALUES ($1,$2,$3,$4)
 				ON CONFLICT (site_id,sitemap_url) DO UPDATE SET url_count=EXCLUDED.url_count,status=EXCLUDED.status`,
-				sid, r.URL, r.UrlCount, r.Status)
+				siteID, r.URL, r.UrlCount, r.Status)
 		}
 	}()
 
@@ -1521,7 +1545,7 @@ func SyncBingDeep(c *gin.Context) {
 		}
 		if json.Unmarshal(data, &resp) == nil {
 			db.DB.Exec(`UPDATE bing_data SET inbound_links_count=$1 WHERE site_id=$2 AND date=$3`,
-				resp.D.InboundLinks, sid, date)
+				resp.D.InboundLinks, siteID, date)
 		}
 	}()
 
@@ -1540,7 +1564,7 @@ func SyncBingDeep(c *gin.Context) {
 		}
 		if json.Unmarshal(data, &resp) == nil {
 			db.DB.Exec(`UPDATE bing_data SET blocked_urls_count=$1 WHERE site_id=$2 AND date=$3`,
-				len(resp.D.Results), sid, date)
+				len(resp.D.Results), siteID, date)
 		}
 	}()
 
@@ -1608,7 +1632,7 @@ func SyncBingDeep(c *gin.Context) {
 				db.DB.Exec(`INSERT INTO bing_query_page_daily (site_id, date, query, page_url, clicks, impressions, avg_impression_position, avg_click_position)
 					VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 					ON CONFLICT (site_id,date,query,page_url) DO UPDATE SET clicks=EXCLUDED.clicks,impressions=EXCLUDED.impressions,avg_impression_position=EXCLUDED.avg_impression_position,avg_click_position=EXCLUDED.avg_click_position`,
-					sid, date, q, p.URL, p.Clicks, p.Impressions, p.AvgImprPos, p.AvgClickPos)
+					siteID, date, q, p.URL, p.Clicks, p.Impressions, p.AvgImprPos, p.AvgClickPos)
 			}
 			// Rate limit: 5 calls/sec
 			time.Sleep(200 * time.Millisecond)
@@ -1618,9 +1642,9 @@ func SyncBingDeep(c *gin.Context) {
 	wg.Wait()
 
 	// Also enrich Bing queries
-	enrichBingQueries(sid)
+	enrichBingQueries(siteID)
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"message": "Bing 深度数据同步成功"}})
+	return nil
 }
 
 func enrichBingQueries(siteID int64) {
@@ -1700,10 +1724,18 @@ func SyncYandexDeep(c *gin.Context) {
 		return
 	}
 
+	if err := syncYandexDeepInternal(sid, token, yandexUserID, yandexHostID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"message": "Yandex 深度数据同步成功"}})
+}
+
+func syncYandexDeepInternal(siteID int64, token, yandexUserID, hostID string) error {
 	date := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 	sd := time.Now().AddDate(0, 0, -30).Format("2006-01-02")
 	ed := date
-	encodedHost := url.PathEscape(yandexHostID)
+	encodedHost := url.PathEscape(hostID)
 
 	var wg sync.WaitGroup
 
@@ -1744,7 +1776,7 @@ func SyncYandexDeep(c *gin.Context) {
 				db.DB.Exec(`INSERT INTO yandex_query_daily (site_id, date, query, query_id, total_shows, total_clicks, total_ctr, avg_show_position, avg_click_position)
 					VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 					ON CONFLICT (site_id,date,query,device_type) DO UPDATE SET query_id=EXCLUDED.query_id,total_shows=EXCLUDED.total_shows,total_clicks=EXCLUDED.total_clicks,total_ctr=EXCLUDED.total_ctr,avg_show_position=EXCLUDED.avg_show_position,avg_click_position=EXCLUDED.avg_click_position`,
-					sid, date, q.QueryText, q.QueryID,
+					siteID, date, q.QueryText, q.QueryID,
 					q.Indicators.TotalShows, q.Indicators.TotalClicks, ctr,
 					q.Indicators.AvgShowPosition, q.Indicators.AvgClickPosition,
 				)
@@ -1777,7 +1809,7 @@ func SyncYandexDeep(c *gin.Context) {
 		if json.Unmarshal(data, &resp) == nil {
 			db.DB.Exec(`UPDATE yandex_data SET sqi=$1, searchable_pages_count=$2, excluded_pages_count=$3, site_problems_json=$4 WHERE site_id=$5 AND date=$6`,
 				resp.SQI, resp.SearchablePageCount, resp.ExcludedPageCount,
-				string(resp.SiteProblems), sid, date)
+				string(resp.SiteProblems), siteID, date)
 		}
 	}()
 
@@ -1804,7 +1836,7 @@ func SyncYandexDeep(c *gin.Context) {
 				db.DB.Exec(`INSERT INTO yandex_http_status_daily (site_id, date, status_code, count)
 					VALUES ($1,$2,$3,$4)
 					ON CONFLICT (site_id,date,status_code) DO UPDATE SET count=EXCLUDED.count`,
-					sid, e.Date, statusCode, e.Value)
+					siteID, e.Date, statusCode, e.Value)
 			}
 		}
 	}()
@@ -1832,7 +1864,7 @@ func SyncYandexDeep(c *gin.Context) {
 				db.DB.Exec(`INSERT INTO yandex_index_events_daily (site_id, date, event_type, count)
 					VALUES ($1,$2,$3,$4)
 					ON CONFLICT (site_id,date,event_type) DO UPDATE SET count=EXCLUDED.count`,
-					sid, e.Date, eventType, e.Value)
+					siteID, e.Date, eventType, e.Value)
 			}
 		}
 	}()
@@ -1859,7 +1891,7 @@ func SyncYandexDeep(c *gin.Context) {
 			db.DB.Exec(`INSERT INTO yandex_external_links (site_id, target_url, source_url, first_seen, last_seen)
 				VALUES ($1,$2,$3,CURRENT_DATE,CURRENT_DATE)
 				ON CONFLICT (site_id,target_url,source_url) DO UPDATE SET last_seen=CURRENT_DATE`,
-				sid, l.TargetURL, l.SourceURL)
+				siteID, l.TargetURL, l.SourceURL)
 		}
 	}()
 
@@ -1878,7 +1910,7 @@ func SyncYandexDeep(c *gin.Context) {
 		}
 		if json.Unmarshal(data, &resp) == nil {
 			db.DB.Exec(`UPDATE yandex_data SET recrawl_quota_daily=$1, recrawl_quota_used=$2 WHERE site_id=$3 AND date=$4`,
-				resp.DailyQuota, resp.QuotaUsed, sid, date)
+				resp.DailyQuota, resp.QuotaUsed, siteID, date)
 		}
 	}()
 
@@ -1916,7 +1948,7 @@ func SyncYandexDeep(c *gin.Context) {
 				db.DB.Exec(`INSERT INTO yandex_indexed_urls (site_id, url, status, http_code, access_date)
 					VALUES ($1,$2,'in_search',$3,$4)
 					ON CONFLICT (site_id,url) DO UPDATE SET status='in_search',http_code=EXCLUDED.http_code,access_date=EXCLUDED.access_date,fetched_at=CURRENT_TIMESTAMP`,
-					sid, u.URL, u.HTTPCode, accessTime)
+					siteID, u.URL, u.HTTPCode, accessTime)
 			}
 			if len(resp.URLs) < limit {
 				break
@@ -1966,7 +1998,7 @@ func SyncYandexDeep(c *gin.Context) {
 					db.DB.Exec(`INSERT INTO yandex_query_daily (site_id, date, query, query_id, device_type, total_shows, total_clicks, total_ctr, avg_show_position, avg_click_position)
 						VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 						ON CONFLICT (site_id,date,query,device_type) DO UPDATE SET query_id=EXCLUDED.query_id,total_shows=EXCLUDED.total_shows,total_clicks=EXCLUDED.total_clicks,total_ctr=EXCLUDED.total_ctr,avg_show_position=EXCLUDED.avg_show_position,avg_click_position=EXCLUDED.avg_click_position`,
-						sid, date, q.QueryText, q.QueryID, dt,
+						siteID, date, q.QueryText, q.QueryID, dt,
 						q.Indicators.TotalShows, q.Indicators.TotalClicks, ctr,
 						q.Indicators.AvgShowPosition, q.Indicators.AvgClickPosition,
 					)
@@ -1985,9 +2017,9 @@ func SyncYandexDeep(c *gin.Context) {
 	wg.Wait()
 
 	// Enrich Yandex queries
-	enrichYandexQueries(sid)
+	enrichYandexQueries(siteID)
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"message": "Yandex 深度数据同步成功"}})
+	return nil
 }
 
 func enrichYandexQueries(siteID int64) {
@@ -2061,14 +2093,25 @@ func SyncGSCURLInspection(c *gin.Context) {
 		return
 	}
 
+	inspected, err := syncGSCURLInspectionInternal(sid, token, gscSiteURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
+		"message":   "URL 检查完成",
+		"inspected": inspected,
+	}})
+}
+
+func syncGSCURLInspectionInternal(siteID int64, token, gscSiteURL string) (int, error) {
 	// Get top 100 pages by clicks
 	rows, err := db.DB.Query(`
 		SELECT DISTINCT page_url FROM gsc_query_page_daily
 		WHERE site_id = $1 AND date >= CURRENT_DATE - INTERVAL '7 days'
-		ORDER BY page_url LIMIT 100`, sid)
+		ORDER BY page_url LIMIT 100`, siteID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询页面失败"})
-		return
+		return 0, fmt.Errorf("查询页面失败: %w", err)
 	}
 	defer rows.Close()
 
@@ -2135,7 +2178,7 @@ func SyncGSCURLInspection(c *gin.Context) {
 		db.DB.Exec(`INSERT INTO gsc_url_inspection (site_id, url, verdict, coverage_state, robots_txt_state, indexing_state, page_fetch_state, last_crawl_time, google_canonical, user_canonical, crawled_as, mobile_usable, rich_results_json, referring_urls_json, sitemap_urls_json)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 			ON CONFLICT DO NOTHING`,
-			sid, pageURL, idx.Verdict, idx.CoverageState, idx.RobotsTxtState,
+			siteID, pageURL, idx.Verdict, idx.CoverageState, idx.RobotsTxtState,
 			idx.IndexingState, idx.PageFetchState, lastCrawl,
 			idx.GoogleCanonical, idx.UserCanonical, idx.CrawledAs,
 			mobileUsable, richJSON, string(referJSON), string(sitemapJSON),
@@ -2146,8 +2189,5 @@ func SyncGSCURLInspection(c *gin.Context) {
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
-		"message":   "URL 检查完成",
-		"inspected": inspected,
-	}})
+	return inspected, nil
 }
