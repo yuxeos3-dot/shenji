@@ -58,8 +58,10 @@ func Start() {
 	c.AddFunc("0 5 * * *", runDeepDataDerivations)
 
 	// ── Full Analysis Pipeline (daily at 06:00) ─────────────
-	// Snapshots → anomaly detection → timeline → health score → derivations
 	c.AddFunc("0 6 * * *", runFullAnalysisPipeline)
+
+	// ── Weekly: content snapshots + backlink aggregation + internal links (Sunday 01:00)
+	c.AddFunc("0 1 * * 0", runWeeklyContentAndLinks)
 
 	c.Start()
 	log.Println("调度器已启动")
@@ -253,6 +255,25 @@ func runDeepDataDerivations() {
 	}
 
 	log.Printf("[deep-data] Derivations complete for %d sites", len(siteIDs))
+}
+
+// runWeeklyContentAndLinks runs content snapshots, backlink aggregation, and internal link analysis.
+func runWeeklyContentAndLinks() {
+	log.Println("[weekly] Starting content + backlink + internal link jobs...")
+	rows, err := db.DB.Query("SELECT id FROM sites WHERE status='active'")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sid int64
+		rows.Scan(&sid)
+		log.Printf("[weekly] site %d: content snapshots", sid)
+		api.CrawlAndSnapshotPages(sid)
+		log.Printf("[weekly] site %d: backlink aggregation", sid)
+		api.AggregateBacklinks(sid)
+	}
+	log.Println("[weekly] Content + backlink jobs complete")
 }
 
 // runFullAnalysisPipeline runs the analysis pipeline for all active sites.

@@ -80,6 +80,9 @@ func main() {
 	// the new audit_findings table for analysis queries.
 	go api.BackfillAuditFindings()
 
+	// Seed initial analysis rules if not present
+	api.SeedInitialRules()
+
 	// Start scheduler
 	scheduler.Start()
 	defer scheduler.Stop()

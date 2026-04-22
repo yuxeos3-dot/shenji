@@ -224,5 +224,8 @@ func RunFullAnalysisPipeline(siteID int64) {
 		RunAllProbes(siteID, domain)
 	}
 
+	// Step 7: Rule engine (execute all enabled rules → rule_findings)
+	RunRuleEngine(siteID)
+
 	log.Printf("[analysis] site %d: pipeline complete in %s", siteID, time.Since(start).Round(time.Millisecond))
 }
