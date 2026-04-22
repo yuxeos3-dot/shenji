@@ -31,8 +31,8 @@
             :disabled-date="disabledDate"
             @change="onDateChange"
           />
-          <button class="btn btn-refresh" @click="unifiedRefresh" :disabled="loading || syncing">
-            {{ syncing ? '同步中...' : loading ? '加载中...' : '🔄 刷新同步' }}
+          <button v-if="view === 'overview'" class="btn btn-refresh" @click="unifiedRefresh" :disabled="loading">
+            {{ loading ? '加载中...' : '🔄 刷新' }}
           </button>
         </div>
       </div>
@@ -1118,9 +1118,11 @@ async function loadDetail(siteKey: string, siteName: string) {
   await resolveSiteIdFromBackend()
   const sid = resolvedSiteId.value
 
-  // Step 2: Load unified overview (deep data + fallback to gsc_data)
-  // This is the SINGLE data source — no separate "basic" call needed
-  if (sid) {
+  // Step 2: Load data — unified for GSC (single source), fallback for others
+  const baseParams = { start_date: dateRange.value[0], end_date: dateRange.value[1] }
+
+  if (platform.value === 'gsc' && sid) {
+    // GSC: unified endpoint (deep table + gsc_data fallback, all in one)
     try {
       const [overviewRes, bucketsRes] = await Promise.all([
         api.getGSCOverviewDeep(sid, deepDays.value),
@@ -1129,38 +1131,17 @@ async function loadDetail(siteKey: string, siteName: string) {
       const ov = (overviewRes as any).data
       gscOverview.value = ov
       gscBuckets.value = (bucketsRes as any).data || []
-
-      // Fill detail.* from the unified response so the UI renders
       if (ov) {
-        detail.kpis = {
-          clicks: ov.total_clicks || 0, impressions: ov.total_impressions || 0,
-          ctr: ov.avg_ctr || 0, position: ov.avg_position || 0,
-        }
-        detail.trendRows = (ov.trend || []).map((r: any) => ({
-          date: r.date, clicks: r.clicks, impressions: r.impressions, ctr: r.ctr,
-        }))
-        detail.keywords = (ov.top_keywords || []).map((r: any) => ({
-          query: r.query, clicks: r.clicks, impressions: r.impressions,
-          ctr: r.ctr, position: r.position,
-        }))
-        detail.pages = (ov.top_pages || []).map((r: any) => ({
-          page: r.page_url || r.page, clicks: r.clicks, impressions: r.impressions,
-          ctr: r.ctr, position: r.position,
-        }))
-        // Devices & countries from unified response
-        detail.devices = barize((ov.devices || []).map((d: any) => ({
-          label: deviceLabel(d.label || ''), clicks: Number(d.clicks || 0),
-        })))
-        detail.countries = barize((ov.countries || []).map((c: any) => ({
-          label: String(c.label || ''), clicks: Number(c.clicks || 0),
-        })))
+        detail.kpis = { clicks: ov.total_clicks||0, impressions: ov.total_impressions||0, ctr: ov.avg_ctr||0, position: ov.avg_position||0 }
+        detail.trendRows = (ov.trend||[]).map((r:any) => ({ date:r.date, clicks:r.clicks, impressions:r.impressions, ctr:r.ctr }))
+        detail.keywords = (ov.top_keywords||[]).map((r:any) => ({ query:r.query, clicks:r.clicks, impressions:r.impressions, ctr:r.ctr, position:r.position }))
+        detail.pages = (ov.top_pages||[]).map((r:any) => ({ page:r.page_url||r.page, clicks:r.clicks, impressions:r.impressions, ctr:r.ctr, position:r.position }))
+        detail.devices = barize((ov.devices||[]).map((d:any) => ({ label:deviceLabel(d.label||''), clicks:Number(d.clicks||0) })))
+        detail.countries = barize((ov.countries||[]).map((c:any) => ({ label:String(c.label||''), clicks:Number(c.clicks||0) })))
       }
-    } catch (e: any) {
-      error.value = e?.response?.data?.error || e?.message || '加载详情失败'
-    }
+    } catch (e: any) { error.value = e?.response?.data?.error || e?.message || '加载失败' }
   } else {
-    // No site_id resolved — fall back to direct platform API call
-    const baseParams = { start_date: dateRange.value[0], end_date: dateRange.value[1] }
+    // GA4/Bing/Yandex or GSC without resolved site_id: use platform dashboard API
     try {
       let res: any
       switch (platform.value) {
@@ -1170,9 +1151,7 @@ async function loadDetail(siteKey: string, siteName: string) {
         case 'yandex': res = await api.dashYandexHostDetail({ ...baseParams, host_id: siteKey }); break
       }
       digestDetail(res.data)
-    } catch (e: any) {
-      error.value = e?.response?.data?.error || e?.message || '加载详情失败'
-    }
+    } catch (e: any) { error.value = e?.response?.data?.error || e?.message || '加载失败' }
   }
 
   loading.value = false

@@ -32,17 +32,48 @@ func resolveSiteIDByDomain(domain string, userID int64, isAdmin bool) int64 {
 	var siteID int64
 	likePattern := "%" + clean + "%"
 
+	// Strategy 1: exact match after stripping protocol/www/slash
+	// Strategy 2: LIKE match (handles subdomains, paths, etc.)
+	// Strategy 3: reverse LIKE (domain in sites contains our search)
+	type q struct {
+		sql  string
+		args []interface{}
+	}
+
+	var queries []q
 	if isAdmin {
-		db.DB.QueryRow(`SELECT id FROM sites WHERE LOWER(REPLACE(REPLACE(REPLACE(REPLACE(domain,'https://',''),'http://',''),'www.',''),'/','')) = $1 LIMIT 1`, clean).Scan(&siteID)
-		if siteID == 0 {
-			db.DB.QueryRow(`SELECT id FROM sites WHERE LOWER(domain) LIKE $1 LIMIT 1`, likePattern).Scan(&siteID)
+		queries = []q{
+			{`SELECT id FROM sites WHERE LOWER(REPLACE(REPLACE(REPLACE(REPLACE(domain,'https://',''),'http://',''),'www.',''),'/','')) = $1 LIMIT 1`, []interface{}{clean}},
+			{`SELECT id FROM sites WHERE LOWER(domain) LIKE $1 LIMIT 1`, []interface{}{likePattern}},
+			{`SELECT id FROM sites WHERE LOWER(name) = $1 LIMIT 1`, []interface{}{clean}},
 		}
 	} else {
-		db.DB.QueryRow(`SELECT id FROM sites WHERE LOWER(REPLACE(REPLACE(REPLACE(REPLACE(domain,'https://',''),'http://',''),'www.',''),'/','')) = $1 AND created_by = $2 LIMIT 1`, clean, userID).Scan(&siteID)
-		if siteID == 0 {
-			db.DB.QueryRow(`SELECT id FROM sites WHERE LOWER(domain) LIKE $1 AND created_by = $2 LIMIT 1`, likePattern, userID).Scan(&siteID)
+		queries = []q{
+			{`SELECT id FROM sites WHERE LOWER(REPLACE(REPLACE(REPLACE(REPLACE(domain,'https://',''),'http://',''),'www.',''),'/','')) = $1 AND created_by = $2 LIMIT 1`, []interface{}{clean, userID}},
+			{`SELECT id FROM sites WHERE LOWER(domain) LIKE $1 AND created_by = $2 LIMIT 1`, []interface{}{likePattern, userID}},
+			{`SELECT id FROM sites WHERE LOWER(name) = $1 AND created_by = $2 LIMIT 1`, []interface{}{clean, userID}},
 		}
 	}
+
+	for _, qr := range queries {
+		if err := db.DB.QueryRow(qr.sql, qr.args...).Scan(&siteID); err == nil && siteID > 0 {
+			return siteID
+		}
+	}
+
+	// Strategy 4: try matching just the root domain (e.g. "mrds66.com" from "www.mrds66.com")
+	// Extract root: take last two segments
+	parts := strings.Split(clean, ".")
+	if len(parts) >= 2 {
+		root := parts[len(parts)-2] + "." + parts[len(parts)-1]
+		rootLike := "%" + root + "%"
+		if isAdmin {
+			db.DB.QueryRow(`SELECT id FROM sites WHERE LOWER(domain) LIKE $1 LIMIT 1`, rootLike).Scan(&siteID)
+		} else {
+			db.DB.QueryRow(`SELECT id FROM sites WHERE LOWER(domain) LIKE $1 AND created_by = $2 LIMIT 1`, rootLike, userID).Scan(&siteID)
+		}
+	}
+
 	return siteID
 }
 
