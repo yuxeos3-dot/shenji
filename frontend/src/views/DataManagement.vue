@@ -454,10 +454,12 @@ async function openDetail(c: any) {
 
 // Load data directly from platform dashboard API (GSC/GA4/Bing/Yandex)
 // This is the primary data source — always works regardless of site_id
+function daysAgo(n: number) { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10) }
+
 async function loadFromPlatformAPI() {
   loading.value = true; error.value = ''
   const sk = detail.value.siteKey
-  const baseParams = { start_date: '', end_date: '' }
+  const baseParams = { start_date: daysAgo(days.value + 1), end_date: daysAgo(2) }
   try {
     let res: any
     switch (platform.value) {
