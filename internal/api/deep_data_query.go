@@ -268,17 +268,89 @@ func GetGSCKeywordDetail(c *gin.Context) {
 		}
 	}
 
+	// Device breakdown for this query
+	deviceRows, _ := db.DB.Query(`
+		SELECT device, SUM(clicks), SUM(impressions),
+			CASE WHEN SUM(impressions)>0 THEN SUM(clicks)::float/SUM(impressions) ELSE 0 END,
+			CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE 0 END
+		FROM gsc_query_page_daily
+		WHERE site_id = $1 AND query = $2 AND search_type = 'web'
+			AND date >= CURRENT_DATE - INTERVAL '30 days' AND device != 'all'
+		GROUP BY device ORDER BY SUM(clicks) DESC`, siteID, query)
+	var devices []map[string]interface{}
+	if deviceRows != nil {
+		defer deviceRows.Close()
+		for deviceRows.Next() {
+			var dev string
+			var c2, i2 int
+			var ctr2, pos2 float64
+			deviceRows.Scan(&dev, &c2, &i2, &ctr2, &pos2)
+			devices = append(devices, map[string]interface{}{"device": dev, "clicks": c2, "impressions": i2, "ctr": ctr2, "position": pos2})
+		}
+	}
+
+	// Country breakdown for this query
+	countryRows, _ := db.DB.Query(`
+		SELECT country, SUM(clicks), SUM(impressions),
+			CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE 0 END
+		FROM gsc_query_page_daily
+		WHERE site_id = $1 AND query = $2 AND search_type = 'web'
+			AND date >= CURRENT_DATE - INTERVAL '30 days' AND country != 'all'
+		GROUP BY country ORDER BY SUM(clicks) DESC LIMIT 10`, siteID, query)
+	var countries []map[string]interface{}
+	if countryRows != nil {
+		defer countryRows.Close()
+		for countryRows.Next() {
+			var ctry string
+			var c3, i3 int
+			var pos3 float64
+			countryRows.Scan(&ctry, &c3, &i3, &pos3)
+			countries = append(countries, map[string]interface{}{"country": ctry, "clicks": c3, "impressions": i3, "position": pos3})
+		}
+	}
+
+	// Other search types for this query (image/video/news)
+	searchTypeRows, _ := db.DB.Query(`
+		SELECT search_type, SUM(clicks), SUM(impressions)
+		FROM gsc_query_page_daily
+		WHERE site_id = $1 AND query = $2 AND search_type != 'web'
+			AND date >= CURRENT_DATE - INTERVAL '30 days'
+		GROUP BY search_type ORDER BY SUM(clicks) DESC`, siteID, query)
+	var searchTypes []map[string]interface{}
+	if searchTypeRows != nil {
+		defer searchTypeRows.Close()
+		for searchTypeRows.Next() {
+			var st string
+			var c4, i4 int
+			searchTypeRows.Scan(&st, &c4, &i4)
+			searchTypes = append(searchTypes, map[string]interface{}{"search_type": st, "clicks": c4, "impressions": i4})
+		}
+	}
+
+	// Cannibalization check: does this query have multiple ranking pages?
+	var cannibalCount int
+	db.DB.QueryRow(`
+		SELECT COUNT(DISTINCT page_url) FROM gsc_query_page_daily
+		WHERE site_id = $1 AND query = $2 AND search_type = 'web'
+			AND date >= CURRENT_DATE - INTERVAL '30 days' AND position < 20`,
+		siteID, query).Scan(&cannibalCount)
+
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
-		"query":         query,
-		"brand":         brand.String,
-		"intent":        intent.String,
-		"length":        lengthCat.String,
-		"is_question":   isQuestion.Bool,
-		"is_comparison": isComparison.Bool,
-		"word_count":    wordCount.Int64,
-		"char_count":    charCount.Int64,
-		"trend":         trend,
-		"pages":         pages,
+		"query":              query,
+		"brand":              brand.String,
+		"intent":             intent.String,
+		"length":             lengthCat.String,
+		"is_question":        isQuestion.Bool,
+		"is_comparison":      isComparison.Bool,
+		"word_count":         wordCount.Int64,
+		"char_count":         charCount.Int64,
+		"trend":              trend,
+		"pages":              pages,
+		"devices":            devices,
+		"countries":          countries,
+		"other_search_types": searchTypes,
+		"cannibalization":    cannibalCount >= 2,
+		"cannibal_page_count": cannibalCount,
 	}})
 }
 

@@ -46,11 +46,21 @@ func SyncGSCDeep(c *gin.Context) {
 		return
 	}
 
-	// Pull yesterday's data (stable)
-	date := time.Now().AddDate(0, 0, -3).Format("2006-01-02")
-	if d := c.Query("date"); d != "" {
-		date = d
+	// Determine date range: default pulls last 7 days of stable data (delay 3 days)
+	// For first-time sync, pull 30 days. For subsequent syncs, pull 3 days.
+	daysToSync := 7
+	if d := c.Query("days"); d != "" {
+		if n, err := strconv.Atoi(d); err == nil && n > 0 && n <= 90 {
+			daysToSync = n
+		}
 	}
+	// Check if we already have data — if not, pull 30 days
+	var existingCount int
+	db.DB.QueryRow("SELECT COUNT(*) FROM gsc_query_page_daily WHERE site_id = $1", sid).Scan(&existingCount)
+	if existingCount == 0 {
+		daysToSync = 30 // First sync: pull 30 days of history
+	}
+
 	encodedURL := url.QueryEscape(gscSiteURL)
 	baseURL := fmt.Sprintf("%s/sites/%s/searchAnalytics/query", gscAPI, encodedURL)
 
@@ -58,48 +68,108 @@ func SyncGSCDeep(c *gin.Context) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
-	// 1. Fetch query × page for ALL 7 searchTypes
+	// 1. Fetch query × page × country × device for ALL searchTypes × ALL dates
+	//    GSC rate limit: 1200 QPM. With 6 searchTypes + 2 appearance calls = 8 calls/day.
+	//    30 days × 8 = 240 calls total — well within limits.
+	//    We batch 3 days at a time with Wait() to be safe.
 	searchTypes := []string{"web", "image", "video", "news", "discover", "googleNews"}
-	for _, st := range searchTypes {
+	syncedDays := 0
+	for dayOffset := 3; dayOffset < 3+daysToSync; dayOffset++ {
+		date := time.Now().AddDate(0, 0, -dayOffset).Format("2006-01-02")
+
+		// Check if we already have data for this date (skip if so)
+		var dateCount int
+		db.DB.QueryRow("SELECT COUNT(*) FROM gsc_query_page_daily WHERE site_id = $1 AND date = $2", sid, date).Scan(&dateCount)
+		if dateCount > 0 {
+			continue // already synced this day
+		}
+		syncedDays++
+
+		// Primary: web searchType gets full query×page×country×device (the big one)
 		wg.Add(1)
-		go func(searchType string) {
+		go func(d string) {
 			defer wg.Done()
-			rows := fetchGSCPaged(token, baseURL, date, []string{"query", "page", "country", "device"}, searchType)
-			n := persistGSCQueryPageDaily(sid, date, rows, searchType)
+			rows := fetchGSCPaged(token, baseURL, d, []string{"query", "page", "country", "device"}, "web")
+			n := persistGSCQueryPageDaily(sid, d, rows, "web")
 			mu.Lock()
 			totalRows += n
 			mu.Unlock()
-		}(st)
+		}(date)
+
+		// Secondary searchTypes: image/video/news/discover/googleNews
+		// These typically have far fewer rows, fetch with query×page only (no country×device breakdown)
+		for _, st := range searchTypes[1:] {
+			wg.Add(1)
+			go func(searchType, d string) {
+				defer wg.Done()
+				rows := fetchGSCPaged(token, baseURL, d, []string{"query", "page"}, searchType)
+				// Convert 2-key rows to 4-key format for unified storage
+				for i := range rows {
+					if len(rows[i].Keys) == 2 {
+						rows[i].Keys = append(rows[i].Keys, "all", "all")
+					}
+				}
+				n := persistGSCQueryPageDaily(sid, d, rows, searchType)
+				mu.Lock()
+				totalRows += n
+				mu.Unlock()
+			}(st, date)
+		}
+
+		// searchAppearance aggregated distribution
+		wg.Add(1)
+		go func(d string) {
+			defer wg.Done()
+			fetchGSCSearchAppearance(token, baseURL, sid, d)
+		}(date)
+
+		// searchAppearance × query × page cross (AI_OVERVIEW, FEATURED_SNIPPET, etc.)
+		wg.Add(1)
+		go func(d string) {
+			defer wg.Done()
+			fetchGSCAppearanceQueryCross(token, baseURL, sid, d)
+		}(date)
+
+		// Throttle: process 2 days at a time to stay under 1200 QPM
+		// Each day fires ~8 concurrent requests. 2 days = ~16 requests.
+		if syncedDays%2 == 0 {
+			wg.Wait()
+		}
 	}
+	// Flush remaining
+	wg.Wait()
 
-	// 2. Fetch searchAppearance breakdown
+	// 4. Fetch sitemaps (once, not per-day)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		fetchGSCSearchAppearance(token, baseURL, sid, date)
-	}()
-
-	// 3. Fetch sitemaps
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		fetchGSCSitemaps(token, gscSiteURL, sid, date)
+		fetchGSCSitemaps(token, gscSiteURL, sid, time.Now().Format("2006-01-02"))
 	}()
 
 	wg.Wait()
 
-	// 4. Compute rank buckets from the data we just inserted
-	computeRankBuckets(sid, date)
+	// 5. Compute rank buckets for the most recent synced date
+	latestDate := time.Now().AddDate(0, 0, -3).Format("2006-01-02")
+	computeRankBuckets(sid, latestDate)
 
-	// 5. Enrich queries
+	// 6. Enrich queries (brand/intent/length/question/comparison)
 	enrichQueries(sid)
+
+	// 7. Compute derived data immediately (don't wait for nightly cron)
+	go func() {
+		ComputeOpportunities(sid)
+		ComputeCannibalization(sid)
+		ComputeQueryDiff(sid)
+	}()
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"data": gin.H{
-			"message":    "GSC 深度数据同步成功",
-			"date":       date,
-			"total_rows": totalRows,
+			"message":       "GSC 深度数据同步成功",
+			"days_synced":   daysToSync,
+			"total_rows":    totalRows,
+			"search_types":  searchTypes,
+			"first_sync":    existingCount == 0,
 		},
 	})
 }
@@ -119,13 +189,14 @@ func fetchGSCPaged(token, baseURL, date string, dimensions []string, searchType 
 
 	for round := 0; round < maxRounds; round++ {
 		body := map[string]interface{}{
-			"startDate":  date,
-			"endDate":    date,
-			"dimensions": dimensions,
-			"rowLimit":   25000,
-			"startRow":   startRow,
-			"dataState":  "final",
-			"type":       searchType,
+			"startDate":       date,
+			"endDate":         date,
+			"dimensions":      dimensions,
+			"rowLimit":        25000,
+			"startRow":        startRow,
+			"dataState":       "final",
+			"type":            searchType,
+			"aggregationType": "byPage", // More precise: per-page data, not auto-aggregated
 		}
 
 		data, err := gscFetch(token, baseURL, "POST", body)
@@ -233,6 +304,85 @@ func fetchGSCSearchAppearance(token, baseURL string, siteID int64, date string) 
 			   ctr = EXCLUDED.ctr, position = EXCLUDED.position`,
 			siteID, date, appearance, r.Clicks, r.Impressions, r.CTR, r.Position,
 		)
+	}
+}
+
+// fetchGSCAppearanceQueryCross pulls searchAppearance × query × page for the top SERP features
+// so we know WHICH keywords appear in AI Overview, Featured Snippet, FAQ, etc.
+func fetchGSCAppearanceQueryCross(token, baseURL string, siteID int64, date string) {
+	// Only fetch the most valuable SERP features to avoid excessive API calls
+	keyFeatures := []string{"AI_OVERVIEW", "FEATURED_SNIPPET", "TPF_FAQ", "REVIEW_SNIPPET", "VIDEO_RESULT", "RICH_RESULT"}
+
+	for _, feat := range keyFeatures {
+		body := map[string]interface{}{
+			"startDate":  date,
+			"endDate":    date,
+			"dimensions": []string{"query", "page"},
+			"rowLimit":   1000,
+			"dataState":  "final",
+			"type":       "web",
+			"dimensionFilterGroups": []map[string]interface{}{
+				{
+					"filters": []map[string]interface{}{
+						{
+							"dimension":  "searchAppearance",
+							"operator":   "equals",
+							"expression": feat,
+						},
+					},
+				},
+			},
+		}
+
+		data, err := gscFetch(token, baseURL, "POST", body)
+		if err != nil {
+			continue
+		}
+
+		var resp struct {
+			Rows []gscRow `json:"rows"`
+		}
+		if json.Unmarshal(data, &resp) != nil {
+			continue
+		}
+
+		// Store each query×page that appeared in this SERP feature
+		// We re-use gsc_query_page_daily but mark via a separate tracking mechanism
+		// For now, store in appearance_daily at a finer grain by logging a JSON array
+		// of affected queries into a separate table or as enrichment metadata.
+		// Simple approach: update the appearance_daily with a query count
+		queryCount := len(resp.Rows)
+		if queryCount > 0 {
+			// Update the appearance row with query-level detail
+			topQueriesJSON := "[]"
+			type qInfo struct {
+				Query       string  `json:"query"`
+				Page        string  `json:"page"`
+				Clicks      int     `json:"clicks"`
+				Impressions int     `json:"impressions"`
+				Position    float64 `json:"position"`
+			}
+			var topQ []qInfo
+			for i, r := range resp.Rows {
+				if i >= 20 || len(r.Keys) < 2 {
+					continue
+				}
+				topQ = append(topQ, qInfo{
+					Query: r.Keys[0], Page: r.Keys[1],
+					Clicks: r.Clicks, Impressions: r.Impressions, Position: r.Position,
+				})
+			}
+			if b, err := json.Marshal(topQ); err == nil {
+				topQueriesJSON = string(b)
+			}
+			// Store the query-level detail into gsc_appearance_daily.top_queries_json
+			db.DB.Exec(
+				`UPDATE gsc_appearance_daily SET top_queries_json = $1
+				 WHERE site_id = $2 AND date = $3 AND appearance = $4`,
+				topQueriesJSON, siteID, date, feat,
+			)
+		}
+		time.Sleep(100 * time.Millisecond) // Rate limit
 	}
 }
 

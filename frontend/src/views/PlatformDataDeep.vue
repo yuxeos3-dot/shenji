@@ -523,11 +523,46 @@
           <el-table-column label="排名" width="65" :formatter="(_:any,__:any,___:any,r:any) => r.position?.toFixed(1)" />
         </el-table>
         <h4 style="margin-top:16px">📄 对应页面（TOP 20）</h4>
+        <div v-if="kwDetailData.cannibalization" class="cannibal-warn">
+          ⚠️ 自蚕食警告：该关键词有 <b>{{ kwDetailData.cannibal_page_count }}</b> 个页面在 TOP 20 争抢排名！
+        </div>
         <el-table :data="kwDetailData.pages" stripe size="small" border>
           <el-table-column type="index" width="35" /><el-table-column prop="page_url" label="页面" min-width="300" show-overflow-tooltip />
           <el-table-column prop="clicks" label="点击" width="65" /><el-table-column prop="impressions" label="曝光" width="75" />
           <el-table-column label="排名" width="65" :formatter="(_:any,__:any,___:any,r:any) => r.position?.toFixed(1)" />
         </el-table>
+        <!-- Device breakdown -->
+        <div v-if="kwDetailData.devices?.length" style="margin-top:16px">
+          <h4>📱 设备分布</h4>
+          <div class="mini-cards">
+            <div class="mini-card" v-for="d in kwDetailData.devices" :key="d.device">
+              <div class="mc-title">{{ d.device }}</div>
+              <div class="mc-row"><span>点击</span><b>{{ d.clicks }}</b></div>
+              <div class="mc-row"><span>曝光</span><b>{{ d.impressions }}</b></div>
+              <div class="mc-row"><span>排名</span><b>{{ d.position?.toFixed(1) }}</b></div>
+            </div>
+          </div>
+        </div>
+        <!-- Country breakdown -->
+        <div v-if="kwDetailData.countries?.length" style="margin-top:16px">
+          <h4>🌍 国家分布（TOP 10）</h4>
+          <el-table :data="kwDetailData.countries" stripe size="small" border>
+            <el-table-column prop="country" label="国家" width="80" /><el-table-column prop="clicks" label="点击" width="65" />
+            <el-table-column prop="impressions" label="曝光" width="75" />
+            <el-table-column label="排名" width="65" :formatter="(_:any,__:any,___:any,r:any) => r.position?.toFixed(1)" />
+          </el-table>
+        </div>
+        <!-- Other search types -->
+        <div v-if="kwDetailData.other_search_types?.length" style="margin-top:16px">
+          <h4>🔎 其他搜索类型</h4>
+          <div class="mini-cards">
+            <div class="mini-card" v-for="s in kwDetailData.other_search_types" :key="s.search_type">
+              <div class="mc-title">{{ s.search_type }}</div>
+              <div class="mc-row"><span>点击</span><b>{{ s.clicks }}</b></div>
+              <div class="mc-row"><span>曝光</span><b>{{ s.impressions }}</b></div>
+            </div>
+          </div>
+        </div>
       </div>
     </el-dialog>
   </div>
@@ -792,4 +827,10 @@ h3 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
 .kd-tags { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .kd-meta { color: #999; font-size: 12px; }
 h4 { margin: 0 0 8px; font-size: 14px; color: #555; }
+.cannibal-warn { background: #fef0f0; border: 1px solid #fbc4c4; border-radius: 6px; padding: 8px 14px; font-size: 13px; color: #f56c6c; margin-bottom: 8px; }
+.mini-cards { display: flex; gap: 10px; flex-wrap: wrap; }
+.mini-card { background: #f9fafb; border: 1px solid #eee; border-radius: 8px; padding: 10px 14px; min-width: 120px; }
+.mc-title { font-weight: 600; font-size: 13px; margin-bottom: 6px; text-transform: capitalize; }
+.mc-row { display: flex; justify-content: space-between; font-size: 12px; color: #666; padding: 1px 0; }
+.mc-row b { color: #333; }
 </style>

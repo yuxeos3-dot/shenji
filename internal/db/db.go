@@ -857,6 +857,7 @@ func Init() {
 			UNIQUE(site_id, date, appearance)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_gad_site_date ON gsc_appearance_daily(site_id, date DESC)`,
+		"DO $$ BEGIN ALTER TABLE gsc_appearance_daily ADD COLUMN top_queries_json JSONB DEFAULT '[]'; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
 
 		// ─── Bing Deep Tables ────────────────────────────────────────────
 		// 6. Bing query × page daily
