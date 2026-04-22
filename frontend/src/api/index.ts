@@ -439,6 +439,18 @@ const api = {
   generateReport: (siteId: Id, type?: string) => instance.post(`/v1/sites/${siteId}/generate-report`, {}, { params: { type }, timeout: 300000 } as any),
   listSiteReports: (siteId: Id) => instance.get(`/v1/sites/${siteId}/analysis-reports`),
   getSiteReport: (reportId: Id) => instance.get(`/v1/analysis-reports/${reportId}`),
+  // Management CRUD
+  listCompetitors: (siteId: Id) => instance.get(`/v1/sites/${siteId}/competitors`),
+  createCompetitor: (siteId: Id, data: Record<string, any>) => instance.post(`/v1/sites/${siteId}/competitors`, data),
+  deleteCompetitor: (id: Id) => instance.delete(`/v1/competitors/${id}`),
+  listAlgorithmUpdates: () => instance.get('/v1/algorithm-updates'),
+  createAlgorithmUpdate: (data: Record<string, any>) => instance.post('/v1/algorithm-updates', data),
+  listSERPObservations: (siteId: Id) => instance.get(`/v1/sites/${siteId}/serp-observations`),
+  createSERPObservation: (siteId: Id, data: Record<string, any>) => instance.post(`/v1/sites/${siteId}/serp-observations`, data),
+  listAIOObservations: (siteId: Id) => instance.get(`/v1/sites/${siteId}/aio-observations`),
+  createAIOObservation: (siteId: Id, data: Record<string, any>) => instance.post(`/v1/sites/${siteId}/aio-observations`, data),
+  listTimelineEvents: (siteId: Id) => instance.get(`/v1/sites/${siteId}/timeline`),
+  createTimelineEvent: (siteId: Id, data: Record<string, any>) => instance.post(`/v1/sites/${siteId}/timeline`, data),
 
   // Unified platform data (single endpoint for everything)
   getUnifiedData: (siteId: Id, platform: string, days?: number) =>
