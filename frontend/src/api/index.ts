@@ -431,6 +431,12 @@ const api = {
     instance.put(`/v1/push/schedules/${id}/toggle`),
 
   // ── Platform Data Deep ─────────────────────────────────────────
+  // Unified platform data (single endpoint for everything)
+  getUnifiedData: (siteId: Id, platform: string, days?: number) =>
+    instance.get(`/v1/sites/${siteId}/platform-data`, { params: { platform, days } }),
+  syncAndLoad: (siteId: Id, platform: string, days?: number) =>
+    instance.post(`/v1/sites/${siteId}/sync-and-load`, {}, { params: { platform, days }, timeout: 300000 } as any),
+
   // Site ID resolution (domain → site_id for deep data)
   resolveSiteId: (domain: string) =>
     instance.get('/v1/resolve-site-id', { params: { domain }, _silent: true } as any),
