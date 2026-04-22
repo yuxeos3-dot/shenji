@@ -2,12 +2,14 @@ package api
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"log"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	"seo-system/internal/crawler"
 	"seo-system/internal/db"
 )
 
@@ -24,6 +26,22 @@ func RunTLSProbe(siteID int64, hostname string) {
 	// Strip path, keep host
 	if idx := strings.Index(hostname, "/"); idx > 0 {
 		hostname = hostname[:idx]
+	}
+
+	// Resolve hostname first to check for private IPs
+	ips, err := net.LookupHost(hostname)
+	if err != nil || len(ips) == 0 {
+		db.DB.Exec(`INSERT INTO tls_checks_daily (site_id, date, hostname, cert_valid) VALUES ($1,$2,$3,FALSE)
+			ON CONFLICT (site_id, date, hostname) DO UPDATE SET cert_valid=FALSE`,
+			siteID, date, hostname)
+		return
+	}
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()) {
+			log.Printf("[tls] site %d %s: blocked private IP %s", siteID, hostname, ipStr)
+			return
+		}
 	}
 
 	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, "tcp", hostname+":443", &tls.Config{})
@@ -107,30 +125,22 @@ func RunDNSProbe(siteID int64, hostname string) {
 		}
 	}
 
-	aJSON := "[]"
-	if len(ips) > 0 {
-		parts := make([]string, len(ips))
-		for i, ip := range ips {
-			parts[i] = `"` + ip + `"`
-		}
-		aJSON = "[" + strings.Join(parts, ",") + "]"
-	}
+	aJSON, _ := json.Marshal(ips)
+	if len(ips) == 0 { aJSON = []byte("[]") }
 
-	nsJSON := "[]"
-	if len(nsList) > 0 {
-		parts := make([]string, len(nsList))
-		for i, ns := range nsList {
-			parts[i] = `"` + ns.Host + `"`
-		}
-		nsJSON = "[" + strings.Join(parts, ",") + "]"
+	nsHosts := make([]string, len(nsList))
+	for i, ns := range nsList {
+		nsHosts[i] = ns.Host
 	}
+	nsJSON, _ := json.Marshal(nsHosts)
+	if len(nsList) == 0 { nsJSON = []byte("[]") }
 
 	db.DB.Exec(`INSERT INTO dns_checks_daily (site_id, date, hostname, a_records_json, ns_json, resolution_time_ms, has_spf, has_dmarc)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT (site_id, date, hostname) DO UPDATE SET a_records_json=EXCLUDED.a_records_json,
 		ns_json=EXCLUDED.ns_json, resolution_time_ms=EXCLUDED.resolution_time_ms,
 		has_spf=EXCLUDED.has_spf, has_dmarc=EXCLUDED.has_dmarc`,
-		siteID, date, hostname, aJSON, nsJSON, resTime, hasSPF, hasDMARC)
+		siteID, date, hostname, string(aJSON), string(nsJSON), resTime, hasSPF, hasDMARC)
 
 	log.Printf("[dns] site %d %s: %d IPs, %dms, SPF=%v DMARC=%v", siteID, hostname, len(ips), resTime, hasSPF, hasDMARC)
 }
@@ -142,7 +152,7 @@ func RunSecurityHeadersProbe(siteID int64, rawURL string) {
 		rawURL = "https://" + rawURL
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := crawler.BuildHTTPClient(15 * time.Second)
 	resp, err := client.Head(rawURL)
 	if err != nil {
 		return

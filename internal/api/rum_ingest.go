@@ -63,6 +63,14 @@ func RUMEventIngest(c *gin.Context) {
 		return
 	}
 
+	// Validate site exists
+	var exists int
+	db.DB.QueryRow("SELECT 1 FROM sites WHERE id=$1", req.SiteID).Scan(&exists)
+	if exists != 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1})
+		return
+	}
+
 	db.DB.Exec(`INSERT INTO rum_events (site_id, url, event_type, event_value, element_selector, device_type, session_id)
 		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
 		req.SiteID, req.URL, req.EventType, req.Value, req.Element, req.Device, req.SessionID)

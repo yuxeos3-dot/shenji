@@ -119,7 +119,7 @@ const stats = computed(() => {
 </script>
 
 <style scoped>
-.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 24px; }
 .stat-card {
   background: var(--surface);
   border: 1.5px solid var(--border-light);

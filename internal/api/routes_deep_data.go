@@ -7,7 +7,7 @@ import "github.com/gin-gonic/gin"
 func registerDeepDataRoutes(v1 *gin.RouterGroup) {
 	// ── Unified data (single endpoint for all platform data) ─────
 	v1.GET("/sites/:id/platform-data", RequirePermission("data.view"), GetUnifiedPlatformData)
-	v1.POST("/sites/:id/sync-and-load", RequirePermission("data.view"), SyncAndLoad)
+	v1.POST("/sites/:id/sync-and-load", RequirePermission("data.sync_gsc"), SyncAndLoad)
 
 	// ── Site Analysis (全站分析) ──────────────────────────────────
 	v1.GET("/sites/:id/health-score", RequirePermission("data.view"), GetSiteHealthScore)
@@ -25,24 +25,24 @@ func registerDeepDataRoutes(v1 *gin.RouterGroup) {
 
 	// ── Competitors ───────────────────────────────────────────────
 	v1.GET("/sites/:id/competitors", RequirePermission("data.view"), ListCompetitors)
-	v1.POST("/sites/:id/competitors", RequirePermission("data.view"), CreateCompetitor)
-	v1.DELETE("/competitors/:competitorId", RequirePermission("data.view"), DeleteCompetitor)
+	v1.POST("/sites/:id/competitors", RequirePermission("data.manage"), CreateCompetitor)
+	v1.DELETE("/sites/:id/competitors/:competitorId", RequirePermission("data.manage"), DeleteCompetitor)
 
 	// ── Algorithm Updates ─────────────────────────────────────────
 	v1.GET("/algorithm-updates", RequirePermission("data.view"), ListAlgorithmUpdates)
-	v1.POST("/algorithm-updates", RequirePermission("data.view"), CreateAlgorithmUpdate)
+	v1.POST("/algorithm-updates", RequirePermission("data.manage"), CreateAlgorithmUpdate)
 
 	// ── SERP Observations ─────────────────────────────────────────
 	v1.GET("/sites/:id/serp-observations", RequirePermission("data.view"), ListSERPObservations)
-	v1.POST("/sites/:id/serp-observations", RequirePermission("data.view"), CreateSERPObservation)
+	v1.POST("/sites/:id/serp-observations", RequirePermission("data.manage"), CreateSERPObservation)
 
 	// ── AIO Observations ──────────────────────────────────────────
 	v1.GET("/sites/:id/aio-observations", RequirePermission("data.view"), ListAIOObservations)
-	v1.POST("/sites/:id/aio-observations", RequirePermission("data.view"), CreateAIOObservation)
+	v1.POST("/sites/:id/aio-observations", RequirePermission("data.manage"), CreateAIOObservation)
 
 	// ── Timeline Events ───────────────────────────────────────────
 	v1.GET("/sites/:id/timeline", RequirePermission("data.view"), ListTimelineEvents)
-	v1.POST("/sites/:id/timeline", RequirePermission("data.view"), CreateTimelineEvent)
+	v1.POST("/sites/:id/timeline", RequirePermission("data.manage"), CreateTimelineEvent)
 
 	// ── Site ID resolution ────────────────────────────────────────
 	v1.GET("/resolve-site-id", RequirePermission("data.view"), ResolveSiteID)

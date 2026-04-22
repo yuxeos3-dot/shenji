@@ -177,7 +177,7 @@ func Register(c *gin.Context) {
 	).Scan(&newID)
 	if err != nil {
 		log.Printf("[register] insert user failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "注册失败：" + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "注册失败"})
 		return
 	}
 
@@ -232,18 +232,19 @@ func loadInviteCodes() []string {
 // half-registered user. Settings has no FK back to users, so we run on
 // db.DB rather than the inviting transaction.
 func consumeInviteCode(code string) {
-	codes := loadInviteCodes()
-	out := make([]string, 0, len(codes))
-	for _, c := range codes {
-		if !strings.EqualFold(c, code) {
-			out = append(out, c)
-		}
-	}
-	if _, err := db.DB.Exec(
-		"UPDATE settings SET value = $1 WHERE key = 'invite_codes_csv'",
-		strings.Join(out, ","),
-	); err != nil {
+	// Use atomic UPDATE to prevent race condition with concurrent registrations
+	result, err := db.DB.Exec(
+		`UPDATE settings SET value = array_to_string(
+			array_remove(string_to_array(value, ','), $1), ',')
+		 WHERE key = 'invite_codes_csv' AND value LIKE '%' || $1 || '%'`,
+		code,
+	)
+	if err != nil {
 		log.Printf("[register] consume invite code %s: %v", code, err)
+		return
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		log.Printf("[register] invite code %s already consumed or not found", code)
 	}
 }
 

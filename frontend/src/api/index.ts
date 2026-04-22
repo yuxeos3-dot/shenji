@@ -64,7 +64,9 @@ instance.interceptors.response.use(
     if (error.response?.status === 401) {
       // Scrub any lingering legacy token — harmless if absent.
       localStorage.removeItem('token')
-      router.push('/login')
+      if (router.currentRoute.value.path !== '/login') {
+        router.push('/login')
+      }
     }
     // #43: CSRF token mismatch — session likely expired or cookie cleared.
     // Redirect to login so the user gets a fresh session + CSRF pair.

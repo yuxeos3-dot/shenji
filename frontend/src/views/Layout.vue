@@ -71,6 +71,10 @@
       <label>新密码</label>
       <el-input v-model="pwdForm.new_password" type="password" show-password />
     </div>
+    <div class="form-group">
+      <label>确认新密码</label>
+      <el-input v-model="pwdForm.confirm_password" type="password" show-password />
+    </div>
     <template #footer>
       <el-button @click="showPasswordDialog=false">取消</el-button>
       <el-button type="primary" @click="changePassword">确定</el-button>
@@ -131,7 +135,7 @@ watch(() => route.path, () => {
 })
 
 const showPasswordDialog = ref(false)
-const pwdForm = ref({ old_password: '', new_password: '' })
+const pwdForm = ref({ old_password: '', new_password: '', confirm_password: '' })
 
 // ─── Sidebar navigation structure ────────────────────────────────────────
 //
@@ -305,6 +309,8 @@ const pageTitles = {
   '/global-data': '全局数据总览',
   '/cache-management': '缓存管理',
   '/settings': '系统设置',
+  '/site-analysis': '全站分析',
+  '/global-analytics': '全局数据分析',
 }
 const pageTitle = computed(() => {
   for (const [path, title] of Object.entries(pageTitles)) {
@@ -337,11 +343,23 @@ async function handleLogout() {
 }
 
 async function changePassword() {
+  if (!pwdForm.value.old_password || !pwdForm.value.new_password) {
+    ElMessage.warning('请填写旧密码和新密码')
+    return
+  }
+  if (pwdForm.value.new_password.length < 12) {
+    ElMessage.warning('新密码至少12位')
+    return
+  }
+  if (pwdForm.value.new_password !== pwdForm.value.confirm_password) {
+    ElMessage.warning('两次输入的新密码不一致')
+    return
+  }
   try {
     await apiClient.changePassword(pwdForm.value)
     ElMessage.success('密码修改成功')
     showPasswordDialog.value = false
-    pwdForm.value = { old_password: '', new_password: '' }
+    pwdForm.value = { old_password: '', new_password: '', confirm_password: '' }
   } catch (e) { console.error(e); ElMessage.error('密码修改失败') }
 }
 </script>

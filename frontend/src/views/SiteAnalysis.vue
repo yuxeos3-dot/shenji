@@ -482,6 +482,8 @@ const reportContent = ref<any>(null)
 // Simple markdown to HTML (basic)
 function renderMD(md: string): string {
   if (!md) return ''
+  // Escape HTML entities to prevent XSS before markdown conversion
+  md = md.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   return md
     .replace(/^### (.*$)/gm, '<h3>$1</h3>')
     .replace(/^## (.*$)/gm, '<h2>$1</h2>')

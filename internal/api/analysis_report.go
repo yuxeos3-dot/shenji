@@ -49,7 +49,7 @@ func GenerateSiteAnalysisReport(c *gin.Context) {
 		VALUES ($1, $2, $3, $4, 'generating') RETURNING id`,
 		sid, reportType, periodStart, periodEnd).Scan(&reportID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "创建报告失败: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "创建报告失败"})
 		return
 	}
 

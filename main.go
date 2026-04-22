@@ -68,17 +68,38 @@ func main() {
 	// finishes; the user-visible effect is just that per-user credentials
 	// might take a few more seconds to appear in the admin monitoring
 	// view on first boot after deploy.
-	go api.MigrateGlobalToPersonalConfig()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[boot] MigrateGlobalToPersonalConfig panic: %v", r)
+			}
+		}()
+		api.MigrateGlobalToPersonalConfig()
+	}()
 
 	// Warm the 4-platform data cache right after the DB is ready so first
 	// request hits a primed cache. Done in a goroutine — the HTTP server
 	// comes up immediately; if an early read loses the race it'll lazy-load
 	// the single site on demand.
-	go api.WarmDataCache()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[boot] WarmDataCache panic: %v", r)
+			}
+		}()
+		api.WarmDataCache()
+	}()
 
 	// One-time backfill: flatten all historical audit_results into
 	// the new audit_findings table for analysis queries.
-	go api.BackfillAuditFindings()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[boot] BackfillAuditFindings panic: %v", r)
+			}
+		}()
+		api.BackfillAuditFindings()
+	}()
 
 	// Seed initial analysis rules if not present
 	api.SeedInitialRules()

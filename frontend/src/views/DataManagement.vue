@@ -353,6 +353,7 @@
 </template>
 
 <script setup lang="ts">
+defineOptions({ name: 'DataManagement' })
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'

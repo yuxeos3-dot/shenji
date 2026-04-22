@@ -150,6 +150,16 @@ const route = useRoute()
 const userStore = useUserStore()
 const siteConfig = useSiteConfigStore()
 
+// Validate redirect path to prevent open redirect attacks
+function safeRedirect(fullPath: string): string {
+  if (!fullPath || fullPath === '/') return ''
+  if (!fullPath.startsWith('/')) return ''
+  if (fullPath.startsWith('//')) return ''
+  if (fullPath.startsWith('/\\')) return ''
+  if (/^\s*(javascript|data|vbscript):/i.test(fullPath)) return ''
+  return fullPath
+}
+
 // Cold-load optimisation: the router guard now sends new tabs to
 // /login synchronously without waiting for the auth probe, then runs
 // the probe in the background. If the probe comes back as "actually
@@ -157,8 +167,9 @@ const siteConfig = useSiteConfigStore()
 // route rather than make the user log in again.
 watch(() => userStore.authed, (now) => {
   if (now) {
-    const dest = route.query.redirect || '/dashboard'
-    router.replace(dest)
+    const raw = String(route.query.redirect || '/dashboard')
+    const dest = safeRedirect(raw)
+    router.replace(dest || '/dashboard')
   }
 })
 
@@ -259,8 +270,8 @@ async function handleRegister() {
     ElMessage.warning('两次输入的密码不一致')
     return
   }
-  if (regForm.password.length < 8) {
-    ElMessage.warning('密码至少 8 位')
+  if (regForm.password.length < 12 || !/[a-zA-Z]/.test(regForm.password) || !/\d/.test(regForm.password)) {
+    ElMessage.warning('密码至少12位，需包含字母和数字')
     return
   }
 
@@ -295,14 +306,15 @@ async function handleRegister() {
 }
 
 onMounted(() => {
-  if (!siteConfig.title) siteConfig.fetch?.()
+  if (!siteConfig.title) siteConfig.refresh()
   // Belt + braces with the watcher above: if the auth probe already
   // resolved to authed=true before this component finished mounting
   // (rare but possible on a cached cookie), the watch won't fire for
   // the initial value. Check once on mount too.
   if (userStore.authed) {
-    const dest = route.query.redirect || '/dashboard'
-    router.replace(dest)
+    const raw = String(route.query.redirect || '/dashboard')
+    const dest = safeRedirect(raw)
+    router.replace(dest || '/dashboard')
   }
 })
 </script>

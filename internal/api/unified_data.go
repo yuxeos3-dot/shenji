@@ -138,6 +138,14 @@ func unifiedGSC(c *gin.Context, siteID int64, days int) {
 		}
 	}
 
+	if trend == nil { trend = []map[string]interface{}{} }
+	if topKeywords == nil { topKeywords = []map[string]interface{}{} }
+	if topPages == nil { topPages = []map[string]interface{}{} }
+	if devices == nil { devices = []map[string]interface{}{} }
+	if countries == nil { countries = []map[string]interface{}{} }
+	if buckets == nil { buckets = []map[string]interface{}{} }
+	if appearances == nil { appearances = []map[string]interface{}{} }
+
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
 		"platform": "gsc", "has_deep_data": hasDeep,
 		"total_clicks": totalClicks, "total_impressions": totalImpressions,
@@ -211,6 +219,11 @@ func unifiedGA4(c *gin.Context, siteID int64, days int) {
 		}
 	}
 
+	if trend == nil { trend = []map[string]interface{}{} }
+	if topPages == nil { topPages = []map[string]interface{}{} }
+	if devices == nil { devices = []map[string]interface{}{} }
+	if countries == nil { countries = []map[string]interface{}{} }
+
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
 		"platform": "ga4", "has_deep_data": hasDeep,
 		"sessions": sessions, "users": users, "new_users": newUsers, "pageviews": pageviews,
@@ -263,6 +276,10 @@ func unifiedBing(c *gin.Context, siteID int64, days int) {
 			parseBingJSON(&topPages, pJSON, "Url", "page_url")
 		}
 	}
+
+	if trend == nil { trend = []map[string]interface{}{} }
+	if topKeywords == nil { topKeywords = []map[string]interface{}{} }
+	if topPages == nil { topPages = []map[string]interface{}{} }
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
 		"platform": "bing", "has_deep_data": hasDeep,
@@ -376,6 +393,9 @@ func unifiedYandex(c *gin.Context, siteID int64, days int) {
 			trend[i], trend[j] = trend[j], trend[i]
 		}
 	}
+
+	if trend == nil { trend = []map[string]interface{}{} }
+	if topKeywords == nil { topKeywords = []map[string]interface{}{} }
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
 		"platform": "yandex", "has_deep_data": hasDeep,
