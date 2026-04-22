@@ -18,6 +18,11 @@ func registerDeepDataRoutes(v1 *gin.RouterGroup) {
 	v1.GET("/sites/:id/analysis-reports", RequirePermission("data.view"), ListSiteReports)
 	v1.GET("/analysis-reports/:reportId", RequirePermission("data.view"), GetSiteReport)
 
+	// ── Content Stats + Rule Findings ─────────────────────────────
+	v1.GET("/sites/:id/content-stats", RequirePermission("data.view"), GetContentStats)
+	v1.GET("/sites/:id/rule-findings", RequirePermission("data.view"), GetRuleFindings)
+	v1.GET("/sites/:id/backlink-profile", RequirePermission("data.view"), GetBacklinkProfile)
+
 	// ── Competitors ───────────────────────────────────────────────
 	v1.GET("/sites/:id/competitors", RequirePermission("data.view"), ListCompetitors)
 	v1.POST("/sites/:id/competitors", RequirePermission("data.view"), CreateCompetitor)

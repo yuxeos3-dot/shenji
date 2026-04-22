@@ -451,6 +451,9 @@ const api = {
   createAIOObservation: (siteId: Id, data: Record<string, any>) => instance.post(`/v1/sites/${siteId}/aio-observations`, data),
   listTimelineEvents: (siteId: Id) => instance.get(`/v1/sites/${siteId}/timeline`),
   createTimelineEvent: (siteId: Id, data: Record<string, any>) => instance.post(`/v1/sites/${siteId}/timeline`, data),
+  getContentStats: (siteId: Id) => instance.get(`/v1/sites/${siteId}/content-stats`),
+  getRuleFindings: (siteId: Id) => instance.get(`/v1/sites/${siteId}/rule-findings`),
+  getBacklinkProfile: (siteId: Id) => instance.get(`/v1/sites/${siteId}/backlink-profile`),
 
   // Unified platform data (single endpoint for everything)
   getUnifiedData: (siteId: Id, platform: string, days?: number) =>

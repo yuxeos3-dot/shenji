@@ -45,6 +45,7 @@
             <span class="stat-label">{{ dimensionLabel(k) }}</span>
             <div class="stat-bar"><div class="stat-fill" :style="{width: v+'%'}" :class="barColor(v)"></div></div>
             <span class="stat-val">{{ v }}</span>
+            <span class="cov-dot" :class="covClass(k)" :title="covTitle(k)"></span>
           </div>
         </div>
         <div class="panel hero-summary">
@@ -198,11 +199,15 @@
     <!-- ═══════ 内容决策 Tab ═══════ -->
     <div v-if="siteId && tab === 'content'" class="panel">
       <h3>📝 内容健康</h3>
-      <div class="kpi-strip" v-if="contentStats" style="margin-bottom:12px">
+      <div class="kpi-strip" v-if="contentStats?.total" style="margin-bottom:12px">
         <div class="panel kpi-card"><div class="kpi-label">总页面</div><div class="kpi-val">{{ contentStats.total || 0 }}</div></div>
         <div class="panel kpi-card"><div class="kpi-label">薄内容(<300词)</div><div class="kpi-val" style="color:#e6a23c">{{ contentStats.thin || 0 }}</div></div>
+        <div class="panel kpi-card"><div class="kpi-label">缺 H1</div><div class="kpi-val" style="color:#f56c6c">{{ contentStats.no_h1 || 0 }}</div></div>
+        <div class="panel kpi-card"><div class="kpi-label">缺 Schema</div><div class="kpi-val" style="color:#e6a23c">{{ contentStats.no_schema || 0 }}</div></div>
+        <div class="panel kpi-card"><div class="kpi-label">缺 Meta Desc</div><div class="kpi-val" style="color:#e6a23c">{{ contentStats.no_meta || 0 }}</div></div>
         <div class="panel kpi-card"><div class="kpi-label">孤岛页面</div><div class="kpi-val" style="color:#f56c6c">{{ contentStats.orphans || 0 }}</div></div>
-        <div class="panel kpi-card"><div class="kpi-label">缺 Schema</div><div class="kpi-val" style="color:#e6a23c">{{ contentStats.noSchema || 0 }}</div></div>
+        <div class="panel kpi-card"><div class="kpi-label">有作者</div><div class="kpi-val" style="color:#67c23a">{{ contentStats.with_author || 0 }}</div></div>
+        <div class="panel kpi-card"><div class="kpi-label">有面包屑</div><div class="kpi-val" style="color:#67c23a">{{ contentStats.with_breadcrumb || 0 }}</div></div>
       </div>
       <el-table :data="contentPages" stripe border size="small" v-if="contentPages.length">
         <el-table-column prop="url" label="URL" min-width="300" show-overflow-tooltip /><el-table-column prop="word_count" label="词数" width="70" />
@@ -363,12 +368,36 @@ const error = ref('')
 const srcLabel = (s: string) => ({ gsc: 'GSC', ga4: 'GA4', bing: 'Bing', yandex: 'Yandex', content_snapshot: '内容快照', backlinks: '反链', tls_dns: 'TLS/DNS', crawl_budget: '抓取预算' }[s] || s)
 const isRecent = (date: string) => { if (!date) return false; const d = new Date(date); const now = new Date(); return (now.getTime() - d.getTime()) < 7 * 86400000 }
 
-const subScores = computed(() => {
+const subScoresRaw = computed(() => {
   if (!data.value?.sub_scores) return {}
-  const raw = typeof data.value.sub_scores === 'string' ? JSON.parse(data.value.sub_scores) : data.value.sub_scores
-  // New format has {scores:{...}, coverage:{...}}, old format is flat {traffic:X,...}
-  return raw?.scores || raw || {}
+  return typeof data.value.sub_scores === 'string' ? JSON.parse(data.value.sub_scores) : data.value.sub_scores
 })
+const subScores = computed(() => subScoresRaw.value?.scores || subScoresRaw.value || {})
+const coverage = computed(() => subScoresRaw.value?.coverage || {})
+
+// Coverage dot: maps dimension name → data source coverage status
+const covMapping: Record<string, string[]> = {
+  traffic: ['gsc'], ranking: ['gsc'], ctr: ['gsc'], technical: ['content_snapshot'],
+  indexation: ['url_inspection'], content: ['content_snapshot'], backlink: ['backlinks'],
+  security: ['tls_dns'], ux: ['ga4'], stability: ['anomaly_detection'],
+  brand: ['gsc'], eeat: ['content_snapshot'], aio: ['gsc'], crawl_budget: ['crawl_budget'], international: ['content_snapshot'],
+}
+function covClass(dim: string): string {
+  const srcs = covMapping[dim] || []
+  const cov = coverage.value
+  if (!cov || !Object.keys(cov).length) return 'cov-unknown'
+  const statuses = srcs.map(s => cov[s] || 'none')
+  if (statuses.every(s => s === 'full')) return 'cov-full'
+  if (statuses.some(s => s === 'full' || s === 'partial')) return 'cov-partial'
+  return 'cov-none'
+}
+function covTitle(dim: string): string {
+  const cls = covClass(dim)
+  if (cls === 'cov-full') return '数据完整'
+  if (cls === 'cov-partial') return '数据部分可用'
+  if (cls === 'cov-none') return '数据缺失(兜底值)'
+  return '未知'
+}
 
 const dimensionLabel = (k: string) => ({
   traffic: '流量', ranking: '排名', ctr: 'CTR', technical: '技术',
@@ -494,24 +523,23 @@ async function loadTabData() {
       const r: any = await api.getGSCUrlInspection(s, {}); idxList.value = r.data?.items || []; idxSummary.value = r.data?.summary || []
     }
     else if (tab.value === 'backlinks') {
-      try { const r: any = await api.getBingInboundLinks(s); blDomains.value = r.data || [] } catch {}
-      // Try backlink_profile_daily
-      const pRows: any[] = []; scanRemote(pRows, s)
+      try {
+        const r: any = await api.getBacklinkProfile(s)
+        blProfile.value = r.data?.profile || null
+        blDomains.value = r.data?.domains || []
+      } catch {}
     }
     else if (tab.value === 'content') {
-      // Content stats from page_content_snapshots via analysis summary data
-      const total = data.value?.findings?.length || 0
-      contentStats.value = { total: data.value?.dead_links || 0, thin: 0, orphans: data.value?.orphan_pages || 0, noSchema: 0 }
+      try {
+        const r: any = await api.getContentStats(s)
+        contentStats.value = r.data || {}
+        contentPages.value = r.data?.pages || []
+      } catch {}
     }
     else if (tab.value === 'rules') {
-      // Rule findings - use the findings from analysis summary that come from rule_findings
-      ruleList.value = []
       try {
-        // Direct query via analysis summary (rule_findings are mixed into findings)
-        const r: any = await api.getSiteAnalysisSummary(s)
-        if (r.data?.findings) {
-          ruleList.value = r.data.findings
-        }
+        const r: any = await api.getRuleFindings(s)
+        ruleList.value = r.data?.findings || []
       } catch {}
     }
     else if (tab.value === 'competitors') { const r: any = await api.listCompetitors(s); competitorsList.value = r.data || [] }
@@ -523,7 +551,6 @@ async function loadTabData() {
   } catch {}
 }
 
-function scanRemote(_dest: any[], _siteId: number) { /* placeholder for direct DB queries via API */ }
 
 async function addCompetitor() {
   if (!siteId.value || !compForm.value.domain) return
@@ -671,6 +698,8 @@ h3 { margin: 0 0 12px; font-size: 15px; font-weight: 700; }
 .sub-pill:hover { background: #fff3e0; border-color: #ffcc80; }
 .sub-pill.active { background: var(--sun, #ff8c00); color: #fff; border-color: var(--sun, #ff8c00); }
 .sp-i { font-size: 13px; }
+.cov-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.cov-full { background: #67c23a; } .cov-partial { background: #e6a23c; } .cov-none { background: #f56c6c; } .cov-unknown { background: #ccc; }
 .ds-chip { padding: 3px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
 .ds-ok { background: #f0f9eb; color: #67c23a; border: 1px solid #c2e7b0; }
 .ds-stale { background: #fef0f0; color: #f56c6c; border: 1px solid #fbc4c4; }
