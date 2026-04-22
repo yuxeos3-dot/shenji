@@ -441,41 +441,125 @@ async function openDetail(c: any) {
   if (!siteKey || c.error) return
   detail.value.siteKey = siteKey
   detail.value.siteName = c.display_name || siteKey
+  detail.value.siteId = 0
   view.value = 'detail'; subTab.value = 'overview'; activeBucket.value = ''
+  d.value = {}
 
-  // Resolve site_id
-  try {
-    const r: any = await api.resolveSiteId(siteKey)
-    detail.value.siteId = r.data?.site_id || 0
-  } catch {
-    // Try with display_name
-    try { const r2: any = await api.resolveSiteId(c.display_name || ''); detail.value.siteId = r2.data?.site_id || 0 } catch { detail.value.siteId = 0 }
-  }
+  // Step 1: Load data from platform API immediately (always works, no site_id needed)
+  await loadFromPlatformAPI()
 
-  loadDetailData()
+  // Step 2: Try to resolve site_id in background for deep data (optional enhancement)
+  resolveAndLoadDeep()
 }
 
-async function loadDetailData() {
-  const sid = detail.value.siteId
-  if (!sid) { error.value = '无法解析站点 ID（请确认在站点管理中已注册该域名）'; return }
+// Load data directly from platform dashboard API (GSC/GA4/Bing/Yandex)
+// This is the primary data source — always works regardless of site_id
+async function loadFromPlatformAPI() {
   loading.value = true; error.value = ''
+  const sk = detail.value.siteKey
+  const baseParams = { start_date: '', end_date: '' }
   try {
-    const res: any = await api.getUnifiedData(sid, platform.value, days.value)
-    d.value = res.data || {}
+    let res: any
+    switch (platform.value) {
+      case 'gsc':    res = await api.dashGSCSiteDetail({ ...baseParams, site_url: sk }); break
+      case 'ga4':    res = await api.dashGAPropertyDetail({ ...baseParams, property_id: sk }); break
+      case 'bing':   res = await api.dashBingSiteDetail({ ...baseParams, site_url: sk }); break
+      case 'yandex': res = await api.dashYandexHostDetail({ ...baseParams, host_id: sk }); break
+    }
+    digestPlatformData(res.data)
   } catch (e: any) { error.value = e?.response?.data?.error || e?.message || '加载失败' }
   finally { loading.value = false }
 }
 
-async function syncAndReload() {
-  const sid = detail.value.siteId
-  if (!sid) { ElMessage.warning('站点 ID 未解析'); return }
-  syncing.value = true
+// Parse platform API response into unified d.value
+function digestPlatformData(raw: any) {
+  if (!raw) return
+  const p = platform.value
+  if (p === 'gsc') {
+    const ov = (raw.overview?.rows || [])[0] || {}
+    const kws = (raw.keywords?.rows || []).map((r:any) => ({ query: r.keys?.[0]||'', clicks: r.clicks||0, impressions: r.impressions||0, ctr: r.ctr||0, position: r.position||0 }))
+    const pgs = (raw.pages?.rows || []).map((r:any) => ({ page_url: r.keys?.[0]||'', clicks: r.clicks||0, impressions: r.impressions||0, ctr: r.ctr||0 }))
+    const trend = (raw.trend?.rows || []).map((r:any) => ({ date: r.keys?.[0]||'', clicks: r.clicks||0, impressions: r.impressions||0, ctr: r.ctr||0 }))
+    const devs = (raw.devices?.rows || []).map((r:any) => ({ label: r.keys?.[0]||'', clicks: r.clicks||0 }))
+    const ctrs = (raw.countries?.rows || []).slice(0,10).map((r:any) => ({ label: r.keys?.[0]||'', clicks: r.clicks||0 }))
+    d.value = { platform: 'gsc', total_clicks: ov.clicks||0, total_impressions: ov.impressions||0, avg_ctr: ov.ctr||0, avg_position: ov.position||0,
+      trend, top_keywords: kws, top_pages: pgs, devices: devs, countries: ctrs, has_deep_data: false }
+  } else if (p === 'ga4') {
+    const toNum = (v:any) => parseFloat(v?.value ?? v ?? '0') || 0
+    const ovRow = (raw.overview?.rows || [])[0]
+    const mv = ovRow?.metricValues || []
+    const trend = (raw.trend?.rows || []).map((r:any) => { const dt = r.dimensionValues?.[0]?.value||''; return { date: dt.length===8 ? `${dt.slice(0,4)}-${dt.slice(4,6)}-${dt.slice(6,8)}` : dt, clicks: toNum(r.metricValues?.[0]), impressions: toNum(r.metricValues?.[1]) } })
+    const pgs = (raw.pages?.rows || []).map((r:any) => ({ page_url: r.dimensionValues?.[0]?.value||'', clicks: toNum(r.metricValues?.[0]), impressions: toNum(r.metricValues?.[1]) }))
+    const devs = (raw.devices?.rows || []).map((r:any) => ({ label: r.dimensionValues?.[0]?.value||'', clicks: toNum(r.metricValues?.[0]) }))
+    const ctrs = (raw.countries?.rows || []).slice(0,10).map((r:any) => ({ label: r.dimensionValues?.[0]?.value||'', clicks: toNum(r.metricValues?.[0]) }))
+    d.value = { platform: 'ga4', sessions: toNum(mv[0]), users: toNum(mv[1]), new_users: toNum(mv[2]), pageviews: toNum(mv[3]),
+      bounce_rate: toNum(mv[4]), engagement_rate: mv[6] ? toNum(mv[6]) : 0, trend, top_pages: pgs, devices: devs, countries: ctrs, has_deep_data: false }
+  } else if (p === 'bing') {
+    const rows = (raw.queries?.d || []).filter((r:any) => r && typeof r === 'object')
+    let clicks=0, impr=0
+    rows.forEach((r:any) => { clicks += Number(r.Clicks||0); impr += Number(r.Impressions||0) })
+    const kws = rows.slice(0,20).map((r:any) => ({ query: r.Query||'', clicks: Number(r.Clicks||0), impressions: Number(r.Impressions||0), position: Number(r.AvgImpPos||0) }))
+    const pgs = (raw.pages?.d || []).slice(0,20).map((r:any) => ({ page_url: r.Page||r.Url||'', clicks: Number(r.Clicks||0), impressions: Number(r.Impressions||0) }))
+    d.value = { platform: 'bing', total_clicks: clicks, total_impressions: impr, avg_ctr: impr>0?clicks/impr:0, avg_position: 0,
+      top_keywords: kws, top_pages: pgs, has_deep_data: false }
+  } else if (p === 'yandex') {
+    const ind = raw.history?.indicators || {}
+    const sumA = (a:any[]) => (a||[]).reduce((s:number, x:any) => s + (x.value||0), 0)
+    const clicks = sumA(ind.TOTAL_CLICKS); const shows = sumA(ind.TOTAL_SHOWS)
+    const trend = (ind.TOTAL_CLICKS||[]).map((x:any, i:number) => ({ date: x.date||'', clicks: x.value||0, impressions: (ind.TOTAL_SHOWS||[])[i]?.value||0 }))
+    const pop = raw.popular?.queries || raw.popular?.popular_queries || []
+    const kws = pop.slice(0,20).map((q:any) => { const i = q.indicators||{}; return { query: q.query_text||q.query||'', clicks: i.TOTAL_CLICKS||0, impressions: i.TOTAL_SHOWS||0, position: i.AVG_SHOW_POSITION||0 } })
+    d.value = { platform: 'yandex', total_clicks: clicks, total_impressions: shows, avg_ctr: shows>0?clicks/shows:0,
+      trend, top_keywords: kws, has_deep_data: false }
+  }
+}
+
+// Try to resolve site_id and load deep data in background (optional, enhances with buckets/appearance/etc)
+async function resolveAndLoadDeep() {
   try {
-    const res: any = await api.syncAndLoad(sid, platform.value, days.value)
-    d.value = res.data || {}
-    ElMessage.success('同步完成')
-  } catch (e: any) { ElMessage.error(e?.response?.data?.error || e?.message || '同步失败') }
-  finally { syncing.value = false }
+    const r: any = await api.resolveSiteId(detail.value.siteKey)
+    detail.value.siteId = r.data?.site_id || 0
+  } catch {
+    try { const r2: any = await api.resolveSiteId(detail.value.siteName); detail.value.siteId = r2.data?.site_id || 0 } catch { detail.value.siteId = 0 }
+  }
+  const sid = detail.value.siteId
+  if (!sid) return // No site_id — platform API data is sufficient
+
+  // Load deep data to enhance the view (buckets, appearances, etc.)
+  try {
+    const res: any = await api.getUnifiedData(sid, platform.value, days.value)
+    const deep = res.data || {}
+    // Merge deep data on top of platform data (deep data has more detail)
+    if (deep.has_deep_data) {
+      d.value = { ...d.value, ...deep }
+    } else {
+      // Only add supplementary fields from unified (buckets/appearances) without overwriting
+      if (deep.buckets?.length) d.value.buckets = deep.buckets
+      if (deep.appearances?.length) d.value.appearances = deep.appearances
+    }
+  } catch {} // Silently fail — platform API data is already showing
+}
+
+// Refresh: reload platform data + trigger deep sync if site_id available
+async function syncAndReload() {
+  syncing.value = true
+  // Always reload platform API data first
+  await loadFromPlatformAPI()
+
+  // If we have site_id, also trigger deep sync
+  const sid = detail.value.siteId
+  if (sid) {
+    try {
+      if (platform.value === 'gsc') await api.syncGSCDeep(sid)
+      else if (platform.value === 'ga4') await api.syncGA4Deep(sid)
+      else if (platform.value === 'bing') await api.syncBingDeep(sid)
+      else if (platform.value === 'yandex') await api.syncYandexDeep(sid)
+    } catch {} // Deep sync failure is OK — platform data is already loaded
+    // Reload deep data
+    resolveAndLoadDeep()
+  }
+  syncing.value = false
+  ElMessage.success('数据已刷新')
 }
 
 function backToOverview() { view.value = 'overview'; subTab.value = 'overview'; error.value = ''; d.value = {} }
