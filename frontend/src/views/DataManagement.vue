@@ -85,31 +85,18 @@
           </div>
           <div v-if="d.has_deep_data === false" class="hint-bar">⚠ 当前为基础数据。点击「刷新同步」获取完整关键词明细、排名分段、SERP 特征等深度分析。</div>
 
-          <!-- Rank buckets (GSC) -->
-          <div v-if="d.buckets?.length" class="section">
-            <div class="section-title">📶 排名分布</div>
+          <!-- Rank buckets (GSC) — inline in overview -->
+          <div v-if="platform === 'gsc' && computedBuckets.length" class="section">
+            <div class="section-title">📶 排名分布
+              <button class="btn btn-link" @click="subTab='buckets'" style="margin-left:auto">查看详情 →</button>
+            </div>
             <div class="bucket-grid">
-              <div v-for="b in d.buckets" :key="b.bucket" :class="['bucket-card', activeBucket===b.bucket && 'selected']" @click="drillBucket(b.bucket)">
+              <div v-for="b in computedBuckets" :key="b.bucket" class="bucket-card" @click="subTab='buckets';activeBucket=b.bucket">
                 <div class="bk-name">{{ b.bucket }}</div>
                 <div class="bk-big">{{ fmt(b.query_count) }} <small>词</small></div>
                 <div class="bk-row"><span>点击</span><b>{{ fmt(b.total_clicks) }}</b></div>
-                <div class="bk-row"><span>曝光</span><b>{{ fmt(b.total_impressions) }}</b></div>
                 <div class="bk-row"><span>CTR</span><b>{{ pct(b.avg_ctr) }}</b></div>
-                <div class="bk-footer">点击查看 →</div>
               </div>
-            </div>
-            <!-- Drill-down -->
-            <div class="panel" v-if="activeBucket && drillData" style="margin-top:12px">
-              <h3>排名段「{{ activeBucket }}」</h3>
-              <el-table :data="drillData.tq" stripe size="small" v-if="drillData.tq?.length" style="margin-bottom:12px">
-                <el-table-column prop="query" label="关键词" min-width="250" show-overflow-tooltip>
-                  <template #default="{row}"><a class="link" @click="openKwDetail(row.query)">{{ row.query }}</a></template>
-                </el-table-column>
-                <el-table-column prop="clicks" label="点击" width="80" /><el-table-column prop="impressions" label="曝光" width="90" />
-              </el-table>
-              <el-table :data="drillData.tp" stripe size="small" v-if="drillData.tp?.length">
-                <el-table-column prop="url" label="页面" min-width="350" show-overflow-tooltip /><el-table-column prop="clicks" label="点击" width="80" />
-              </el-table>
             </div>
           </div>
 
@@ -186,6 +173,36 @@
 
       <!-- ═══════════ GSC deep sub-tabs ═══════════ -->
       <template v-else-if="platform === 'gsc' && subTab !== 'overview'">
+        <!-- 排名分布 (standalone tab) -->
+        <div v-if="subTab==='buckets'" class="section">
+          <div v-if="computedBuckets.length" class="bucket-grid">
+            <div v-for="b in computedBuckets" :key="b.bucket" :class="['bucket-card', activeBucket===b.bucket && 'selected']" @click="drillBucket(b.bucket)">
+              <div class="bk-name">{{ b.bucket }}</div>
+              <div class="bk-big">{{ fmt(b.query_count) }} <small>词</small></div>
+              <div class="bk-row"><span>点击</span><b>{{ fmt(b.total_clicks) }}</b></div>
+              <div class="bk-row"><span>曝光</span><b>{{ fmt(b.total_impressions) }}</b></div>
+              <div class="bk-row"><span>CTR</span><b>{{ pct(b.avg_ctr) }}</b></div>
+              <div class="bk-footer">点击查看关键词 →</div>
+            </div>
+          </div>
+          <div v-else class="state-empty">暂无排名段数据。请先点击「🔄 刷新同步」获取数据。</div>
+          <!-- Drill-down -->
+          <div class="panel" v-if="activeBucket && drillData" style="margin-top:12px">
+            <h3>排名段「{{ activeBucket }}」— 关键词</h3>
+            <el-table :data="drillData.tq" stripe size="small" v-if="drillData.tq?.length" style="margin-bottom:12px">
+              <el-table-column prop="query" label="关键词" min-width="250" show-overflow-tooltip>
+                <template #default="{row}"><a class="link" @click="openKwDetail(row.query)">{{ row.query }}</a></template>
+              </el-table-column>
+              <el-table-column prop="clicks" label="点击" width="80" />
+              <el-table-column prop="impressions" label="曝光" width="90" />
+              <el-table-column label="排名" width="70" :formatter="(_:any,__:any,___:any,r:any) => r.position?.toFixed?.(1) || '-'" />
+            </el-table>
+            <el-table :data="drillData.tp" stripe size="small" v-if="drillData.tp?.length">
+              <el-table-column prop="url" label="页面" min-width="350" show-overflow-tooltip />
+              <el-table-column prop="clicks" label="点击" width="80" />
+            </el-table>
+          </div>
+        </div>
         <!-- Keywords -->
         <div v-if="subTab==='keywords'" class="panel">
           <div class="panel-head"><h3>🔍 关键词分析</h3><el-button type="success" size="small" @click="exportCSV">📥 导出 CSV</el-button></div>
@@ -407,9 +424,36 @@ async function hideCard(c: any) {
 const detail = ref({ siteId: 0, siteName: '', siteKey: '' })
 const d = ref<any>({}) // unified data from backend
 const activeBucket = ref('')
+
+// Compute buckets from either deep data OR from keywords in the platform response
+const computedBuckets = computed(() => {
+  // If deep data has buckets, use those (more accurate, from DB)
+  if (d.value.buckets?.length) return d.value.buckets
+  // Otherwise compute from top_keywords (platform API response has position)
+  const kws = d.value.top_keywords || []
+  if (!kws.length) return []
+  const defs = [
+    { bucket: '1-3', lo: 0, hi: 3 }, { bucket: '4-10', lo: 3, hi: 10 },
+    { bucket: '11-20', lo: 10, hi: 20 }, { bucket: '21-50', lo: 20, hi: 50 },
+    { bucket: '51-100', lo: 50, hi: 100 }, { bucket: '100+', lo: 100, hi: 99999 },
+  ]
+  return defs.map(def => {
+    const inBucket = kws.filter((k: any) => (k.position || 0) >= def.lo && (k.position || 0) < def.hi)
+    const totalClicks = inBucket.reduce((s: number, k: any) => s + (k.clicks || 0), 0)
+    const totalImpressions = inBucket.reduce((s: number, k: any) => s + (k.impressions || 0), 0)
+    return {
+      bucket: def.bucket, query_count: inBucket.length, page_count: 0,
+      total_clicks: totalClicks, total_impressions: totalImpressions,
+      avg_ctr: totalImpressions > 0 ? totalClicks / totalImpressions : 0,
+      top_queries_json: inBucket.slice(0, 10),
+      top_pages_json: [],
+    }
+  }).filter(b => b.query_count > 0) // Only show buckets that have keywords
+})
+
 const drillData = computed(() => {
-  if (!activeBucket.value || !d.value.buckets) return null
-  const b = d.value.buckets.find((x: any) => x.bucket === activeBucket.value)
+  if (!activeBucket.value) return null
+  const b = computedBuckets.value.find((x: any) => x.bucket === activeBucket.value)
   if (!b) return null
   let tq: any[] = []; let tp: any[] = []
   try { tq = typeof b.top_queries_json === 'string' ? JSON.parse(b.top_queries_json) : b.top_queries_json || [] } catch {}

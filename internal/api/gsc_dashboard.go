@@ -286,8 +286,8 @@ func GSCSiteDetail(c *gin.Context) {
 	slices := []slice{
 		{"overview", map[string]interface{}{"startDate": sd, "endDate": ed}},
 		{"trend", map[string]interface{}{"startDate": sd, "endDate": ed, "dimensions": []string{"date"}, "rowLimit": 500}},
-		{"keywords", map[string]interface{}{"startDate": sd, "endDate": ed, "dimensions": []string{"query"}, "rowLimit": 20}},
-		{"pages", map[string]interface{}{"startDate": sd, "endDate": ed, "dimensions": []string{"page"}, "rowLimit": 20}},
+		{"keywords", map[string]interface{}{"startDate": sd, "endDate": ed, "dimensions": []string{"query"}, "rowLimit": 500}},
+		{"pages", map[string]interface{}{"startDate": sd, "endDate": ed, "dimensions": []string{"page"}, "rowLimit": 100}},
 		{"devices", map[string]interface{}{"startDate": sd, "endDate": ed, "dimensions": []string{"device"}, "rowLimit": 10}},
 		{"countries", map[string]interface{}{"startDate": sd, "endDate": ed, "dimensions": []string{"country"}, "rowLimit": 10}},
 	}
