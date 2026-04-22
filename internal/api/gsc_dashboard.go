@@ -290,6 +290,7 @@ func GSCSiteDetail(c *gin.Context) {
 		{"pages", map[string]interface{}{"startDate": sd, "endDate": ed, "dimensions": []string{"page"}, "rowLimit": 100}},
 		{"devices", map[string]interface{}{"startDate": sd, "endDate": ed, "dimensions": []string{"device"}, "rowLimit": 10}},
 		{"countries", map[string]interface{}{"startDate": sd, "endDate": ed, "dimensions": []string{"country"}, "rowLimit": 10}},
+		{"appearances", map[string]interface{}{"startDate": sd, "endDate": ed, "dimensions": []string{"searchAppearance"}, "rowLimit": 50}},
 	}
 
 	result := make(map[string]json.RawMessage)
@@ -328,16 +329,17 @@ func GSCSiteDetail(c *gin.Context) {
 	go saveOverviewAsSync(siteURL, sd, ed, result["overview"])
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{
-		"site_url":   siteURL,
-		"start_date": sd,
-		"end_date":   ed,
-		"overview":   result["overview"],
-		"trend":      result["trend"],
-		"keywords":   result["keywords"],
-		"pages":      result["pages"],
-		"devices":    result["devices"],
-		"countries":  result["countries"],
-		"errors":     errs,
+		"site_url":    siteURL,
+		"start_date":  sd,
+		"end_date":    ed,
+		"overview":    result["overview"],
+		"trend":       result["trend"],
+		"keywords":    result["keywords"],
+		"pages":       result["pages"],
+		"devices":     result["devices"],
+		"countries":   result["countries"],
+		"appearances": result["appearances"],
+		"errors":      errs,
 	}})
 }
 

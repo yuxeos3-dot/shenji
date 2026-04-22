@@ -531,8 +531,10 @@ function digestPlatformData(raw: any) {
     const trend = (raw.trend?.rows || []).map((r:any) => ({ date: r.keys?.[0]||'', clicks: r.clicks||0, impressions: r.impressions||0, ctr: r.ctr||0 }))
     const devs = (raw.devices?.rows || []).map((r:any) => ({ label: r.keys?.[0]||'', clicks: r.clicks||0 }))
     const ctrs = (raw.countries?.rows || []).slice(0,10).map((r:any) => ({ label: r.keys?.[0]||'', clicks: r.clicks||0 }))
+    // Parse SERP appearances
+    const apps = (raw.appearances?.rows || []).map((r:any) => ({ appearance: r.keys?.[0]||'', clicks: r.clicks||0, impressions: r.impressions||0, ctr: r.ctr||0, position: r.position||0 }))
     d.value = { platform: 'gsc', total_clicks: ov.clicks||0, total_impressions: ov.impressions||0, avg_ctr: ov.ctr||0, avg_position: ov.position||0,
-      trend, top_keywords: kws, top_pages: pgs, devices: devs, countries: ctrs, has_deep_data: false }
+      trend, top_keywords: kws, top_pages: pgs, devices: devs, countries: ctrs, appearances: apps, has_deep_data: false }
   } else if (p === 'ga4') {
     const toNum = (v:any) => parseFloat(v?.value ?? v ?? '0') || 0
     const ovRow = (raw.overview?.rows || [])[0]
