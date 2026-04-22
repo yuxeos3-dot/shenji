@@ -18,6 +18,27 @@ func registerDeepDataRoutes(v1 *gin.RouterGroup) {
 	v1.GET("/sites/:id/analysis-reports", RequirePermission("data.view"), ListSiteReports)
 	v1.GET("/analysis-reports/:reportId", RequirePermission("data.view"), GetSiteReport)
 
+	// ── Competitors ───────────────────────────────────────────────
+	v1.GET("/sites/:id/competitors", RequirePermission("data.view"), ListCompetitors)
+	v1.POST("/sites/:id/competitors", RequirePermission("data.view"), CreateCompetitor)
+	v1.DELETE("/competitors/:competitorId", RequirePermission("data.view"), DeleteCompetitor)
+
+	// ── Algorithm Updates ─────────────────────────────────────────
+	v1.GET("/algorithm-updates", RequirePermission("data.view"), ListAlgorithmUpdates)
+	v1.POST("/algorithm-updates", RequirePermission("data.view"), CreateAlgorithmUpdate)
+
+	// ── SERP Observations ─────────────────────────────────────────
+	v1.GET("/sites/:id/serp-observations", RequirePermission("data.view"), ListSERPObservations)
+	v1.POST("/sites/:id/serp-observations", RequirePermission("data.view"), CreateSERPObservation)
+
+	// ── AIO Observations ──────────────────────────────────────────
+	v1.GET("/sites/:id/aio-observations", RequirePermission("data.view"), ListAIOObservations)
+	v1.POST("/sites/:id/aio-observations", RequirePermission("data.view"), CreateAIOObservation)
+
+	// ── Timeline Events ───────────────────────────────────────────
+	v1.GET("/sites/:id/timeline", RequirePermission("data.view"), ListTimelineEvents)
+	v1.POST("/sites/:id/timeline", RequirePermission("data.view"), CreateTimelineEvent)
+
 	// ── Site ID resolution ────────────────────────────────────────
 	v1.GET("/resolve-site-id", RequirePermission("data.view"), ResolveSiteID)
 
