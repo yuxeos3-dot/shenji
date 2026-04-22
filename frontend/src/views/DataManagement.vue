@@ -52,7 +52,7 @@
         <button class="btn" @click="backToOverview">← 返回总览</button>
         <div class="detail-title"><span class="tp">{{ platformLabel }}</span> · {{ detail.siteName }}</div>
         <div class="detail-days">
-          <el-select v-model="days" size="small" style="width:110px" @change="loadDetailData">
+          <el-select v-model="days" size="small" style="width:110px" @change="reloadCurrentView">
             <el-option :value="7" label="近 7 天" /><el-option :value="30" label="近 30 天" /><el-option :value="90" label="近 90 天" />
           </el-select>
         </div>
@@ -423,7 +423,10 @@ const kpis = computed(() => {
   const v = d.value
   if (platform.value === 'ga4') return [
     { label: '会话', value: fmt(v.sessions), cls: 'sv-blue' }, { label: '用户', value: fmt(v.users), cls: 'sv-green' },
-    { label: 'PV', value: fmt(v.pageviews), cls: 'sv-orange' }, { label: '新用户', value: fmt(v.new_users), cls: 'sv-purple' },
+    { label: 'PV', value: fmt(v.pageviews), cls: 'sv-orange' },
+    { label: '跳出率', value: pct(v.bounce_rate), cls: 'sv-purple' },
+    { label: '参与率', value: pct(v.engagement_rate), cls: 'sv-blue' },
+    { label: '新用户', value: fmt(v.new_users), cls: 'sv-green' },
   ]
   return [
     { label: '点击', value: fmt(v.total_clicks), cls: 'sv-blue' }, { label: '展示', value: fmt(v.total_impressions), cls: 'sv-green' },
@@ -448,8 +451,8 @@ async function openDetail(c: any) {
   // Step 1: Load data from platform API immediately (always works, no site_id needed)
   await loadFromPlatformAPI()
 
-  // Step 2: Try to resolve site_id in background for deep data (optional enhancement)
-  resolveAndLoadDeep()
+  // Step 2: Try to resolve site_id in background for deep data (non-blocking, fire-and-forget)
+  resolveAndLoadDeep().catch(() => {})
 }
 
 // Load data directly from platform dashboard API (GSC/GA4/Bing/Yandex)
@@ -490,12 +493,16 @@ function digestPlatformData(raw: any) {
     const toNum = (v:any) => parseFloat(v?.value ?? v ?? '0') || 0
     const ovRow = (raw.overview?.rows || [])[0]
     const mv = ovRow?.metricValues || []
+    // GA4 overview metrics order: sessions(0), totalUsers(1), newUsers(2), screenPageViews(3), bounceRate(4), averageSessionDuration(5), engagementRate(6)
+    const sessions = toNum(mv[0]), gaUsers = toNum(mv[1]), newUsers = toNum(mv[2]), pvs = toNum(mv[3])
+    const br = mv.length > 4 ? toNum(mv[4]) : 0
+    const er = mv.length > 6 ? toNum(mv[6]) : 0
     const trend = (raw.trend?.rows || []).map((r:any) => { const dt = r.dimensionValues?.[0]?.value||''; return { date: dt.length===8 ? `${dt.slice(0,4)}-${dt.slice(4,6)}-${dt.slice(6,8)}` : dt, clicks: toNum(r.metricValues?.[0]), impressions: toNum(r.metricValues?.[1]) } })
     const pgs = (raw.pages?.rows || []).map((r:any) => ({ page_url: r.dimensionValues?.[0]?.value||'', clicks: toNum(r.metricValues?.[0]), impressions: toNum(r.metricValues?.[1]) }))
     const devs = (raw.devices?.rows || []).map((r:any) => ({ label: r.dimensionValues?.[0]?.value||'', clicks: toNum(r.metricValues?.[0]) }))
     const ctrs = (raw.countries?.rows || []).slice(0,10).map((r:any) => ({ label: r.dimensionValues?.[0]?.value||'', clicks: toNum(r.metricValues?.[0]) }))
-    d.value = { platform: 'ga4', sessions: toNum(mv[0]), users: toNum(mv[1]), new_users: toNum(mv[2]), pageviews: toNum(mv[3]),
-      bounce_rate: toNum(mv[4]), engagement_rate: mv[6] ? toNum(mv[6]) : 0, trend, top_pages: pgs, devices: devs, countries: ctrs, has_deep_data: false }
+    d.value = { platform: 'ga4', sessions, users: gaUsers, new_users: newUsers, pageviews: pvs,
+      bounce_rate: br, engagement_rate: er, trend, top_pages: pgs, devices: devs, countries: ctrs, has_deep_data: false }
   } else if (p === 'bing') {
     const rows = (raw.queries?.d || []).filter((r:any) => r && typeof r === 'object')
     let clicks=0, impr=0
@@ -577,11 +584,22 @@ const bingKw = ref<any>({ items: [] }); const bingPg = ref<any>({ items: [] }); 
 const yandexKw = ref<any>({ items: [] }); const yandexIE = ref<any[]>([]); const yandexHS = ref<any[]>([]); const yandexEL = ref<any[]>([])
 const kwDlgShow = ref(false); const kwDlg = ref<any>(null)
 
+// FIX #1: reload when days changes
+async function reloadCurrentView() {
+  if (view.value === 'overview') { loadOverview(); return }
+  await loadFromPlatformAPI()
+  resolveAndLoadDeep()
+  if (subTab.value !== 'overview') loadSubTab()
+}
+
 async function loadSubTab() {
-  const sid = detail.value.siteId; if (!sid) return; subLoading.value = true
+  const sid = detail.value.siteId
+  if (!sid) { subLoading.value = false; return } // FIX #12: don't show infinite spinner
+  subLoading.value = true
   try {
     const t = subTab.value; const dd = days.value
     if (platform.value === 'gsc') {
+      if (t === 'buckets' || t === 'overview') { subLoading.value = false; return } // buckets loaded from unified data
       if (t === 'keywords') { const r: any = await api.getGSCKeywords(sid, { page: kwPage.value, page_size: kwPageSize.value, days: dd, search: kwSearch.value||undefined, bucket: kwBucket.value||undefined, intent: kwIntent.value||undefined }); kwData.value = r.data || { items: [], total: 0 } }
       else if (t === 'pages') { const r: any = await api.getGSCDeepPages(sid, { page: pgPage.value, days: dd, search: pgSearch.value||undefined }); pgData.value = r.data || { items: [], total: 0 } }
       else if (t === 'serp') { const r: any = await api.getGSCAppearance(sid, dd); appearanceList.value = r.data || [] }
