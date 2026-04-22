@@ -13,6 +13,63 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// ResolveSiteID resolves a platform site key (domain/URL) to a numeric site_id.
+// This is the bridge between the platform overview (which uses site_url/property_id/host_id)
+// and the deep data endpoints (which use site_id from the sites table).
+func ResolveSiteID(c *gin.Context) {
+	domain := c.Query("domain")
+	if domain == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "缺少 domain 参数"})
+		return
+	}
+
+	// Clean the domain for matching
+	clean := strings.TrimPrefix(domain, "sc-domain:")
+	clean = strings.TrimPrefix(clean, "https://")
+	clean = strings.TrimPrefix(clean, "http://")
+	clean = strings.TrimPrefix(clean, "www.")
+	clean = strings.TrimRight(clean, "/")
+	clean = strings.ToLower(clean)
+	// Remove port
+	if idx := strings.Index(clean, ":"); idx > 0 {
+		clean = clean[:idx]
+	}
+
+	uid := c.GetInt64("user_id")
+	role, _ := c.Get("role")
+
+	// Try multiple matching strategies
+	var siteID int64
+
+	// 1. Exact match on cleaned domain
+	queries := []string{
+		`SELECT id FROM sites WHERE LOWER(REPLACE(REPLACE(REPLACE(REPLACE(domain, 'https://', ''), 'http://', ''), 'www.', ''), '/', '')) = $1`,
+		`SELECT id FROM sites WHERE LOWER(domain) LIKE '%' || $1 || '%'`,
+		`SELECT id FROM sites WHERE $1 LIKE '%' || LOWER(REPLACE(REPLACE(domain, 'https://', ''), 'http://', '')) || '%'`,
+	}
+
+	for _, q := range queries {
+		if role == "admin" {
+			err := db.DB.QueryRow(q, clean).Scan(&siteID)
+			if err == nil && siteID > 0 {
+				break
+			}
+		} else {
+			err := db.DB.QueryRow(q+" AND created_by = $2", clean, uid).Scan(&siteID)
+			if err == nil && siteID > 0 {
+				break
+			}
+		}
+	}
+
+	if siteID == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "未找到匹配的站点", "domain": domain, "cleaned": clean})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"site_id": siteID}})
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // GSC Deep Query Endpoints
 // ═══════════════════════════════════════════════════════════════════════

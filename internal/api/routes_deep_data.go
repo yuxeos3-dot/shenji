@@ -5,6 +5,9 @@ import "github.com/gin-gonic/gin"
 // registerDeepDataRoutes wires up the "Platform Data Deep" endpoints.
 // These supplement (not replace) the existing data routes.
 func registerDeepDataRoutes(v1 *gin.RouterGroup) {
+	// ── Site ID resolution ────────────────────────────────────────
+	v1.GET("/resolve-site-id", RequirePermission("data.view"), ResolveSiteID)
+
 	// ── GSC Deep Sync ─────────────────────────────────────────────
 	v1.POST("/sites/:id/gsc/deep-sync", RequirePermission("data.sync_gsc"), SyncGSCDeep)
 	v1.POST("/sites/:id/gsc/url-inspection", RequirePermission("data.sync_gsc"), SyncGSCURLInspection)

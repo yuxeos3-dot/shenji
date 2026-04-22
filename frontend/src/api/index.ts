@@ -431,6 +431,10 @@ const api = {
     instance.put(`/v1/push/schedules/${id}/toggle`),
 
   // ── Platform Data Deep ─────────────────────────────────────────
+  // Site ID resolution (domain → site_id for deep data)
+  resolveSiteId: (domain: string) =>
+    instance.get('/v1/resolve-site-id', { params: { domain }, _silent: true } as any),
+
   // GSC Deep
   syncGSCDeep: (siteId: Id, date?: string) =>
     instance.post(`/v1/sites/${siteId}/gsc/deep-sync`, date ? { date } : {}, { timeout: 300000 } as any),

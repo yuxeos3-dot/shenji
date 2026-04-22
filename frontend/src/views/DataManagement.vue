@@ -133,7 +133,7 @@
           <span class="title-sep">·</span>
           <span class="title-site">{{ detail.siteName }}</span>
         </div>
-        <button class="btn btn-sync" @click="unifiedRefresh" :disabled="loading || syncing" v-if="resolvedSiteId">
+        <button class="btn btn-sync" @click="unifiedRefresh" :disabled="loading || syncing">
           {{ syncing ? '同步中...' : loading ? '加载中...' : '🔄 刷新同步' }}
         </button>
       </div>
@@ -906,39 +906,27 @@ function switchSubTab(key: string) {
 // table. We resolve it by matching the detail's siteKey (domain/URL) to
 // the sites list.
 const allSites = ref<any[]>([])
-const resolvedSiteId = computed<number | null>(() => {
-  if (!detail.siteKey || !allSites.value.length) return null
-  // Extract domain from siteKey for matching — handles sc-domain:, https://, trailing /
-  const cleanDomain = (s: string) => (s || '')
-    .replace(/^sc-domain:/, '')
-    .replace(/^https?:\/\//, '')
-    .replace(/^www\./, '')
-    .replace(/\/+$/, '')
-    .replace(/:.*$/, '')  // remove port
-    .toLowerCase()
-    .trim()
-  const target = cleanDomain(detail.siteKey)
-  if (!target) return null
+// resolvedSiteId: resolved via backend API call, not client-side matching
+const resolvedSiteId = ref<number | null>(null)
 
-  // 1. Exact domain match
-  for (const s of allSites.value) {
-    const sd = cleanDomain(s.domain)
-    if (sd === target) return s.id
+// Called when entering a detail view to resolve siteKey → site_id via backend
+async function resolveSiteIdFromBackend() {
+  if (!detail.siteKey) { resolvedSiteId.value = null; return }
+  try {
+    const r: any = await api.resolveSiteId(detail.siteKey)
+    resolvedSiteId.value = r.data?.site_id || null
+  } catch {
+    // Fallback: try with siteName
+    if (detail.siteName && detail.siteName !== detail.siteKey) {
+      try {
+        const r2: any = await api.resolveSiteId(detail.siteName)
+        resolvedSiteId.value = r2.data?.site_id || null
+      } catch { resolvedSiteId.value = null }
+    } else {
+      resolvedSiteId.value = null
+    }
   }
-  // 2. Partial domain match (subdomain / parent domain)
-  for (const s of allSites.value) {
-    const sd = cleanDomain(s.domain)
-    if (target.endsWith('.' + sd) || sd.endsWith('.' + target) || target.includes(sd) || sd.includes(target)) return s.id
-  }
-  // 3. Match by site name (display_name from overview card)
-  const siteName = detail.siteName?.toLowerCase() || ''
-  for (const s of allSites.value) {
-    const sd = cleanDomain(s.domain)
-    if (siteName.includes(sd) || sd.includes(siteName)) return s.id
-    if ((s.name || '').toLowerCase() === siteName) return s.id
-  }
-  return null
-})
+}
 
 // ── 5-minute in-memory cache ────────────────────────────────────────────
 type CacheEntry = { at: number; data: any }
@@ -989,7 +977,8 @@ async function unifiedRefresh() {
     await loadOverview()
     return
   }
-  // In detail view: refresh basic + deep sync + deep data in one action
+  // In detail view: first resolve site_id, then refresh basic + deep sync
+  await resolveSiteIdFromBackend()
   const sid = resolvedSiteId.value
   loading.value = true
   try {
@@ -1157,8 +1146,8 @@ async function loadDetail(siteKey: string, siteName: string) {
   if (cached) {
     digestDetail(cached)
     loading.value = false
-    // Load deep data in background
-    loadDeepOverviewData()
+    // Resolve site_id then load deep data
+    resolveSiteIdFromBackend().then(() => loadDeepOverviewData())
     return
   }
 
@@ -1179,7 +1168,8 @@ async function loadDetail(siteKey: string, siteName: string) {
     loading.value = false
   }
 
-  // Load deep data in background
+  // Resolve site_id then load deep data
+  await resolveSiteIdFromBackend()
   loadDeepOverviewData()
 }
 
@@ -1461,17 +1451,9 @@ const yandexLoading = ref(false)
 const yandexKeywords = ref<any>({ items: [], total: 0 }); const yandexIndexEvents = ref<any[]>([]); const yandexHttpStatus = ref<any[]>([])
 const yandexExtLinks = ref<any[]>([]); const yandexIndexedUrls = ref<any>({ items: [], total: 0 })
 
-// ── Load deep overview data (called when entering detail view) ──
+// ── Load deep overview data (called after site_id is resolved) ──
 async function loadDeepOverviewData() {
-  let sid = resolvedSiteId.value
-  // If site ID not resolved yet (allSites still loading), wait and retry
-  if (!sid && allSites.value.length === 0) {
-    try {
-      const r: any = await api.listSites()
-      allSites.value = r.data || []
-      sid = resolvedSiteId.value
-    } catch {}
-  }
+  const sid = resolvedSiteId.value
   if (!sid) return
 
   if (platform.value === 'gsc') {
