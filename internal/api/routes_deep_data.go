@@ -13,6 +13,7 @@ func registerDeepDataRoutes(v1 *gin.RouterGroup) {
 	v1.GET("/sites/:id/health-score", RequirePermission("data.view"), GetSiteHealthScore)
 	v1.POST("/sites/:id/health-score/compute", RequirePermission("data.view"), ComputeAndReturnHealth)
 	v1.GET("/sites/:id/analysis-summary", RequirePermission("data.view"), GetSiteAnalysisSummary)
+	v1.POST("/sites/:id/run-analysis", RequirePermission("data.view"), RunAnalysisPipelineHandler)
 
 	// ── Site ID resolution ────────────────────────────────────────
 	v1.GET("/resolve-site-id", RequirePermission("data.view"), ResolveSiteID)

@@ -435,6 +435,7 @@ const api = {
   getSiteHealthScore: (siteId: Id) => instance.get(`/v1/sites/${siteId}/health-score`),
   computeHealthScore: (siteId: Id) => instance.post(`/v1/sites/${siteId}/health-score/compute`),
   getSiteAnalysisSummary: (siteId: Id) => instance.get(`/v1/sites/${siteId}/analysis-summary`),
+  runAnalysisPipeline: (siteId: Id) => instance.post(`/v1/sites/${siteId}/run-analysis`, {}, { timeout: 120000 } as any),
 
   // Unified platform data (single endpoint for everything)
   getUnifiedData: (siteId: Id, platform: string, days?: number) =>

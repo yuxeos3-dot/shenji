@@ -76,6 +76,10 @@ func main() {
 	// the single site on demand.
 	go api.WarmDataCache()
 
+	// One-time backfill: flatten all historical audit_results into
+	// the new audit_findings table for analysis queries.
+	go api.BackfillAuditFindings()
+
 	// Start scheduler
 	scheduler.Start()
 	defer scheduler.Stop()

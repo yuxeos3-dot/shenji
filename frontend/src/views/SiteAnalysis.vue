@@ -7,8 +7,11 @@
         <el-select v-model="siteId" filterable placeholder="选择站点" @change="loadAnalysis" style="width:300px">
           <el-option v-for="s in sites" :key="s.id" :label="`${s.name} (${s.domain})`" :value="s.id" />
         </el-select>
-        <el-button type="primary" :loading="computing" @click="computeScore" style="margin-left:auto">
-          {{ computing ? '计算中...' : '🔄 重新计算健康分' }}
+        <el-button :loading="analyzing" @click="runPipeline" style="margin-left:auto">
+          {{ analyzing ? '分析中...' : '🔬 运行完整分析' }}
+        </el-button>
+        <el-button type="primary" :loading="computing" @click="computeScore">
+          {{ computing ? '计算中...' : '🔄 刷新健康分' }}
         </el-button>
       </div>
     </div>
@@ -119,6 +122,7 @@ const siteId = ref<number | null>(null)
 const data = ref<any>(null)
 const loading = ref(false)
 const computing = ref(false)
+const analyzing = ref(false)
 const error = ref('')
 
 const subScores = computed(() => {
@@ -159,6 +163,17 @@ async function loadAnalysis() {
     }
   } catch (e: any) { error.value = e?.message || '加载失败' }
   finally { loading.value = false }
+}
+
+async function runPipeline() {
+  if (!siteId.value) return
+  analyzing.value = true
+  try {
+    await api.runAnalysisPipeline(siteId.value)
+    ElMessage.success('分析管道已启动，3秒后刷新...')
+    setTimeout(() => loadAnalysis(), 3000)
+  } catch (e: any) { ElMessage.error(e?.message || '启动失败') }
+  finally { analyzing.value = false }
 }
 
 async function computeScore() {

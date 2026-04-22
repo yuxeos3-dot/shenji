@@ -336,6 +336,17 @@ func ComputeAndReturnHealth(c *gin.Context) {
 	GetSiteHealthScore(c)
 }
 
+// RunAnalysisPipelineHandler triggers the full analysis pipeline for a site
+func RunAnalysisPipelineHandler(c *gin.Context) {
+	siteID := c.Param("id")
+	if !canAccessSite(c, siteID) {
+		return
+	}
+	sid, _ := strconv.ParseInt(siteID, 10, 64)
+	go RunFullAnalysisPipeline(sid)
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "分析管道已启动，请稍后刷新查看结果"})
+}
+
 // GetSiteAnalysisSummary returns a comprehensive analysis summary for a site
 // combining health score + top findings + anomalies + timeline
 func GetSiteAnalysisSummary(c *gin.Context) {

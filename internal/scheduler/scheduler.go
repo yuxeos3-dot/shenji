@@ -55,8 +55,11 @@ func Start() {
 	c.AddFunc("*/10 * * * *", runScheduledPushes)
 
 	// ── Platform Deep Data Sync (daily at 02:00) ────────────────
-	// Runs derived-layer computations for all sites that have deep data.
 	c.AddFunc("0 5 * * *", runDeepDataDerivations)
+
+	// ── Full Analysis Pipeline (daily at 06:00) ─────────────
+	// Snapshots → anomaly detection → timeline → health score → derivations
+	c.AddFunc("0 6 * * *", runFullAnalysisPipeline)
 
 	c.Start()
 	log.Println("调度器已启动")
@@ -250,6 +253,26 @@ func runDeepDataDerivations() {
 	}
 
 	log.Printf("[deep-data] Derivations complete for %d sites", len(siteIDs))
+}
+
+// runFullAnalysisPipeline runs the analysis pipeline for all active sites.
+func runFullAnalysisPipeline() {
+	log.Println("[analysis] Starting daily analysis pipeline...")
+	rows, err := db.DB.Query("SELECT id FROM sites WHERE status='active'")
+	if err != nil {
+		log.Printf("[analysis] query sites: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var sid int64
+		rows.Scan(&sid)
+		api.RunFullAnalysisPipeline(sid)
+		count++
+	}
+	log.Printf("[analysis] Pipeline complete for %d sites", count)
 }
 
 func Stop() {
