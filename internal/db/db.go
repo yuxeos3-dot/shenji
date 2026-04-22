@@ -1342,6 +1342,22 @@ func Init() {
 		}
 	}
 
+	// Phase 3: SEO Deep Analysis tables (71 new tables + ALTERs)
+	for _, m := range AnalysisMigrations {
+		if _, err := DB.Exec(m); err != nil {
+			msg := err.Error()
+			if strings.Contains(msg, "duplicate") || strings.Contains(msg, "already exists") {
+				continue
+			}
+			trimmed := strings.TrimSpace(m)
+			upper := strings.ToUpper(trimmed)
+			if strings.HasPrefix(upper, "UPDATE ") {
+				continue
+			}
+			log.Printf("[analysis-migration] %.80q: %v", m, err)
+		}
+	}
+
 	seedDefaultAdmin()
 	seedDefaultSettings()
 
