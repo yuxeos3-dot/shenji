@@ -625,36 +625,155 @@ func GetGSCOverviewDeep(c *gin.Context) {
 	}
 	days, _ := strconv.Atoi(c.DefaultQuery("days", "30"))
 
+	// Check if deep data exists
+	var deepCount int
+	db.DB.QueryRow("SELECT COUNT(*) FROM gsc_query_page_daily WHERE site_id = $1 LIMIT 1", siteID).Scan(&deepCount)
+
+	hasDeepData := deepCount > 0
 	var totalClicks, totalImpressions, totalQueries, totalPages int
 	var avgCTR, avgPosition float64
-	db.DB.QueryRow(`
-		SELECT COALESCE(SUM(clicks),0), COALESCE(SUM(impressions),0),
-			CASE WHEN SUM(impressions)>0 THEN SUM(clicks)::float/SUM(impressions) ELSE 0 END,
-			CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE 0 END,
-			COUNT(DISTINCT query), COUNT(DISTINCT page_url)
-		FROM gsc_query_page_daily
-		WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day' AND search_type = 'web'`,
-		siteID, days).Scan(&totalClicks, &totalImpressions, &avgCTR, &avgPosition, &totalQueries, &totalPages)
-
-	// Daily trend
-	trendRows, _ := db.DB.Query(`
-		SELECT date, SUM(clicks) as clicks, SUM(impressions) as imp,
-			CASE WHEN SUM(impressions)>0 THEN SUM(clicks)::float/SUM(impressions) ELSE 0 END as ctr,
-			CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE 0 END as pos
-		FROM gsc_query_page_daily
-		WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day' AND search_type = 'web'
-		GROUP BY date ORDER BY date`, siteID, days)
 	var trend []map[string]interface{}
-	if trendRows != nil {
-		defer trendRows.Close()
-		for trendRows.Next() {
-			var date string
-			var clicks, imp int
-			var ctr, pos float64
-			trendRows.Scan(&date, &clicks, &imp, &ctr, &pos)
-			trend = append(trend, map[string]interface{}{
-				"date": date, "clicks": clicks, "impressions": imp, "ctr": ctr, "position": pos,
-			})
+	var topKeywords []map[string]interface{}
+	var topPages []map[string]interface{}
+
+	if hasDeepData {
+		// Use deep tables
+		db.DB.QueryRow(`
+			SELECT COALESCE(SUM(clicks),0), COALESCE(SUM(impressions),0),
+				CASE WHEN SUM(impressions)>0 THEN SUM(clicks)::float/SUM(impressions) ELSE 0 END,
+				CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE 0 END,
+				COUNT(DISTINCT query), COUNT(DISTINCT page_url)
+			FROM gsc_query_page_daily
+			WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day' AND search_type = 'web'`,
+			siteID, days).Scan(&totalClicks, &totalImpressions, &avgCTR, &avgPosition, &totalQueries, &totalPages)
+
+		trendRows, _ := db.DB.Query(`
+			SELECT date, SUM(clicks), SUM(impressions),
+				CASE WHEN SUM(impressions)>0 THEN SUM(clicks)::float/SUM(impressions) ELSE 0 END,
+				CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE 0 END
+			FROM gsc_query_page_daily
+			WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day' AND search_type = 'web'
+			GROUP BY date ORDER BY date`, siteID, days)
+		if trendRows != nil {
+			defer trendRows.Close()
+			for trendRows.Next() {
+				var date string
+				var clicks, imp int
+				var ctr, pos float64
+				trendRows.Scan(&date, &clicks, &imp, &ctr, &pos)
+				trend = append(trend, map[string]interface{}{"date": date, "clicks": clicks, "impressions": imp, "ctr": ctr, "position": pos})
+			}
+		}
+		// Top 20 keywords
+		kwRows, _ := db.DB.Query(`
+			SELECT query, SUM(clicks) as c, SUM(impressions) as i,
+				CASE WHEN SUM(impressions)>0 THEN SUM(clicks)::float/SUM(impressions) ELSE 0 END,
+				CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE 0 END
+			FROM gsc_query_page_daily
+			WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day' AND search_type = 'web'
+			GROUP BY query ORDER BY c DESC LIMIT 20`, siteID, days)
+		if kwRows != nil {
+			defer kwRows.Close()
+			for kwRows.Next() {
+				var q string
+				var c, i int
+				var ctr, pos float64
+				kwRows.Scan(&q, &c, &i, &ctr, &pos)
+				topKeywords = append(topKeywords, map[string]interface{}{"query": q, "clicks": c, "impressions": i, "ctr": ctr, "position": pos})
+			}
+		}
+		// Top 20 pages
+		pgRows, _ := db.DB.Query(`
+			SELECT page_url, SUM(clicks) as c, SUM(impressions) as i,
+				CASE WHEN SUM(impressions)>0 THEN SUM(clicks)::float/SUM(impressions) ELSE 0 END,
+				CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE 0 END
+			FROM gsc_query_page_daily
+			WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day' AND search_type = 'web'
+			GROUP BY page_url ORDER BY c DESC LIMIT 20`, siteID, days)
+		if pgRows != nil {
+			defer pgRows.Close()
+			for pgRows.Next() {
+				var u string
+				var c, i int
+				var ctr, pos float64
+				pgRows.Scan(&u, &c, &i, &ctr, &pos)
+				topPages = append(topPages, map[string]interface{}{"page_url": u, "clicks": c, "impressions": i, "ctr": ctr, "position": pos})
+			}
+		}
+	} else {
+		// FALLBACK: use existing gsc_data table
+		rows, _ := db.DB.Query(`
+			SELECT date, clicks, impressions, ctr, position, keywords_json, pages_json
+			FROM gsc_data WHERE site_id = $1
+			ORDER BY date DESC LIMIT $2`, siteID, days)
+		if rows != nil {
+			defer rows.Close()
+			for rows.Next() {
+				var date string
+				var clicks, imp int
+				var ctr, pos float64
+				var kwJSON, pgJSON string
+				rows.Scan(&date, &clicks, &imp, &ctr, &pos, &kwJSON, &pgJSON)
+				totalClicks += clicks
+				totalImpressions += imp
+				trend = append(trend, map[string]interface{}{"date": date, "clicks": clicks, "impressions": imp, "ctr": ctr, "position": pos})
+
+				// Parse keywords from first (latest) row
+				if len(topKeywords) == 0 && kwJSON != "" && kwJSON != "[]" {
+					var kws []struct {
+						Keys        []string `json:"keys"`
+						Clicks      int      `json:"clicks"`
+						Impressions int      `json:"impressions"`
+						CTR         float64  `json:"ctr"`
+						Position    float64  `json:"position"`
+					}
+					if json.Unmarshal([]byte(kwJSON), &kws) == nil {
+						for _, k := range kws {
+							q := ""
+							if len(k.Keys) > 0 {
+								q = k.Keys[0]
+							}
+							if q != "" {
+								topKeywords = append(topKeywords, map[string]interface{}{"query": q, "clicks": k.Clicks, "impressions": k.Impressions, "ctr": k.CTR, "position": k.Position})
+							}
+						}
+					}
+				}
+				if len(topPages) == 0 && pgJSON != "" && pgJSON != "[]" {
+					var pgs []struct {
+						Keys        []string `json:"keys"`
+						Clicks      int      `json:"clicks"`
+						Impressions int      `json:"impressions"`
+						CTR         float64  `json:"ctr"`
+						Position    float64  `json:"position"`
+					}
+					if json.Unmarshal([]byte(pgJSON), &pgs) == nil {
+						for _, p := range pgs {
+							u := ""
+							if len(p.Keys) > 0 {
+								u = p.Keys[0]
+							}
+							if u != "" {
+								topPages = append(topPages, map[string]interface{}{"page_url": u, "clicks": p.Clicks, "impressions": p.Impressions, "ctr": p.CTR, "position": p.Position})
+							}
+						}
+					}
+				}
+			}
+		}
+		if totalImpressions > 0 {
+			avgCTR = float64(totalClicks) / float64(totalImpressions)
+		}
+		totalQueries = len(topKeywords)
+		totalPages = len(topPages)
+		// Reverse trend so oldest first
+		for i, j := 0, len(trend)-1; i < j; i, j = i+1, j-1 {
+			trend[i], trend[j] = trend[j], trend[i]
+		}
+		if len(trend) > 0 {
+			if p, ok := trend[len(trend)-1]["position"].(float64); ok {
+				avgPosition = p
+			}
 		}
 	}
 
@@ -662,7 +781,10 @@ func GetGSCOverviewDeep(c *gin.Context) {
 		"total_clicks": totalClicks, "total_impressions": totalImpressions,
 		"avg_ctr": avgCTR, "avg_position": avgPosition,
 		"total_queries": totalQueries, "total_pages": totalPages,
-		"trend": trend,
+		"trend":         trend,
+		"top_keywords":  topKeywords,
+		"top_pages":     topPages,
+		"has_deep_data": hasDeepData,
 	}})
 }
 
