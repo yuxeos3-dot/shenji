@@ -430,6 +430,26 @@ func BuildTechPromptBatch(batch TechBatch, domain string, sitePages []SitePageFo
 // CallAIChapters calls the AI with a batched prompt and returns just the
 // chapters array (no top-level stats). This is the preferred form for the
 // split-call architecture.
+// normalizeAIEndpoint ensures the API URL points to the chat completions endpoint.
+// Handles various user input formats:
+//   - "https://api.example.com"                     → "https://api.example.com/v1/chat/completions"
+//   - "https://api.example.com/v1"                  → "https://api.example.com/v1/chat/completions"
+//   - "https://api.example.com/v1/"                 → "https://api.example.com/v1/chat/completions"
+//   - "https://api.example.com/v1/chat/completions" → "https://api.example.com/v1/chat/completions" (unchanged)
+func normalizeAIEndpoint(apiURL string) string {
+	u := strings.TrimRight(apiURL, "/")
+	// Already ends with /chat/completions — use as-is
+	if strings.HasSuffix(u, "/chat/completions") {
+		return u
+	}
+	// Ends with /v1 or similar versioned path — append /chat/completions
+	if strings.HasSuffix(u, "/v1") || strings.HasSuffix(u, "/v2") {
+		return u + "/chat/completions"
+	}
+	// Bare domain or path without /v1 — add /v1/chat/completions
+	return u + "/v1/chat/completions"
+}
+
 // ─── Transient-error retry for AI HTTP calls ────────────────────────────────
 //
 // Upstream AI providers (and intermediate routers like ai.router.team)
@@ -458,7 +478,7 @@ func postAIWithRetry(httpClient *http.Client, apiURL, apiKey string, body []byte
 	const maxAttempts = 3
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		req, err := http.NewRequest("POST", strings.TrimRight(apiURL, "/")+"/chat/completions", bytes.NewReader(body))
+		req, err := http.NewRequest("POST", normalizeAIEndpoint(apiURL), bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
