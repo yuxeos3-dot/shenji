@@ -11,7 +11,6 @@
       <div class="hdr-actions">
         <button class="btn" @click="$emit('back')">← 返回库列表</button>
         <button class="btn" @click="showImport = true">✏️ 手动输入</button>
-        <button class="btn btn-green" @click="doGSCImport">📥 从 GSC 获取</button>
         <button class="btn btn-platforms" @click="doPlatformsImport" :disabled="platformsImporting">
           {{ platformsImporting ? '拉取中...' : '🔄 从4平台拉取' }}
         </button>
@@ -45,7 +44,7 @@
         </tr>
         <tr v-if="!items.length">
           <td colspan="4" class="empty-cell">
-            {{ loading ? '加载中...' : '这个库里还没有关键词。点右上角「手动输入」或「从 GSC 获取」开始。' }}
+            {{ loading ? '加载中...' : '这个库里还没有关键词。点右上角「手动输入」或「🔄 从4平台拉取」开始。' }}
           </td>
         </tr>
       </tbody>
@@ -154,23 +153,6 @@ async function doManualImport() {
     ElMessage.error(e?.response?.data?.error || '导入失败')
   } finally {
     importing.value = false
-  }
-}
-
-async function doGSCImport() {
-  if (!props.siteId) {
-    ElMessage.warning('请先选择站点')
-    return
-  }
-  try {
-    const res = await api.geoImportFromGSC(props.lib.id, { site_id: props.siteId, limit: 0 })
-    ElMessage.success(
-      '✅ 从 GSC 导入 ' + (res.data?.imported || 0) + ' 条关键词' +
-      ' · 来源 ' + (res.data?.source_total || 0) + ' 条（已过滤排名 1-99）'
-    )
-    reload()
-  } catch (e) {
-    ElMessage.error(e?.response?.data?.error || '导入失败 — 请先在「数据管理」里同步 GSC')
   }
 }
 

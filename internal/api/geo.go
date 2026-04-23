@@ -245,35 +245,60 @@ func GeoImportFromPlatforms(c *gin.Context) {
 		return
 	}
 
-	// Auto-sync: if gsc_query_page_daily is empty for this site, trigger
-	// a deep sync using the SITE OWNER's OAuth token (not the caller's —
-	// admin might be pulling for a site they don't own). This is the
-	// "admin view-as owner" pattern applied to keyword import.
+	// Auto-sync: if deep tables are empty, trigger deep sync across ALL 4
+	// platforms using the SITE OWNER's OAuth token. Admin pulling another
+	// user's site will use the owner's credentials (view-as-owner pattern).
 	autoSynced := false
-	var deepCount int
-	db.DB.QueryRow(
-		`SELECT COUNT(*) FROM gsc_query_page_daily WHERE site_id=$1 LIMIT 1`, req.SiteID,
-	).Scan(&deepCount)
-	if deepCount == 0 {
+	var gscCount, bingCount, yandexCount int
+	db.DB.QueryRow(`SELECT COUNT(*) FROM gsc_query_page_daily WHERE site_id=$1 LIMIT 1`, req.SiteID).Scan(&gscCount)
+	db.DB.QueryRow(`SELECT COUNT(*) FROM bing_query_daily WHERE site_id=$1 LIMIT 1`, req.SiteID).Scan(&bingCount)
+	db.DB.QueryRow(`SELECT COUNT(*) FROM yandex_query_daily WHERE site_id=$1 LIMIT 1`, req.SiteID).Scan(&yandexCount)
+
+	if gscCount == 0 || bingCount == 0 || yandexCount == 0 {
 		var ownerID int64
 		var domain string
-		db.DB.QueryRow(
-			"SELECT COALESCE(created_by,0), COALESCE(domain,'') FROM sites WHERE id=$1", req.SiteID,
-		).Scan(&ownerID, &domain)
+		db.DB.QueryRow("SELECT COALESCE(created_by,0), COALESCE(domain,'') FROM sites WHERE id=$1", req.SiteID).Scan(&ownerID, &domain)
 		if ownerID > 0 && domain != "" {
-			if token, err := getGoogleAccessToken(ownerID); err == nil {
-				if gscURL, err := resolveGSCProperty(token, domain, ownerID); err == nil {
-					if rows, err := syncGSCDeepInternal(req.SiteID, token, gscURL, 7); err == nil {
-						log.Printf("[geo-import] site %d auto-synced %d GSC rows via owner %d", req.SiteID, rows, ownerID)
-						autoSynced = true
-					} else {
-						log.Printf("[geo-import] site %d syncGSCDeep failed: %v", req.SiteID, err)
+			// GSC
+			if gscCount == 0 {
+				if token, err := getGoogleAccessToken(ownerID); err == nil {
+					if gscURL, err := resolveGSCProperty(token, domain, ownerID); err == nil {
+						if rows, err := syncGSCDeepInternal(req.SiteID, token, gscURL, 7); err == nil {
+							log.Printf("[geo-import] site %d auto-synced %d GSC rows via owner %d", req.SiteID, rows, ownerID)
+							autoSynced = true
+						} else {
+							log.Printf("[geo-import] site %d syncGSCDeep failed: %v", req.SiteID, err)
+						}
 					}
-				} else {
-					log.Printf("[geo-import] site %d resolveGSC failed: %v", req.SiteID, err)
 				}
-			} else {
-				log.Printf("[geo-import] site %d (owner %d) no Google token: %v", req.SiteID, ownerID, err)
+			}
+			// Bing
+			if bingCount == 0 {
+				if apiKey, _ := LoadUserBingKey(ownerID); apiKey != "" {
+					if bingURL, err := resolveBingSiteURL(apiKey, domain, ownerID); err == nil {
+						if err := syncBingDeepInternal(req.SiteID, apiKey, bingURL); err == nil {
+							log.Printf("[geo-import] site %d auto-synced Bing via owner %d", req.SiteID, ownerID)
+							autoSynced = true
+						} else {
+							log.Printf("[geo-import] site %d syncBingDeep failed: %v", req.SiteID, err)
+						}
+					}
+				}
+			}
+			// Yandex
+			if yandexCount == 0 {
+				if token, err := getYandexAccessToken(ownerID); err == nil {
+					if yID, err := getYandexUserIDCached(ownerID, token); err == nil {
+						if hostID, err := resolveYandexHost(token, yID, domain, ownerID); err == nil {
+							if err := syncYandexDeepInternal(req.SiteID, token, yID, hostID); err == nil {
+								log.Printf("[geo-import] site %d auto-synced Yandex via owner %d", req.SiteID, ownerID)
+								autoSynced = true
+							} else {
+								log.Printf("[geo-import] site %d syncYandexDeep failed: %v", req.SiteID, err)
+							}
+						}
+					}
+				}
 			}
 		}
 	}
