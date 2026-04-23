@@ -22,6 +22,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -267,7 +268,17 @@ func GSCSiteDetail(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	token, err := getGoogleAccessToken(c.GetInt64("user_id"))
+	// Admin can pass ?user_id=X to use that user's OAuth token — needed
+	// for the 全局数据总览 drilldown where admin views a user's sites.
+	effectiveUserID := c.GetInt64("user_id")
+	if v := c.Query("user_id"); v != "" {
+		if role, _ := c.Get("role"); role == "admin" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				effectiveUserID = n
+			}
+		}
+	}
+	token, err := getGoogleAccessToken(effectiveUserID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
