@@ -23,7 +23,7 @@
       <thead>
         <tr>
           <th style="width:38%">标题</th>
-          <th>关键词</th>
+          <th style="width:200px">关键词</th>
           <th style="width:70px">字数</th>
           <th style="width:100px">审核</th>
           <th style="width:90px">状态</th>
@@ -34,7 +34,7 @@
       <tbody>
         <tr v-for="a in articles" :key="a.id">
           <td style="font-weight:600">{{ a.title }}</td>
-          <td style="color:var(--ink-soft);font-size:12px">{{ a.keywords || '—' }}</td>
+          <td style="color:var(--ink-soft);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="a.keywords">{{ a.keywords || '—' }}</td>
           <td>{{ a.word_count }}</td>
           <td>
             <span class="badge" :class="reviewClass(a.review_status)">

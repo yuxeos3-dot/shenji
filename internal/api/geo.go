@@ -770,7 +770,8 @@ func GeoGetArticle(c *gin.Context) {
 	if articleSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", articleSiteID)) {
 		return
 	}
-	var aID, taskID, titleID, wordCount int64
+	var aID, wordCount int64
+	var taskID, titleID sql.NullInt64
 	var title, content, excerpt, kw, metaTitle, md, category, status, reviewStatus, reviewerNote, aiModel, slug, createdAt string
 	var pubAt *string
 	err := db.DB.QueryRow(`SELECT id, task_id, title_id, title, slug, content, excerpt, keywords,
@@ -781,11 +782,12 @@ func GeoGetArticle(c *gin.Context) {
 			&metaTitle, &md, &category, &status, &reviewStatus, &reviewerNote,
 			&aiModel, &wordCount, &createdAt, &pubAt)
 	if err != nil {
+		log.Printf("[geo] GetArticle scan error id=%s: %v", id, err)
 		c.JSON(404, gin.H{"code": -1, "error": "文章不存在"})
 		return
 	}
 	c.JSON(200, gin.H{"code": 0, "data": gin.H{
-		"id": aID, "task_id": taskID, "title_id": titleID, "title": title, "slug": slug,
+		"id": aID, "task_id": taskID.Int64, "title_id": titleID.Int64, "title": title, "slug": slug,
 		"content": content, "excerpt": excerpt, "keywords": kw,
 		"meta_title": metaTitle, "meta_description": md,
 		"category": category, "status": status, "review_status": reviewStatus,
