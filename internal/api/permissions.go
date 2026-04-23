@@ -142,11 +142,9 @@ var PermissionTree = []PermNode{
 		{Code: "reports.monthly.view", Label: "查看月报"},
 		{Code: "reports.monthly.write", Label: "写 / 生成 / 提交月报"},
 		{Code: "reports.monthly.polish", Label: "月报 AI 润色"},
-		// Evaluate subordinates — admin-only sub, enforced via AdminRequired
-		// on POST/DELETE /v1/evaluations. Tree entry is AdminOnly so the
-		// member perm picker hides this single row while still showing its
-		// parent (reports.*) category as normally grantable.
-		{Code: "reports.evaluate", Label: "评价下级汇报", AdminOnly: true},
+		// Evaluate subordinates — given to group_leader by default,
+		// but admin can grant this to anyone via user management.
+		{Code: "reports.evaluate", Label: "评价日报/周报/月报（审查评价）"},
 	}},
 	{Code: "settings", Label: "系统设置", Children: []PermNode{
 		{Code: "settings.view", Label: "查看系统设置"},

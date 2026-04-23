@@ -1,7 +1,6 @@
 package api
 
 import (
-	"seo-system/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -45,7 +44,7 @@ func registerReportRoutes(v1 *gin.RouterGroup) {
 
 	// Evaluations
 	v1.GET("/evaluations", RequirePermission("reports.daily.view"), ListEvaluations)
-	v1.POST("/evaluations", middleware.AdminRequired(), CreateEvaluation)
-	v1.POST("/evaluations/polish", middleware.AdminRequired(), PolishEvaluation)
-	v1.DELETE("/evaluations/:id", middleware.AdminRequired(), DeleteEvaluation)
+	v1.POST("/evaluations", RequirePermission("reports.evaluate"), CreateEvaluation)
+	v1.POST("/evaluations/polish", RequirePermission("reports.evaluate"), PolishEvaluation)
+	v1.DELETE("/evaluations/:id", RequirePermission("reports.evaluate"), DeleteEvaluation)
 }
