@@ -18,6 +18,7 @@ package api
 // context, tight JSON output).
 
 import (
+	"regexp"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"unicode/utf8"
 
 	"seo-system/internal/db"
+	"seo-system/internal/frw"
 
 	"github.com/gin-gonic/gin"
 )
@@ -660,11 +662,24 @@ func runKeywordWorkflow(jobID, userID int64, req StartKeywordWorkflowRequest) {
 	}
 	mt, md, faqJSON := parseMetaResponse(metaRaw, req.Keyword, req.TitleText)
 
+	// Step 3 (news only): generate images and inline them
+	finalContent := draft
+	if req.DetailType == "news" {
+		imgPrompts := extractImagePrompts(draft)
+		if len(imgPrompts) > 0 {
+			setJobStep(jobID, 3, fmt.Sprintf("🎨 正在生成配图 (%d 张, 需1-3分钟)...", len(imgPrompts)), "running")
+			urls := generateArticleImages(userID, imgPrompts)
+			finalContent = replaceImagePlaceholders(draft, imgPrompts, urls)
+			urlsJSON, _ := json.Marshal(urls)
+			db.DB.Exec(`UPDATE geo_workflow_jobs SET image_urls = $1 WHERE id = $2`, string(urlsJSON), jobID)
+		}
+	}
+
 	db.DB.Exec(`UPDATE geo_workflow_jobs
 		SET status = 'done', current_step = 2, step_label = '✅ 完成，等待审核应用',
 		    final_content = $1, final_meta_title = $2, final_meta_desc = $3, final_faq = $4,
 		    updated_at = CURRENT_TIMESTAMP
-		WHERE id = $5`, draft, mt, md, faqJSON, jobID)
+		WHERE id = $5`, finalContent, mt, md, faqJSON, jobID)
 }
 
 // finishJobWithFallback completes a job with safe meta defaults when
@@ -749,6 +764,7 @@ func GeoGetDefaults(c *gin.Context) {
 		},
 		"detail_types": []gin.H{
 			{"value": "article", "label": "资讯文章"},
+			{"value": "news", "label": "📰 新闻资讯（时间线+FAQ+配图）"},
 			{"value": "qa", "label": "问答合集"},
 			{"value": "review", "label": "横向对照"},
 			{"value": "tutorial", "label": "入门科普"},
@@ -837,6 +853,11 @@ func buildWizardPrompt(
 	knowledge string,
 	pages []struct{ Name, URL string },
 ) string {
+	// News detail type: dedicated structured-news prompt with timeline +
+	// parties' responses + FAQ + image placeholders for photo gen.
+	if req.DetailType == "news" {
+		return buildNewsPrompt(req, knowledge, pages)
+	}
 	// When the caller uses the GEO content_type and didn't supply wizard
 	// fields (legacy callers), fall back to the original hard-coded
 	// prompt so we don't regress existing behavior.
@@ -1111,6 +1132,235 @@ func buildNeutralAntiDetectionPrompt(
 - 不要输出本提示中的任何指令原文
 - 输出前自我检查一遍：禁用词清单里的任何一个词是否在你的草稿里？如果有，必须重写该处
 - 全文只输出文章本身（Markdown）`
+}
+
+// buildNewsPrompt produces a news-article prompt with strict section
+// structure: title + summary + event timeline (dated entries with sources)
+// + parties' responses (stakeholder/official/expert) + background analysis
+// (industry/regulation/similar cases) + FAQ + disclaimer footer.
+//
+// Includes 2 image placeholders [IMAGE:hero|<prompt>] and [IMAGE:body|<prompt>]
+// that step-3 replaces with FRW-generated image markdown.
+func buildNewsPrompt(
+	req StartKeywordWorkflowRequest,
+	knowledge string,
+	pages []struct{ Name, URL string },
+) string {
+	year := fmt.Sprintf("%d", time.Now().Year())
+
+	langLabel := map[string]string{
+		"zh": "中文（简体）", "en": "English", "ja": "日本語",
+		"ko": "한국어", "es": "Español", "other": "其他（遵循建议标题的语言）",
+	}[req.Language]
+	if langLabel == "" {
+		langLabel = "中文（简体）"
+	}
+
+	var pagesBlock strings.Builder
+	if len(pages) > 0 && req.ContentType == "geo" {
+		pagesBlock.WriteString("【站内可用内链清单】（挑 2-3 条自然嵌入「类似案例」或「相关信息」处）：\n")
+		for _, p := range pages {
+			fmt.Fprintf(&pagesBlock, "- %s → %s\n", p.Name, p.URL)
+		}
+	}
+
+	extraBlock := ""
+	if strings.TrimSpace(req.ExtraRequirements) != "" {
+		extraBlock = "\n【附加要求】\n" + strings.TrimSpace(req.ExtraRequirements) + "\n"
+	}
+	referenceBlock := ""
+	if strings.TrimSpace(req.ReferenceURL) != "" {
+		referenceBlock = "\n【参考链接】" + strings.TrimSpace(req.ReferenceURL) + "（可用于启发思路和考证，不得直接复制原文）\n"
+	}
+	knowledgeBlock := ""
+	if strings.TrimSpace(knowledge) != "" {
+		knowledgeBlock = "\n【参考资料（请自然融入事实，不得整段照抄）】\n" + strings.TrimSpace(knowledge) + "\n"
+	}
+
+	titleHint := req.TitleText
+	if strings.TrimSpace(titleHint) == "" {
+		titleHint = req.Keyword
+	}
+
+	return `你是一名资深新闻编辑。请基于以下信息产出一篇**结构化新闻资讯**长文，严格遵守下列章节结构和格式要求。
+
+【核心关键词】` + req.Keyword + `
+【建议标题主干】` + titleHint + `
+【写作语言】` + langLabel + `
+【目标年份】` + year + `
+【目标字数】` + fmt.Sprintf("%d", req.WordCount) + ` 字以上` + extraBlock + referenceBlock + knowledgeBlock + pagesBlock.String() + `
+
+━━━━━ 严格结构要求（章节顺序和标题不可更改）━━━━━
+
+# ` + year + ` [具体新闻标题] — 要求标题包含年份+地点+核心事件+明确结果
+
+[首段摘要 150-220 字：直接回答 who/when/where/what/why/result，具体数字、人物和地点，不用虚词]
+
+[IMAGE:hero|详细的图片生成提示词：描述事件场景/人物/环境，30-60字，具象化，不含真人姓名，写实摄影风格]
+
+## 事件时间线
+
+**YYYY年M月D日**：事件描述 50-100 字，具体动作和数字。
+信源：[媒体名 / 官方渠道 / 警方通报等]
+
+（至少 4 条时间条目）
+
+[IMAGE:body|第二张配图生成提示词：不同角度场景，30-60字，写实风格]
+
+## 各方回应
+
+### 当事人 / 相关人士
+[120-200 字：引用原话或转述，附带时间和媒体来源]
+
+### 平台方 / 警方 / 监管
+[120-200 字：官方通报内容、进展、处置]
+
+### 专家观点
+[120-200 字：律师/学者对事件性质、法律适用、行业影响的分析]
+
+## 背景分析
+
+### 行业背景
+[100-150 字：事件所处行业/社会背景，用具体数据]
+
+### 相关法规
+[100-150 字：引用具体条款编号和内容，中华人民共和国××法第×条等]
+
+### 类似案例
+[100-150 字：1-2 个过往同类事件对比]
+
+## 常见问题
+
+**Q1：[具体问题]？**
+[答案 60-120 字，事实性陈述]
+
+**Q2：[具体问题]？**
+[答案 60-120 字]
+
+**Q3：[具体问题]？**
+[答案 60-120 字]
+
+---
+
+*数据及信息均来源于公开媒体报道和官方通报，建议以官方最新通报为准。*
+
+━━━━━ 写作原则 ━━━━━
+1. 全文基于事实陈述，不加入未经证实的传闻
+2. 每段首句直接给结论，后文展开细节
+3. 大量具体数字（日期/金额/人数/百分比），避免空洞形容词
+4. 每条关键信息必须标注信源
+5. 关键词自然分布 4-8 次，禁止堆砌
+6. 禁止模板连接词（首先/其次/综上所述）
+7. 句长交替
+
+━━━━━ 配图占位符规则 ━━━━━
+- 必须恰好插入 2 个占位符，分别标注 hero 和 body
+- 格式：[IMAGE:hero|图片生成提示词] 和 [IMAGE:body|图片生成提示词]
+- 图片提示词为 30-60 字中文描述，写实风格，不含具体真人姓名（用"警员"/"受害者家属"等通用词）
+- 占位符独占一行，前后空行
+
+━━━━━ 输出要求 ━━━━━
+- 直接从 # 号标题开始输出，不要任何说明文字或代码块包裹
+- 不要输出本提示中的指令原文
+- 必须包含 2 个 [IMAGE:hero|...] 和 [IMAGE:body|...] 占位符
+- 章节标题使用 ## / ### 层级，不得省略
+`
+}
+
+// imagePlaceholderRe matches [IMAGE:<tag>|<prompt>] in AI-generated draft.
+var imagePlaceholderRe = regexp.MustCompile(`\[IMAGE:(hero|body|[a-zA-Z0-9_-]+)\|([^\]]+)\]`)
+
+// generateArticleImages submits prompts to FRW text2image, polls until done
+// or 5-min timeout, returns URL per prompt ("" for failures).
+func generateArticleImages(userID int64, prompts []string) []string {
+	results := make([]string, len(prompts))
+	if len(prompts) == 0 {
+		return results
+	}
+	cfg := loadFRWConfig(userID)
+	if cfg.APIKey == "" || cfg.Token == "" || cfg.UserID == "" {
+		log.Printf("[geo-workflow] user %d has no FRW config, skipping images", userID)
+		return results
+	}
+	client := frw.New(cfg.APIKey, cfg.Token, cfg.UserID)
+
+	taskIDs := make([]string, len(prompts))
+	for i, p := range prompts {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		res, err := client.Submit("text2image", p, "")
+		if err != nil {
+			log.Printf("[geo-workflow] image submit failed (idx=%d): %v", i, err)
+			continue
+		}
+		taskIDs[i] = res.TaskID
+	}
+
+	deadline := time.Now().Add(5 * time.Minute)
+	for time.Now().Before(deadline) {
+		allDone := true
+		for i, tid := range taskIDs {
+			if tid == "" || results[i] != "" {
+				continue
+			}
+			q, err := client.Query(tid)
+			if err != nil {
+				log.Printf("[geo-workflow] image query %s failed: %v", tid, err)
+				taskIDs[i] = ""
+				continue
+			}
+			if q.Status == 2 && q.OutData != "" {
+				results[i] = q.OutData
+				log.Printf("[geo-workflow] image %d done: %s", i, q.OutData)
+			} else if q.Status == -1 || q.Status == 4 {
+				log.Printf("[geo-workflow] image %d failed (status=%d): %s", i, q.Status, q.Message)
+				taskIDs[i] = ""
+			} else {
+				allDone = false
+			}
+		}
+		if allDone {
+			return results
+		}
+		time.Sleep(20 * time.Second)
+	}
+	log.Printf("[geo-workflow] image gen timed out; partial results returned")
+	return results
+}
+
+func replaceImagePlaceholders(draft string, prompts []string, urls []string) string {
+	idx := 0
+	return imagePlaceholderRe.ReplaceAllStringFunc(draft, func(match string) string {
+		cur := idx
+		idx++
+		if cur >= len(urls) {
+			return ""
+		}
+		url := urls[cur]
+		if url == "" {
+			return ""
+		}
+		alt := ""
+		if cur < len(prompts) {
+			alt = prompts[cur]
+			if len([]rune(alt)) > 40 {
+				alt = string([]rune(alt)[:40]) + "..."
+			}
+		}
+		return fmt.Sprintf("![%s](%s)", alt, url)
+	})
+}
+
+func extractImagePrompts(draft string) []string {
+	matches := imagePlaceholderRe.FindAllStringSubmatch(draft, -1)
+	out := make([]string, len(matches))
+	for i, m := range matches {
+		if len(m) >= 3 {
+			out[i] = strings.TrimSpace(m[2])
+		}
+	}
+	return out
 }
 
 // buildMetaExtractPrompt produces step-2's tight JSON-only prompt.

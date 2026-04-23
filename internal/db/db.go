@@ -569,6 +569,7 @@ func Init() {
 		"DO $$ BEGIN ALTER TABLE geo_workflow_jobs ADD COLUMN style TEXT DEFAULT 'professional'; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
 		"DO $$ BEGIN ALTER TABLE geo_workflow_jobs ADD COLUMN output_format TEXT DEFAULT 'markdown'; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
 		"DO $$ BEGIN ALTER TABLE geo_workflow_jobs ADD COLUMN paragraph_struct TEXT DEFAULT ''; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+        "DO $$ BEGIN ALTER TABLE geo_workflow_jobs ADD COLUMN image_urls TEXT DEFAULT ''; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
 		"DO $$ BEGIN ALTER TABLE geo_workflow_jobs ADD COLUMN extra_requirements TEXT DEFAULT ''; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
 		"DO $$ BEGIN ALTER TABLE geo_workflow_jobs ADD COLUMN reference_url TEXT DEFAULT ''; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
 		"DO $$ BEGIN ALTER TABLE geo_workflow_jobs ADD COLUMN custom_prompt TEXT DEFAULT ''; EXCEPTION WHEN duplicate_column THEN NULL; END $$",

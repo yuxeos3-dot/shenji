@@ -370,7 +370,7 @@ async function pollOnce() {
     const j = res.data
     stepLabel.value = j.step_label || ''
     // rough progress heuristic: step 1 ≈ 55%, step 2 ≈ 90%, done = 100
-    progressPct.value = j.current_step === 2 ? 90 : (j.current_step === 1 ? 55 : 15)
+    progressPct.value = j.current_step === 3 ? 92 : (j.current_step === 2 ? 78 : (j.current_step === 1 ? 55 : 15))
     if (j.status === 'done') {
       stopPoll()
       progressPct.value = 100
