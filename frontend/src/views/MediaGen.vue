@@ -62,8 +62,8 @@
             </td>
             <td class="col-thumb">
               <img
-                v-if="item.output_url"
-                :src="item.output_url"
+                v-if="item.result_url || item.output_url"
+                :src="item.result_url || item.output_url"
                 class="thumb"
                 @click="previewItem = item"
               />
@@ -74,12 +74,20 @@
               <span class="tag tag-mode">{{ modeLabel(item.mode) }}</span>
             </td>
             <td class="col-status">
-              <span :class="['tag', 'tag-status-' + item.status]">{{ statusLabel(item.status) }}</span>
+              <div class="status-wrap">
+                <span :class="['tag', statusTagClass(item.status)]">{{ statusLabel(item.status) }}</span>
+                <div v-if="isProcessing(item.status)" class="progress-bar">
+                  <div class="progress-fill" :style="{width: (item.progress || 0) + '%'}"></div>
+                  <span class="progress-text">{{ Math.round(item.progress || 0) }}%</span>
+                </div>
+              </div>
             </td>
             <td class="col-time">{{ fmtTime(item.created_at) }}</td>
             <td class="col-actions">
-              <button class="btn-sm" @click="publishOne(item)" :disabled="item.status !== 'completed'">发布</button>
-              <button class="btn-sm" @click="copyURL(item)" :disabled="!item.output_url">复制</button>
+              <button class="btn-sm" @click="openDetail(item)">详情</button>
+              <button class="btn-sm" @click="publishOne(item)" :disabled="!isCompleted(item.status)">发布</button>
+              <button class="btn-sm" @click="copyURL(item)" :disabled="!(item.result_url || item.output_url)">复制</button>
+              <button class="btn-sm btn-warn" v-if="isFailed(item.status)" @click="retryItem(item)">重试</button>
               <button class="btn-sm btn-danger" @click="deleteOne(item)">删除</button>
             </td>
           </tr>
@@ -167,6 +175,44 @@
       </template>
     </el-dialog>
 
+    <!-- Detail Dialog -->
+    <el-dialog v-model="showDetailDialog" :title="'任务 #' + (detailItem?.id || '')" width="620px">
+      <div v-if="detailItem" class="detail-view">
+        <div class="detail-preview" v-if="detailItem.result_url || detailItem.output_url">
+          <img v-if="detailItem.kind === 'image'" :src="detailItem.result_url || detailItem.output_url" class="detail-media" />
+          <video v-else :src="detailItem.result_url || detailItem.output_url" class="detail-media" controls></video>
+        </div>
+        <div class="detail-preview detail-placeholder" v-else-if="isProcessing(detailItem.status)">
+          <div class="detail-loading">
+            <div class="spinner"></div>
+            <div>生成中 · {{ Math.round(detailItem.progress || 0) }}%</div>
+          </div>
+        </div>
+        <div class="detail-preview detail-placeholder" v-else>
+          <div>{{ statusLabel(detailItem.status) }}</div>
+        </div>
+        <div class="detail-meta">
+          <div class="detail-row"><label>提示词</label><div class="detail-val">{{ detailItem.prompt || '--' }}</div></div>
+          <div class="detail-row"><label>模式</label><div class="detail-val">{{ modeLabel(detailItem.mode) }}</div></div>
+          <div class="detail-row"><label>状态</label><div class="detail-val">
+            <span :class="['tag', statusTagClass(detailItem.status)]">{{ statusLabel(detailItem.status) }}</span>
+            <span v-if="isProcessing(detailItem.status)" class="detail-prog">{{ Math.round(detailItem.progress || 0) }}%</span>
+          </div></div>
+          <div class="detail-row" v-if="detailItem.source_url"><label>参考图</label><div class="detail-val"><a :href="detailItem.source_url" target="_blank">{{ detailItem.source_url }}</a></div></div>
+          <div class="detail-row"><label>创建时间</label><div class="detail-val">{{ fmtTime(detailItem.created_at) }}</div></div>
+          <div class="detail-row" v-if="detailItem.error_msg"><label>错误信息</label><div class="detail-val detail-err">{{ detailItem.error_msg }}</div></div>
+          <div class="detail-row" v-if="detailItem.result_url || detailItem.output_url"><label>结果URL</label><div class="detail-val">
+            <a :href="detailItem.result_url || detailItem.output_url" target="_blank">{{ detailItem.result_url || detailItem.output_url }}</a>
+          </div></div>
+        </div>
+      </div>
+      <template #footer>
+        <button class="btn btn-secondary" @click="showDetailDialog = false">关闭</button>
+        <button v-if="detailItem && isFailed(detailItem.status)" class="btn btn-primary" @click="retryItem(detailItem); showDetailDialog = false">重试</button>
+        <button v-if="detailItem && isCompleted(detailItem.status)" class="btn btn-primary" @click="publishOne(detailItem)">发布</button>
+      </template>
+    </el-dialog>
+
     <!-- Lightbox -->
     <Teleport to="body">
       <div class="lightbox-overlay" v-if="previewItem" @click="previewItem = null">
@@ -237,12 +283,12 @@ onMounted(() => {
   loadList()
   pollTimer = setInterval(() => {
     const hasActive = list.value.some(
-      (item) => item.status === "queued" || item.status === "processing"
+      (item) => isProcessing(item.status)
     )
     if (hasActive) {
       loadList()
     }
-  }, 5000)
+  }, 3000)
 })
 
 onUnmounted(() => {
@@ -319,6 +365,32 @@ async function doGenerate() {
       ElMessage({ message: msg, type: "error", duration: 6000, showClose: true })
     }
   }
+}
+
+// Retry a failed task — submit again with same params
+async function retryItem(item: any) {
+  try {
+    const payload: any = {
+      kind: item.kind,
+      mode: item.mode,
+      prompt: item.prompt,
+    }
+    if (item.source_url) payload.source_url = item.source_url
+    await api.submitFRWGeneration(payload)
+    ElMessage.success("已重新提交")
+    loadList()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || "重试失败")
+  }
+}
+
+// Detail dialog state
+const detailItem = ref<any>(null)
+const showDetailDialog = ref(false)
+
+function openDetail(item: any) {
+  detailItem.value = item
+  showDetailDialog.value = true
 }
 
 // Upload
@@ -429,12 +501,46 @@ function modeLabel(mode: string): string {
   return mode || "--"
 }
 
-function statusLabel(status: string): string {
+function statusLabel(status: any): string {
+  const s = typeof status === "number" ? status : Number(status)
+  if (!isNaN(s)) {
+    if (s === 0) return "排队中"
+    if (s === 1) return "生成中"
+    if (s === 2) return "已完成"
+    if (s === -1) return "失败"
+    if (s === 4) return "超时"
+  }
   if (status === "queued") return "排队中"
   if (status === "processing") return "生成中"
   if (status === "completed") return "已完成"
   if (status === "failed") return "失败"
-  return status || "--"
+  return "待处理"
+}
+
+function statusTagClass(status: any): string {
+  const s = typeof status === "number" ? status : Number(status)
+  if (!isNaN(s)) {
+    if (s === 0) return "tag-status-queued"
+    if (s === 1) return "tag-status-processing"
+    if (s === 2) return "tag-status-completed"
+    if (s === -1 || s === 4) return "tag-status-failed"
+  }
+  return "tag-status-" + status
+}
+
+function isProcessing(status: any): boolean {
+  const s = typeof status === "number" ? status : Number(status)
+  return s === 0 || s === 1
+}
+
+function isCompleted(status: any): boolean {
+  const s = typeof status === "number" ? status : Number(status)
+  return s === 2 || status === "completed"
+}
+
+function isFailed(status: any): boolean {
+  const s = typeof status === "number" ? status : Number(status)
+  return s === -1 || s === 4 || status === "failed"
 }
 
 function fmtTime(ts: string): string {
@@ -596,4 +702,25 @@ function formatSize(bytes: number): string {
   .mg-pagination { margin-left: 0; }
   .col-prompt { max-width: 120px; }
 }
+
+.status-wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.progress-bar { position: relative; width: 100px; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; }
+.progress-fill { position: absolute; top: 0; left: 0; height: 100%; background: linear-gradient(90deg, #1890ff, #52c41a); transition: width .3s; }
+.progress-text { position: absolute; right: -32px; top: -5px; font-size: 11px; color: #666; font-weight: 600; }
+.btn-warn { background: #fa8c16; color: #fff; border-color: #fa8c16; }
+.btn-warn:hover { background: #d46b08; }
+.detail-view { display: flex; flex-direction: column; gap: 16px; }
+.detail-preview { width: 100%; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; justify-content: center; min-height: 240px; }
+.detail-placeholder { color: #999; font-size: 14px; }
+.detail-media { max-width: 100%; max-height: 400px; border-radius: 8px; }
+.detail-loading { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.spinner { width: 40px; height: 40px; border: 3px solid #e5e7eb; border-top-color: #1890ff; border-radius: 50%; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.detail-meta { display: flex; flex-direction: column; gap: 10px; }
+.detail-row { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; }
+.detail-row label { min-width: 72px; font-weight: 600; color: #666; }
+.detail-val { flex: 1; color: #333; word-break: break-all; }
+.detail-val a { color: #1890ff; }
+.detail-err { color: #f5222d; }
+.detail-prog { margin-left: 8px; font-weight: 600; color: #1890ff; }
 </style>
