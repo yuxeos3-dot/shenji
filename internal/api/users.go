@@ -378,6 +378,23 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 
+	// If role was changed, auto-reset permissions to the new role's defaults.
+	// Admin bypasses permission checks so we clear to empty array for cleanliness.
+	// This is the "role binds permissions" model: user → role → perms.
+	if req.Role != "" && req.Role != curRole {
+		var newPerms []string
+		if req.Role == "admin" {
+			newPerms = []string{}
+		} else {
+			newPerms = DefaultPermissionsForRole(req.Role)
+		}
+		permsJSON, _ := json.Marshal(newPerms)
+		if _, err := tx.Exec("UPDATE users SET permissions = $1 WHERE id = $2", string(permsJSON), id); err != nil {
+			log.Printf("[users] reset perms for user %s on role change: %v", id, err)
+			// Non-fatal — the role change already went through; just log
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "更新失败"})
 		return

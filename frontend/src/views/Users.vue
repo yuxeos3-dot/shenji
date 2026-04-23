@@ -141,7 +141,7 @@
           <tr v-for="u in users" :key="u.id">
             <td style="font-weight:700">{{ u.name }}</td>
             <td style="color:var(--ink-mid)">{{ u.email }}</td>
-            <td><span class="role-badge" :class="u.role==='admin'?'role-admin':'role-member'">{{ u.role }}</span></td>
+            <td><span class="role-badge" :class="'role-' + (u.role || 'user')">{{ roleLabel(u.role) }}</span></td>
             <td style="font-size:12px">
               <template v-if="u.department_name">
                 <span class="dept-inline">{{ u.department_name }}</span>
@@ -184,8 +184,12 @@
       <div class="form-group">
         <label>角色</label>
         <el-select v-model="form.role" style="width:100%" @change="onRoleChange">
-          <el-option label="管理员" value="admin" />
-          <el-option label="成员" value="member" />
+          <el-option label="管理员 (admin) - 全部权限" value="admin" />
+          <el-option label="用户 (user) - 仪表盘/汇报/设置" value="user" />
+          <el-option label="组长 (group_leader) - 用户+协同审核+全站分析" value="group_leader" />
+          <el-option label="技术 (dev) - 只看协同管理" value="dev" />
+          <el-option label="运营 (operations) - 只看内容生产" value="operations" />
+          <el-option label="产品 (product) - 只看内容生产" value="product" />
         </el-select>
       </div>
       <div class="form-row">
@@ -576,11 +580,27 @@ function openEdit(u) {
 function onDeptChange() {
   form.value.group_id = null
 }
-// Admins don't have checked permissions (they have all implicitly).
-// Clear the inline picker when user flips to admin so we don't silently
-// keep stale selections behind a v-if.
+function roleLabel(r) {
+  const map = {
+    admin: '管理员',
+    user: '用户',
+    group_leader: '组长',
+    dev: '技术',
+    operations: '运营',
+    product: '产品',
+    member: '成员', // legacy
+  }
+  return map[r] || r || '—'
+}
+
+// When role changes, clear the "initial perms" selection since the backend
+// will now seed perms based on the role default. Admin can still manually
+// add extra perms via the permissions dialog after creation.
 function onRoleChange(v) {
-  if (v === 'admin') initialPerms.value = []
+  initialPerms.value = []
+  if (v) {
+    ElMessage.info('角色已切换，保存后权限将自动按角色默认值设置')
+  }
 }
 
 async function saveUser() {
@@ -825,9 +845,19 @@ onMounted(loadAll)
 .table td { padding:10px 14px; border-bottom:1px solid var(--border-light); font-size:13px; }
 .table tr:hover td { background:var(--sun-light); }
 
-.role-badge { font-size:11px; font-weight:800; padding:2px 10px; border-radius:20px; text-transform:uppercase; }
-.role-admin { background:linear-gradient(135deg,#FFF0DE,#FFE4C4); color:var(--sun-deep); border:1px solid var(--peach); }
-.role-member { background:var(--surface-3); color:var(--ink-soft); border:1px solid var(--border); }
+.role-badge {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 12px;
+  display: inline-block;
+}
+.role-admin { background: #fee2e2; color: #dc2626; }
+.role-user, .role-member { background: #dbeafe; color: #2563eb; }
+.role-group_leader { background: #fef3c7; color: #d97706; }
+.role-dev { background: #e0e7ff; color: #6366f1; }
+.role-operations { background: #dcfce7; color: #16a34a; }
+.role-product { background: #fce7f3; color: #db2777; }
 
 .action-btns { display:flex; gap:6px; }
 .empty-cell { text-align:center; color:var(--ink-hint); padding:30px !important; }
