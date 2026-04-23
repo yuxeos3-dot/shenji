@@ -309,9 +309,7 @@ async function doGenerate() {
     const msg = e?.response?.data?.error || e?.message || "提交失败"
     if (msg.includes("FRW") && (msg.includes("未配置") || msg.includes("API Key") || msg.includes("JWT") || msg.includes("Bearer"))) {
       ElMessageBox.confirm(
-        msg + "
-
-请到「系统设置」粘贴你的 FRW API Key 后再试。",
+        `${msg}\n\n请到「系统设置」粘贴你的 FRW API Key 后再试。`,
         "FRW 配置问题",
         { confirmButtonText: "去配置", cancelButtonText: "取消", type: "warning" }
       ).then(() => {
