@@ -101,6 +101,17 @@ func main() {
 		api.BackfillAuditFindings()
 	}()
 
+	// Resume FRW polls for tasks left in-flight by the previous process
+	// (deployment restarts would otherwise leave them stuck forever).
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[boot] ResumeFRWPolls panic: %v", r)
+			}
+		}()
+		api.ResumeFRWPolls()
+	}()
+
 	// Seed initial analysis rules if not present
 	api.SeedInitialRules()
 

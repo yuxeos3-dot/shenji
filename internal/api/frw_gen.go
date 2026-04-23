@@ -225,6 +225,18 @@ func ListFRWGenerations(c *gin.Context) {
 			"error_msg": em, "created_at": ct,
 		})
 	}
+	// Nudge polls for any in-progress tasks. pollFRWTask is idempotent
+	// via activeFRWPolls — safe to call multiple times. This ensures
+	// tasks progress updates even if server restarted mid-flight.
+	for _, item := range out {
+		if st, ok := item["status"].(int); ok && (st == 0 || st == 1) {
+			if taskID, ok2 := item["frw_task_id"].(string); ok2 && taskID != "" {
+				if id, ok3 := item["id"].(int64); ok3 {
+					go pollFRWTask(id)
+				}
+			}
+		}
+	}
 	c.JSON(200, gin.H{"code": 0, "data": gin.H{"items": out, "total": total, "published": published, "page": page, "per_page": perPage}})
 }
 
@@ -366,10 +378,16 @@ func pollFRWTask(id int64) {
 	for time.Now().Before(deadline) {
 		q, err := client.Query(taskID)
 		if err != nil {
-			// 401 or network. Persist as failure so the user gets a
-			// meaningful message in the UI, then bail.
-			db.DB.Exec(`UPDATE ai_generations SET status=-1, error_msg=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2`, err.Error(), id)
-			return
+			// Retry transient errors (timeout, network, 5xx) up to 3 times.
+			// Only persist as failure on auth errors (401) or repeated failures.
+			errStr := err.Error()
+			if strings.Contains(errStr, "401") || strings.Contains(errStr, "invalid") || strings.Contains(errStr, "unauthorized") {
+				db.DB.Exec(`UPDATE ai_generations SET status=-1, error_msg=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2`, errStr, id)
+				return
+			}
+			log.Printf("[frw-poll] task %d Query transient error: %v (will retry)", id, err)
+			time.Sleep(interval)
+			continue
 		}
 		_, _ = db.DB.Exec(`UPDATE ai_generations SET status=$1, progress=$2, result_url=$3, error_msg=$4, updated_at=CURRENT_TIMESTAMP WHERE id=$5`,
 			q.Status, q.Progress, q.OutData, q.Message, id)
@@ -380,6 +398,35 @@ func pollFRWTask(id int64) {
 	}
 	// Exceeded our own deadline — mark timeout locally so the row doesn't hang.
 	db.DB.Exec(`UPDATE ai_generations SET status=4, error_msg='本地轮询超时', updated_at=CURRENT_TIMESTAMP WHERE id=$1`, id)
+}
+
+// ResumeFRWPolls restarts poll goroutines for all FRW generation tasks
+// still in 'queued' or 'processing' state. Call on server startup —
+// without this, tasks that were in-flight when the process restarted
+// would sit forever with status=0 and no one updating them.
+func ResumeFRWPolls() {
+	rows, err := db.DB.Query(`SELECT id FROM ai_generations WHERE status IN (0, 1) AND frw_task_id <> ''`)
+	if err != nil {
+		log.Printf("[frw] ResumeFRWPolls query failed: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+
+	for _, id := range ids {
+		go pollFRWTask(id)
+	}
+	if len(ids) > 0 {
+		log.Printf("[frw] resumed %d in-progress poll tasks after startup", len(ids))
+	}
 }
 
 // ─── POST /frw/generations/:id/publish ───────────────────────────────────
