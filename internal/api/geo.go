@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"log"
 	"encoding/json"
 	"fmt"
@@ -738,14 +739,16 @@ func GeoListArticles(c *gin.Context) {
 	defer rows.Close()
 	var list []gin.H
 	for rows.Next() {
-		var id, taskID, wordCount int64
+		var id, wordCount int64
+		var taskID sql.NullInt64
 		var title, excerpt, kw, mt, md, status, reviewStatus, aiModel, cat string
 		var pubAt *string
 		if err := rows.Scan(&id, &taskID, &title, &excerpt, &kw, &mt, &md, &status, &reviewStatus, &aiModel, &wordCount, &cat, &pubAt); err != nil {
+			log.Printf("[geo] ListArticles scan error: %v", err)
 			continue
 		}
 		list = append(list, gin.H{
-			"id": id, "task_id": taskID, "title": title, "excerpt": excerpt,
+			"id": id, "task_id": taskID.Int64, "title": title, "excerpt": excerpt,
 			"keywords": kw, "meta_title": mt, "meta_description": md, "status": status,
 			"review_status": reviewStatus, "ai_model": aiModel, "word_count": wordCount,
 			"created_at": cat, "published_at": pubAt,
