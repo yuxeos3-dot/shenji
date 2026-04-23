@@ -160,12 +160,15 @@ const groups = [
   {
     key: 'sites-data', icon: '🌐', label: '站点与数据',
     items: [
-      { path: '/sites',             icon: '🌐', label: '站点管理',   activePrefix: '/sites' },
-      { path: '/data-management',   icon: '📡', label: '数据管理' },
-      { path: '/site-analysis',     icon: '🧠', label: '全站分析' },
+      { path: '/sites',             icon: '🌐', label: '站点管理',       activePrefix: '/sites' },
+      { path: '/data-management',   icon: '📡', label: '数据管理',       hideForAdmin: true },
+      { path: '/global-data',       icon: '📈', label: '全局数据总览',    adminOnly: true },
+      { path: '/global-analytics',  icon: '🧠', label: '全局数据分析',    adminOnly: true },
+      { path: '/users-monitor',     icon: '📊', label: '用户数据',       adminOnly: true },
+      { path: '/site-analysis',     icon: '🔍', label: '全站分析' },
       { path: '/spider-management', icon: '🕷️', label: '蜘蛛管理' },
       { path: '/dead-links',        icon: '💀', label: '死链管理' },
-      { path: '/push-management',  icon: '📤', label: '推送管理' },
+      { path: '/push-management',   icon: '📤', label: '推送管理' },
     ],
   },
   {
@@ -186,22 +189,10 @@ const groups = [
     ],
   },
   {
-    // 用户管理 top-level group (admin only). Keeps "who can do what" knobs
-    // next to "what are they actually doing" — avoids stuffing monitoring
-    // under the generic 系统管理 bucket.
+    // 用户管理 group (admin only). 用户数据 moved to 站点与数据 group.
     key: 'user-mgmt', icon: '👥', label: '用户管理', adminOnly: true,
     items: [
-      { path: '/users',         icon: '🪪', label: '用户设置' },
-      { path: '/users-monitor', icon: '📈', label: '用户数据' },
-    ],
-  },
-  {
-    // 全局数据 (admin only). Cross-user total overview of all sites and
-    // their 4-platform data — the bird's-eye view.
-    key: 'global-data', icon: '🌐', label: '全局数据', adminOnly: true,
-    items: [
-      { path: '/global-data', icon: '📈', label: '全局数据总览' },
-      { path: '/global-analytics', icon: '🧠', label: '全局数据分析' },
+      { path: '/users', icon: '🪪', label: '用户设置' },
     ],
   },
   {
@@ -211,7 +202,7 @@ const groups = [
     key: 'system', icon: '⚙️', label: '系统管理',
     items: [
       { path: '/settings',         icon: '🛠️', label: '系统设置' },
-      { path: '/cache-management', icon: '💾', label: '缓存管理',   adminOnly: true },
+      { path: '/cache-management', icon: '💾', label: '缓存管理', adminOnly: true },
     ],
   },
 ]
@@ -232,9 +223,11 @@ const visibleGroups = computed(() => {
     .map(g => ({
       ...g,
       items: g.items.filter(it => {
-        // Admin-only items still gated by admin
+        // Admin-only items hidden from non-admins
         if (it.adminOnly && !isAdmin) return false
-        // Role-based visibility
+        // hideForAdmin items hidden from admins (e.g. 数据管理 — admins don't build sites)
+        if (it.hideForAdmin && isAdmin) return false
+        // Role-based menu visibility
         return userStore.canSeeMenu(it.path)
       }),
     }))
