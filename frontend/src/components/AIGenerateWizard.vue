@@ -283,6 +283,13 @@ async function resetState() {
     reference_url: '',
     custom_prompt: '',
   }
+  await loadDefaults()
+}
+
+// loadDefaults fetches wizard defaults (prompt template + options) from the server.
+// Extracted so it can be called both on initial mount AND when user changes
+// detail_type (news type has a different prompt than article).
+async function loadDefaults() {
   try {
     const res = await api.geoGetDefaults(props.contentType, form.value.detail_type)
     defaults.value = res.data
