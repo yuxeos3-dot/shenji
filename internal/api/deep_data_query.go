@@ -176,9 +176,22 @@ func GetGSCKeywords(c *gin.Context) {
 	}
 
 	// Build WHERE clause
-	where := "WHERE q.site_id = $1 AND q.date >= CURRENT_DATE - $2 * INTERVAL '1 day' AND q.search_type = 'web'"
-	args := []interface{}{siteID, days}
-	argIdx := 3
+	// Use MAX(date) relative filter instead of CURRENT_DATE —
+	// many sites have gsc_query_page_daily data that's 30+ days old
+	// (last sync was long ago), and a fixed "today - 30 days" filter
+	// would return empty while rank_buckets (which computed long ago)
+	// still show data. Relative filter: "last N days of whatever data
+	// this site has" = MAX(date) - N days.
+	var maxDate string
+	db.DB.QueryRow("SELECT COALESCE(MAX(date)::text, '') FROM gsc_query_page_daily WHERE site_id=$1 AND search_type='web'", siteID).Scan(&maxDate)
+	where := "WHERE q.site_id = $1 AND q.search_type = 'web'"
+	args := []interface{}{siteID}
+	argIdx := 2
+	if maxDate != "" {
+		where += " AND q.date >= $" + strconv.Itoa(argIdx) + "::date - $" + strconv.Itoa(argIdx+1) + " * INTERVAL '1 day'"
+		args = append(args, maxDate, days)
+		argIdx += 2
+	}
 
 	if search != "" {
 		where += " AND q.query ILIKE $" + strconv.Itoa(argIdx)
@@ -451,9 +464,19 @@ func GetGSCPages(c *gin.Context) {
 	days, _ := strconv.Atoi(c.DefaultQuery("days", "30"))
 	search := c.Query("search")
 
-	where := "WHERE site_id = $1 AND date >= CURRENT_DATE - $2 * INTERVAL '1 day' AND search_type = 'web'"
-	args := []interface{}{siteID, days}
-	argIdx := 3
+	// Relative-to-latest-data filter (MAX(date) - N days) instead of
+	// CURRENT_DATE - N days. Handles sites with stale (>30 days old)
+	// gsc_query_page_daily data so the tab still shows results.
+	var maxDateP string
+	db.DB.QueryRow("SELECT COALESCE(MAX(date)::text, '') FROM gsc_query_page_daily WHERE site_id=$1 AND search_type='web'", siteID).Scan(&maxDateP)
+	where := "WHERE site_id = $1 AND search_type = 'web'"
+	args := []interface{}{siteID}
+	argIdx := 2
+	if maxDateP != "" {
+		where += " AND date >= $" + strconv.Itoa(argIdx) + "::date - $" + strconv.Itoa(argIdx+1) + " * INTERVAL '1 day'"
+		args = append(args, maxDateP, days)
+		argIdx += 2
+	}
 	if search != "" {
 		where += " AND page_url ILIKE $" + strconv.Itoa(argIdx)
 		args = append(args, "%"+search+"%")
