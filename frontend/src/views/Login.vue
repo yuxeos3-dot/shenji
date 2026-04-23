@@ -52,7 +52,7 @@
         <template v-else>
           <div class="form-row">
             <div class="form-group">
-              <label>TG名称 <span class="req">*</span></label>
+              <label>TG名称（选填）</label>
               <input v-model="regForm.tg_name" placeholder="请输入TG名称" />
             </div>
             <div class="form-group">
@@ -67,7 +67,7 @@
               <input v-model="regForm.nickname" placeholder="请输入花名" />
             </div>
             <div class="form-group">
-              <label>工号 <span class="req">*</span></label>
+              <label>工号（选填）</label>
               <input v-model="regForm.employee_id" placeholder="如 HF001" />
             </div>
           </div>
@@ -96,7 +96,7 @@
               </select>
             </div>
             <div class="form-group">
-              <label>二级标签</label>
+              <label>二级标签 <span class="req">*</span></label>
               <select v-model="regForm.group_id" :disabled="!regForm.department_id">
                 <option :value="null">请选择二级标签</option>
                 <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
@@ -243,9 +243,7 @@ async function handleRegister() {
   // invite_code is intentionally NOT here — admin review is the real
   // gate, so users without a code can still apply.
   const required = [
-    ['tg_name', 'TG名称'],
     ['nickname', '花名'],
-    ['employee_id', '工号'],
     ['email', '邮箱'],
     ['password', '密码'],
     ['confirm', '确认密码'],
@@ -264,6 +262,10 @@ async function handleRegister() {
   }
   if (!regForm.department_id) {
     ElMessage.warning('请选择一级标签')
+    return
+  }
+  if (!regForm.group_id) {
+    ElMessage.warning('请选择二级标签')
     return
   }
   if (regForm.password !== regForm.confirm) {

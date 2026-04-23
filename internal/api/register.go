@@ -36,18 +36,18 @@ import (
 // column has a NOT NULL UNIQUE constraint and the form deliberately
 // omits a free-text email field.
 type RegisterRequest struct {
-	TGName       string `json:"tg_name" binding:"required"`
-	TGID         string `json:"tg_id"` // optional, e.g. "@username"
-	Nickname     string `json:"nickname" binding:"required"`     // 花名
-	EmployeeID   string `json:"employee_id" binding:"required"`  // 工号
-	Email        string `json:"email" binding:"required,email"`  // 登录邮箱
+	TGName       string `json:"tg_name"`                         // 选填
+	TGID         string `json:"tg_id"`                           // 选填
+	Nickname     string `json:"nickname" binding:"required"`     // 花名 必填
+	EmployeeID   string `json:"employee_id"`                     // 工号 选填
+	Email        string `json:"email" binding:"required,email"`  // 登录邮箱 必填
 	// InviteCode is optional — every registration still goes through
 	// admin review, so a code is more a "VIP fast-track" hint than a
 	// true gate. When present, it's validated + consumed; when empty,
 	// we just skip the check and mark the row pending as usual.
-	InviteCode   string `json:"invite_code"`
-	DepartmentID int64  `json:"department_id" binding:"required"`
-	GroupID      int64  `json:"group_id"`
+	InviteCode   string `json:"invite_code"`                     // 选填
+	DepartmentID int64  `json:"department_id" binding:"required"` // 一级标签 必填
+	GroupID      int64  `json:"group_id" binding:"required"`      // 二级标签 必填
 	Password     string `json:"password" binding:"required,min=8"`
 	Confirm      string `json:"confirm" binding:"required"`
 }
@@ -62,13 +62,12 @@ func Register(c *gin.Context) {
 		// missing a newer required input (e.g. the email field). Name
 		// the field so browser cache / deploy skew is obvious.
 		fields := translateBindErrors(err, map[string]fieldRule{
-			"TGName":     {label: "TG名称", required: "请填写 TG 名称"},
-			"Nickname":   {label: "花名", required: "请填写花名"},
-			"EmployeeID": {label: "工号", required: "请填写工号"},
-			"Email":      {label: "邮箱", required: "请填写邮箱", email: "邮箱格式不正确"},
+			"Nickname":     {label: "花名", required: "请填写花名"},
+			"Email":        {label: "邮箱", required: "请填写邮箱", email: "邮箱格式不正确"},
 			"DepartmentID": {label: "一级标签", required: "请选择一级标签"},
-			"Password":   {label: "密码", required: "请填写密码", min: "密码至少 8 位"},
-			"Confirm":    {label: "确认密码", required: "请填写确认密码"},
+			"GroupID":      {label: "二级标签", required: "请选择二级标签"},
+			"Password":     {label: "密码", required: "请填写密码", min: "密码至少 8 位"},
+			"Confirm":      {label: "确认密码", required: "请填写确认密码"},
 		})
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":   -1,
@@ -124,21 +123,30 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	// Check for collisions on email OR employee_id BEFORE insert so we
-	// can give a clear error rather than a generic UNIQUE violation.
-	// Both fields are compared case-insensitively to match their indexes.
+	// Check for collisions on email (always) and employee_id (only if provided).
+	// When employee_id is empty we skip the employee_id check — otherwise
+	// multiple users without employee_id would collide on the empty string.
 	var dupField string
-	err := db.DB.QueryRow(
-		`SELECT CASE
-		        WHEN LOWER(email) = $1 THEN 'email'
-		        WHEN LOWER(employee_id) = $2 THEN 'employee_id'
-		        ELSE ''
-		        END
-		 FROM users
-		 WHERE LOWER(email) = $1 OR LOWER(employee_id) = $2
-		 LIMIT 1`,
-		req.Email, strings.ToLower(req.EmployeeID),
-	).Scan(&dupField)
+	empLower := strings.ToLower(req.EmployeeID)
+	var err error
+	if empLower != "" {
+		err = db.DB.QueryRow(
+			`SELECT CASE
+			        WHEN LOWER(email) = $1 THEN 'email'
+			        WHEN LOWER(employee_id) = $2 THEN 'employee_id'
+			        ELSE ''
+			        END
+			 FROM users
+			 WHERE LOWER(email) = $1 OR LOWER(employee_id) = $2
+			 LIMIT 1`,
+			req.Email, empLower,
+		).Scan(&dupField)
+	} else {
+		err = db.DB.QueryRow(
+			`SELECT 'email' FROM users WHERE LOWER(email) = $1 LIMIT 1`,
+			req.Email,
+		).Scan(&dupField)
+	}
 	if err == nil && dupField != "" {
 		msg := "该工号已被注册"
 		if dupField == "email" {
