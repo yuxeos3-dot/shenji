@@ -1392,7 +1392,7 @@ func migrateMembersToRoles() {
 		LEFT JOIN departments d ON d.id = u.department_id
 		WHERE u.role != 'admin'`)
 	if err != nil {
-		log.Printf("[migration] role_system_v2 query failed: %v", err)
+		log.Printf("[migration] role_system_v3 query failed: %v", err)
 		return
 	}
 	defer rows.Close()
@@ -1499,7 +1499,7 @@ func migrateMembersToRoles() {
 
 	DB.Exec(`INSERT INTO settings (key, value) VALUES ($1, '1')
 		ON CONFLICT (key) DO UPDATE SET value='1'`, flag)
-	log.Printf("[migration] role_system_v2: migrated %d users", updated)
+	log.Printf("[migration] role_system_v3: migrated %d users", updated)
 }
 
 func seedDefaultAdmin() {
