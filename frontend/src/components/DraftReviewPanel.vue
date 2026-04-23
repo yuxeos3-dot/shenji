@@ -115,8 +115,12 @@
           <el-input v-model="viewing.meta_description" type="textarea" :rows="2" />
         </div>
         <div class="view-row">
-          <label>正文</label>
-          <el-input v-model="viewing.content" type="textarea" :rows="18" />
+          <label>正文预览（图片已渲染）</label>
+          <div class="content-preview" v-html="renderedContent"></div>
+        </div>
+        <div class="view-row">
+          <label>正文（可编辑 Markdown）</label>
+          <el-input v-model="viewing.content" type="textarea" :rows="14" />
         </div>
         <div v-if="viewing.reviewer_note" class="reviewer-note">
           <b>审核意见：</b>{{ viewing.reviewer_note }}
@@ -131,7 +135,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 
@@ -182,6 +186,43 @@ function reviewClass(s) {
 
 const viewVisible = ref(false)
 const viewing = ref(null)
+
+// Lightweight markdown renderer for the review-panel preview pane.
+// Full markdown would need a lib; here we only render what news articles
+// actually use: images (markdown + [IMAGE:] placeholders), headings,
+// paragraphs, bold. URLs restricted to http/https to block javascript:.
+function escapeHtml(s: string) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+function safeUrl(u: string) {
+  return /^https?:\/\//i.test(u) ? u : ''
+}
+const renderedContent = computed(() => {
+  const raw = viewing.value?.content || ''
+  // Escape first, then un-escape the patterns we rebuild.
+  let html = escapeHtml(raw)
+  // ![alt](url)
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt, url) => {
+    const safe = safeUrl(url.trim())
+    if (!safe) return ''
+    return `<img src="${safe}" alt="${alt}" style="max-width:100%;margin:8px 0;border-radius:6px;border:1px solid #eee" />`
+  })
+  // Leftover [IMAGE:name|prompt] placeholders — show as muted pill so user
+  // sees which images failed to generate.
+  html = html.replace(/\[IMAGE:([^|\]]+)\|([^\]]+)\]/g, (_m, name, prompt) =>
+    `<span style="display:inline-block;padding:2px 8px;background:#fef3c7;color:#92400e;border-radius:4px;font-size:12px">⚠️ 未生成配图 [${name}]: ${prompt.slice(0, 40)}...</span>`
+  )
+  // Headings
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
+  // Bold **x**
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  // Paragraph breaks
+  html = html.replace(/\n\n+/g, '</p><p>')
+  html = '<p>' + html + '</p>'
+  return html
+})
 
 async function openView(a) {
   try {
@@ -282,6 +323,17 @@ defineExpose({ reload: loadPage })
 .badge-warn { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border); }
 .badge-err { background: var(--err-bg); color: var(--err); border: 1px solid var(--err-border); }
 .badge-muted { background: var(--surface-3); color: var(--ink-hint); border: 1px solid var(--border); }
+
+.content-preview {
+  max-height: 420px; overflow-y: auto; padding: 12px 14px;
+  background: var(--surface-2, #fafafa); border: 1px solid var(--border);
+  border-radius: 8px; line-height: 1.7; font-size: 14px;
+}
+.content-preview :deep(h1) { font-size: 20px; margin: 16px 0 8px; }
+.content-preview :deep(h2) { font-size: 17px; margin: 14px 0 6px; border-bottom: 1px solid var(--border-light); padding-bottom: 4px; }
+.content-preview :deep(h3) { font-size: 15px; margin: 10px 0 4px; }
+.content-preview :deep(p) { margin: 6px 0; }
+.content-preview :deep(img) { display: block; }
 
 .action-btns { display: flex; gap: 4px; flex-wrap: wrap; }
 .btn {
