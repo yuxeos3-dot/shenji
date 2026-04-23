@@ -182,8 +182,12 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from "vue"
+import { useRouter } from "vue-router"
+import { ElMessage, ElMessageBox } from "element-plus"
 import api from "../api"
 import { copyToClipboard } from "../utils/clipboard"
+
+const router = useRouter()
 
 const props = defineProps<{
   kind: string
@@ -276,22 +280,46 @@ async function loadList() {
 
 // Generate
 async function doGenerate() {
+  const p = genPrompt.value.trim()
+  if (!p) {
+    ElMessage.warning("请输入提示词")
+    return
+  }
+  if (genMode.value === imgModeKey.value && !genSourceUrl.value.trim()) {
+    ElMessage.warning("图生模式需要参考图 URL")
+    return
+  }
   try {
     const payload: any = {
       kind: props.kind,
       mode: genMode.value,
-      prompt: genPrompt.value.trim(),
+      prompt: p,
     }
     if (genMode.value === imgModeKey.value && genSourceUrl.value.trim()) {
       payload.source_url = genSourceUrl.value.trim()
     }
     await api.submitFRWGeneration(payload)
+    ElMessage.success("任务已提交，生成中...")
     showGenDialog.value = false
     genPrompt.value = ""
     genSourceUrl.value = ""
     loadList()
-  } catch (e) {
+  } catch (e: any) {
     console.error("doGenerate error:", e)
+    const msg = e?.response?.data?.error || e?.message || "提交失败"
+    if (msg.includes("FRW") && (msg.includes("未配置") || msg.includes("API Key") || msg.includes("JWT") || msg.includes("Bearer"))) {
+      ElMessageBox.confirm(
+        msg + "
+
+请到「系统设置」粘贴你的 FRW API Key 后再试。",
+        "FRW 配置问题",
+        { confirmButtonText: "去配置", cancelButtonText: "取消", type: "warning" }
+      ).then(() => {
+        router.push("/settings")
+      }).catch(() => {})
+    } else {
+      ElMessage({ message: msg, type: "error", duration: 6000, showClose: true })
+    }
   }
 }
 
@@ -311,8 +339,10 @@ async function doUpload() {
     uploadFiles.value = []
     uploadDesc.value = ""
     loadList()
-  } catch (e) {
+    ElMessage.success("上传成功")
+  } catch (e: any) {
     console.error("doUpload error:", e)
+    ElMessage.error(e?.response?.data?.error || "上传失败")
   }
 }
 
