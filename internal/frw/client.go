@@ -421,8 +421,12 @@ func pickQueryFields(row map[string]interface{}, taskID string) *QueryResult {
 
 	for _, src := range sources {
 		if r.Status == 0 {
+			// status may be numeric (0/1/2/-1) or string ("queued"/"running"/
+			// "processing"/"completed"/"failed"). Handle both.
 			if v, ok := numericAny(src["status"]); ok {
 				r.Status = int(v)
+			} else if s, ok := src["status"].(string); ok && s != "" {
+				r.Status = stringStatusToInt(s)
 			}
 		}
 		if r.Progress == 0 {
@@ -437,9 +441,10 @@ func pickQueryFields(row map[string]interface{}, taskID string) *QueryResult {
 					break
 				}
 			}
-			// Also check "outputs" array — FRW sometimes returns an array of URLs
+			// Also check array-of-URLs fields. FRW's current response
+			// uses "resultUrls" (plural, camelCase).
 			if r.OutData == "" {
-				for _, k := range []string{"outputs", "output_urls", "results"} {
+				for _, k := range []string{"resultUrls", "result_urls", "outputs", "output_urls", "results"} {
 					if arr, ok := src[k].([]interface{}); ok && len(arr) > 0 {
 						if s, ok := arr[0].(string); ok && s != "" {
 							r.OutData = s
@@ -471,7 +476,33 @@ func pickQueryFields(row map[string]interface{}, taskID string) *QueryResult {
 		}
 	}
 
+	// If we have a result URL, always treat as completed regardless of
+	// what the status field says (safety net: FRW sometimes sets URL
+	// before updating status, or uses unknown status strings).
+	if r.OutData != "" && r.Status != 2 && r.Status != -1 {
+		r.Status = 2
+	}
+
 	return r
+}
+
+// stringStatusToInt maps FRW string status values to our internal
+// numeric codes (0=queued, 1=running, 2=completed, -1=failed, 4=timeout).
+func stringStatusToInt(s string) int {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "completed", "complete", "success", "succeeded", "done", "finish", "finished":
+		return 2
+	case "failed", "fail", "error", "rejected":
+		return -1
+	case "timeout", "timedout", "expired":
+		return 4
+	case "running", "processing", "generating", "in_progress":
+		return 1
+	case "queued", "pending", "waiting":
+		return 0
+	}
+	// Unknown string status — assume queued so poll keeps going
+	return 0
 }
 
 // Download fetches the final output URL (image/video) into memory.
