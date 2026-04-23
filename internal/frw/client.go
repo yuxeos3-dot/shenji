@@ -328,45 +328,16 @@ func (c *Client) Query(taskID string) (*QueryResult, error) {
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 
-	log.Printf("[frw-client] Query task=%s status=%d body=%s", taskID, resp.StatusCode, truncate(string(raw), 400))
+	log.Printf("[frw-client] Query task=%s status=%d body=%s", taskID, resp.StatusCode, truncate(string(raw), 1200))
 
 	if resp.StatusCode == 401 {
 		return nil, fmt.Errorf("FRW 401, token 失效")
 	}
 
-	// FRW's /query has been seen to return data as either a map keyed
-	// by task_id or as a flat list. Parse defensively.
-	var envMap struct {
-		Success bool                    `json:"success"`
-		Data    map[string]*QueryResult `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &envMap); err == nil && envMap.Success && envMap.Data != nil {
-		if e, ok := envMap.Data[taskID]; ok && e != nil {
-			e.TaskID = taskID
-			return e, nil
-		}
-		// empty but success — treat as still pending.
-		log.Printf("[frw-client] WARN task %s: envMap data empty, treating as pending", taskID)
-		return &QueryResult{TaskID: taskID, Status: 0}, nil
-	}
-	var envList struct {
-		Success bool           `json:"success"`
-		Data    []*QueryResult `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &envList); err == nil && envList.Success {
-		for _, e := range envList.Data {
-			if e != nil && e.TaskID == taskID {
-				return e, nil
-			}
-		}
-		log.Printf("[frw-client] WARN task %s: envList has no matching entry, treating as pending", taskID)
-		return &QueryResult{TaskID: taskID, Status: 0}, nil
-	}
-
-	// Third fallback: neither strict-struct shape matched. Parse data
-	// as generic and lift whatever fields exist under any name variant.
-	// Guards against FRW shipping yet another field naming change that
-	// used to black-hole Query into "格式异常".
+	// FRW's /query response shape has drifted over time — use the generic
+	// parser (which walks map / list / nested "generation" object) as the
+	// primary path. Falls back to "pending" only when we truly can't find
+	// any matching row.
 	var envGeneric struct {
 		Success bool            `json:"success"`
 		Data    json.RawMessage `json:"data"`
@@ -375,6 +346,7 @@ func (c *Client) Query(taskID string) (*QueryResult, error) {
 		if r, ok := parseQueryDataGeneric(envGeneric.Data, taskID); ok {
 			return r, nil
 		}
+		log.Printf("[frw-client] WARN task %s: parseQueryDataGeneric returned no match, treating as pending", taskID)
 		return &QueryResult{TaskID: taskID, Status: 0}, nil
 	}
 
@@ -387,53 +359,118 @@ func (c *Client) Query(taskID string) (*QueryResult, error) {
 // (task_id) / id field-name drift doesn't matter, and numeric fields
 // accept both numbers and numeric strings.
 func parseQueryDataGeneric(raw json.RawMessage, taskID string) (*QueryResult, bool) {
-	// Try map shape first: { "task_id": { ... } }
+	// Try list shape first (FRW current default):
+	// data: [{"taskId": "X", "generation": {...}}]
+	var asList []map[string]interface{}
+	if err := json.Unmarshal(raw, &asList); err == nil && len(asList) > 0 {
+		// First try: find a row whose taskId / task_id / taskID matches
+		for _, row := range asList {
+			if rowMatchesTaskID(row, taskID) {
+				return pickQueryFields(row, taskID), true
+			}
+		}
+		// Fallback: if only one row, use it regardless of id matching
+		// (some upstreams echo a different id after normalization)
+		if len(asList) == 1 {
+			return pickQueryFields(asList[0], taskID), true
+		}
+	}
+
+	// Try map shape: { "task_id": { ... } }
 	var asMap map[string]interface{}
 	if err := json.Unmarshal(raw, &asMap); err == nil {
 		if row, ok := asMap[taskID].(map[string]interface{}); ok {
 			return pickQueryFields(row, taskID), true
 		}
 	}
-	// Fall through to list shape: [ { "task_id": ..., ... }, ... ]
-	var asList []interface{}
-	if err := json.Unmarshal(raw, &asList); err == nil {
-		for _, item := range asList {
-			row, ok := item.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			id, _ := row["task_id"].(string)
-			if id == "" {
-				id, _ = row["taskID"].(string)
-			}
-			if id == "" {
-				id, _ = row["id"].(string)
-			}
-			if id == taskID {
-				return pickQueryFields(row, taskID), true
+	return nil, false
+}
+
+
+// rowMatchesTaskID checks if a row's taskId / task_id / taskID / id field
+// matches our task identifier. Handles camelCase / snake_case variants
+// across FRW response format changes.
+func rowMatchesTaskID(row map[string]interface{}, taskID string) bool {
+	for _, k := range []string{"taskId", "task_id", "taskID", "id"} {
+		if v, ok := row[k].(string); ok && v == taskID {
+			return true
+		}
+	}
+	// Also check nested generation object
+	if gen, ok := row["generation"].(map[string]interface{}); ok {
+		for _, k := range []string{"taskId", "task_id", "taskID", "id"} {
+			if v, ok := gen[k].(string); ok && v == taskID {
+				return true
 			}
 		}
 	}
-	return nil, false
+	return false
 }
 
 func pickQueryFields(row map[string]interface{}, taskID string) *QueryResult {
 	r := &QueryResult{TaskID: taskID}
-	if v, ok := numericAny(row["status"]); ok {
-		r.Status = int(v)
+
+	// Merge top-level + nested "generation" object if present.
+	// FRW's current /query response wraps actual fields inside a
+	// "generation" child object: {"taskId": "X", "generation": {...}}.
+	// Older shape had them flat at the top. Walk both.
+	sources := []map[string]interface{}{row}
+	if gen, ok := row["generation"].(map[string]interface{}); ok {
+		sources = append(sources, gen)
 	}
-	if v, ok := numericAny(row["progress"]); ok {
-		r.Progress = v
-	}
-	for _, k := range []string{"out_data", "outData", "output", "url"} {
-		if v, ok := row[k].(string); ok && v != "" {
-			r.OutData = v
-			break
+
+	for _, src := range sources {
+		if r.Status == 0 {
+			if v, ok := numericAny(src["status"]); ok {
+				r.Status = int(v)
+			}
+		}
+		if r.Progress == 0 {
+			if v, ok := numericAny(src["progress"]); ok {
+				r.Progress = v
+			}
+		}
+		if r.OutData == "" {
+			for _, k := range []string{"out_data", "outData", "output", "outputUrl", "output_url", "resultUrl", "result_url", "url"} {
+				if v, ok := src[k].(string); ok && v != "" {
+					r.OutData = v
+					break
+				}
+			}
+			// Also check "outputs" array — FRW sometimes returns an array of URLs
+			if r.OutData == "" {
+				for _, k := range []string{"outputs", "output_urls", "results"} {
+					if arr, ok := src[k].([]interface{}); ok && len(arr) > 0 {
+						if s, ok := arr[0].(string); ok && s != "" {
+							r.OutData = s
+							break
+						}
+						// array of objects with url field
+						if m, ok := arr[0].(map[string]interface{}); ok {
+							for _, uk := range []string{"url", "output_url", "resultUrl"} {
+								if s, ok := m[uk].(string); ok && s != "" {
+									r.OutData = s
+									break
+								}
+							}
+							if r.OutData != "" {
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+		if r.Message == "" {
+			for _, k := range []string{"message", "error_msg", "errorMsg", "msg"} {
+				if v, ok := src[k].(string); ok && v != "" {
+					r.Message = v
+					break
+				}
+			}
 		}
 	}
-	if v, ok := row["message"].(string); ok {
-		r.Message = v
-	}
+
 	return r
 }
 
