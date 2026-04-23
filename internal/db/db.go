@@ -1378,7 +1378,7 @@ func Init() {
 // runs once per deploy (keyed off a settings flag) the duplication is
 // acceptable and keeps db/ free of circular deps.
 func migrateMembersToRoles() {
-	flag := "role_system_v2_migrated"
+	flag := "role_system_v3_migrated"
 	var done string
 	DB.QueryRow("SELECT value FROM settings WHERE key=$1", flag).Scan(&done)
 	if done == "1" {
@@ -1420,38 +1420,46 @@ func migrateMembersToRoles() {
 	}
 	rolePerms := map[string][]string{
 		"user": {
-			"dashboard.view",
-			"reports.daily.view", "reports.daily.write", "reports.daily.export",
-			"reports.weekly.view", "reports.weekly.write",
-			"reports.monthly.view", "reports.monthly.write",
-			"settings.view",
+			"dashboard.view", "data.view", "data.sync_gsc", "data.sync_ga", "data.sync_yandex", "data.sync_bing",
+			"sites.view", "sites.create", "sites.edit", "sites.delete", "sites.pages", "sites.export",
+			"sites.import", "sites.audit", "sites.audit_view", "sites.audit_delete", "sites.audit_download", "geo.view",
+			"geo.keywords", "geo.workflow", "geo.articles", "geo.articles_publish", "geo.articles_delete", "ai_gen.view",
+			"ai_gen.submit", "ai_gen.publish", "ai_gen.delete", "deadlinks.view", "deadlinks.check", "deadlinks.retry",
+			"rewrite.use", "extlinks.view", "extlinks.create", "extlinks.edit", "extlinks.delete", "extlinks.check",
+			"spider.view", "push.view", "push.submit", "push.submit_all", "push.schedule", "coord.view",
+			"coord.create", "coord.edit", "coord.delete", "coord.assign", "coord.comment", "coord.ping_dev",
+			"coord.attachment", "coord.submit", "coord.test_pages", "coord.pre_audit", "coord.verify", "coord.reject",
+			"reports.daily.view", "reports.daily.write", "reports.daily.polish", "reports.daily.export", "reports.weekly.view", "reports.weekly.write",
+			"reports.weekly.polish", "reports.monthly.view", "reports.monthly.write", "reports.monthly.polish", "settings.view", "settings.edit",
+			"settings.test_ai", "settings.test_tg", "audit_log.view",
 		},
 		"group_leader": {
-			"dashboard.view",
-			"reports.daily.view", "reports.daily.write", "reports.daily.export",
-			"reports.weekly.view", "reports.weekly.write",
-			"reports.monthly.view", "reports.monthly.write",
-			"data.view",
-			"coord.view", "coord.review", "coord.comment",
-			"settings.view",
+			"dashboard.view", "data.view", "data.sync_gsc", "data.sync_ga", "data.sync_yandex", "data.sync_bing",
+			"sites.view", "sites.create", "sites.edit", "sites.delete", "sites.pages", "sites.export",
+			"sites.import", "sites.audit", "sites.audit_view", "sites.audit_delete", "sites.audit_download", "geo.view",
+			"geo.keywords", "geo.workflow", "geo.articles", "geo.articles_publish", "geo.articles_delete", "ai_gen.view",
+			"ai_gen.submit", "ai_gen.publish", "ai_gen.delete", "deadlinks.view", "deadlinks.check", "deadlinks.retry",
+			"rewrite.use", "extlinks.view", "extlinks.create", "extlinks.edit", "extlinks.delete", "extlinks.check",
+			"spider.view", "push.view", "push.submit", "push.submit_all", "push.schedule", "coord.view",
+			"coord.create", "coord.edit", "coord.delete", "coord.assign", "coord.comment", "coord.ping_dev",
+			"coord.attachment", "coord.submit", "coord.test_pages", "coord.pre_audit", "coord.verify", "coord.reject",
+			"reports.daily.view", "reports.daily.write", "reports.daily.polish", "reports.daily.export", "reports.weekly.view", "reports.weekly.write",
+			"reports.weekly.polish", "reports.monthly.view", "reports.monthly.write", "reports.monthly.polish", "settings.view", "settings.edit",
+			"settings.test_ai", "settings.test_tg", "audit_log.view", "geo.articles_review", "coord.review", "reports.evaluate",
 		},
 		"dev": {
-			"coord.view", "coord.submit", "coord.comment", "coord.attachment", "coord.test_pages",
-			"settings.view",
+			"coord.view", "coord.submit", "coord.comment", "coord.attachment", "coord.test_pages", "settings.view",
+			"settings.edit",
 		},
 		"operations": {
-			"geo.view", "geo.keywords", "geo.workflow", "geo.articles",
-			"ai_gen.view", "ai_gen.submit", "ai_gen.publish",
-			"rewrite.use",
-			"extlinks.view", "extlinks.create", "extlinks.edit", "extlinks.check",
-			"settings.view",
+			"geo.view", "geo.keywords", "geo.workflow", "geo.articles", "geo.articles_publish", "ai_gen.view",
+			"ai_gen.submit", "ai_gen.publish", "ai_gen.delete", "rewrite.use", "extlinks.view", "extlinks.create",
+			"extlinks.edit", "extlinks.check", "settings.view", "settings.edit",
 		},
 		"product": {
-			"geo.view", "geo.keywords", "geo.workflow", "geo.articles",
-			"ai_gen.view", "ai_gen.submit", "ai_gen.publish",
-			"rewrite.use",
-			"extlinks.view", "extlinks.create", "extlinks.edit", "extlinks.check",
-			"settings.view",
+			"geo.view", "geo.keywords", "geo.workflow", "geo.articles", "geo.articles_publish", "ai_gen.view",
+			"ai_gen.submit", "ai_gen.publish", "ai_gen.delete", "rewrite.use", "extlinks.view", "extlinks.create",
+			"extlinks.edit", "extlinks.check", "settings.view", "settings.edit",
 		},
 	}
 

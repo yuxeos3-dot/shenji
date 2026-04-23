@@ -485,21 +485,42 @@ func ListCoordTasks(c *gin.Context) {
 		role, _ := c.Get("role")
 		if role != "admin" {
 			userID := c.GetInt64("user_id")
-			// Non-admin can see tasks where they are:
-			//   - site owner (created the site)
-			//   - task creator
-			//   - task assignee (currently in progress)
-			//   - pending assignee (during review phase)
-			//   - reviewer (on the roster)
 			n := len(args) + 1
-			where = append(where, fmt.Sprintf(
-				`(t.site_id IN (SELECT id FROM sites WHERE created_by = $%d)
-				  OR t.created_by = $%d
-				  OR t.assignee_id = $%d
-				  OR COALESCE(t.pending_assignee_id,0) = $%d
-				  OR EXISTS (SELECT 1 FROM coord_task_reviewers r WHERE r.task_id = t.id AND r.reviewer_id = $%d))`,
-				n, n+1, n+2, n+3, n+4))
-			args = append(args, userID, userID, userID, userID, userID)
+			if role == "group_leader" {
+				// Group leader sees tasks for sites owned by any teammate in their group
+				// + tasks where they are assignee/creator/reviewer
+				var myGroup int64
+				db.DB.QueryRow("SELECT COALESCE(group_id,0) FROM users WHERE id = $1", userID).Scan(&myGroup)
+				if myGroup > 0 {
+					where = append(where, fmt.Sprintf(
+						`(t.site_id IN (SELECT id FROM sites WHERE created_by IN (SELECT id FROM users WHERE COALESCE(group_id,0) = $%d))
+						  OR t.created_by = $%d
+						  OR t.assignee_id = $%d
+						  OR COALESCE(t.pending_assignee_id,0) = $%d
+						  OR EXISTS (SELECT 1 FROM coord_task_reviewers r WHERE r.task_id = t.id AND r.reviewer_id = $%d))`,
+						n, n+1, n+2, n+3, n+4))
+					args = append(args, myGroup, userID, userID, userID, userID)
+				} else {
+					// Fallback: no group_id set, treat as regular user
+					where = append(where, fmt.Sprintf(
+						`(t.site_id IN (SELECT id FROM sites WHERE created_by = $%d)
+						  OR t.created_by = $%d OR t.assignee_id = $%d
+						  OR COALESCE(t.pending_assignee_id,0) = $%d
+						  OR EXISTS (SELECT 1 FROM coord_task_reviewers r WHERE r.task_id = t.id AND r.reviewer_id = $%d))`,
+						n, n+1, n+2, n+3, n+4))
+					args = append(args, userID, userID, userID, userID, userID)
+				}
+			} else {
+				// Regular user: own sites + own tasks
+				where = append(where, fmt.Sprintf(
+					`(t.site_id IN (SELECT id FROM sites WHERE created_by = $%d)
+					  OR t.created_by = $%d
+					  OR t.assignee_id = $%d
+					  OR COALESCE(t.pending_assignee_id,0) = $%d
+					  OR EXISTS (SELECT 1 FROM coord_task_reviewers r WHERE r.task_id = t.id AND r.reviewer_id = $%d))`,
+					n, n+1, n+2, n+3, n+4))
+				args = append(args, userID, userID, userID, userID, userID)
+			}
 		}
 	}
 	if s := c.Query("status"); s != "" {

@@ -57,12 +57,25 @@ func ListSites(c *gin.Context) {
 		LEFT JOIN dept_groups g ON g.id = u.group_id`
 
 	var args []interface{}
-	if !isAdmin {
+	if isAdmin {
+		if filterUser != "" {
+			query += " WHERE s.created_by = $1"
+			args = append(args, filterUser)
+		}
+	} else if role == "group_leader" {
+		// Group leader sees sites owned by any teammate in their group.
+		var myGroup int64
+		db.DB.QueryRow("SELECT COALESCE(group_id,0) FROM users WHERE id = $1", userID).Scan(&myGroup)
+		if myGroup > 0 {
+			query += " WHERE s.created_by IN (SELECT id FROM users WHERE COALESCE(group_id,0) = $1)"
+			args = append(args, myGroup)
+		} else {
+			query += " WHERE s.created_by = $1"
+			args = append(args, userID)
+		}
+	} else {
 		query += " WHERE s.created_by = $1"
 		args = append(args, userID)
-	} else if filterUser != "" {
-		query += " WHERE s.created_by = $1"
-		args = append(args, filterUser)
 	}
 	query += " ORDER BY s.id DESC"
 

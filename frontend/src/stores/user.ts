@@ -63,8 +63,28 @@ export const useUserStore = defineStore('user', () => {
   // and personal credential tabs (Settings.vue gates admin-only tabs).
   const roleMenuPaths: Record<string, string[]> = {
     admin: ['*'],
-    user: ['/dashboard', '/reports', '/settings'],
-    group_leader: ['/dashboard', '/site-analysis', '/coordination', '/reports', '/settings'],
+    // 'user' is a power-user: sees all non-admin menus.
+    // Admin-only items (用户管理/系统管理的缓存等) stay hidden via adminOnly flags.
+    user: [
+      '/dashboard',
+      '/sites', '/data-management', '/site-analysis', '/spider-management',
+      '/dead-links', '/push-management',
+      '/geo-management', '/image-management', '/video-management',
+      '/content-rewrite', '/external-links',
+      '/coordination', '/reports',
+      '/settings',
+    ],
+    // group_leader = user + review authority (enforced via permissions backend-side).
+    // Also sees sites/data of all users in their group (cross-user).
+    group_leader: [
+      '/dashboard',
+      '/sites', '/data-management', '/site-analysis', '/spider-management',
+      '/dead-links', '/push-management',
+      '/geo-management', '/image-management', '/video-management',
+      '/content-rewrite', '/external-links',
+      '/coordination', '/reports',
+      '/settings',
+    ],
     dev: ['/coordination'],
     operations: ['/geo-management', '/image-management', '/video-management', '/content-rewrite', '/external-links'],
     product: ['/geo-management', '/image-management', '/video-management', '/content-rewrite', '/external-links'],
