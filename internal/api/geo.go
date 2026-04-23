@@ -349,26 +349,74 @@ func GeoImportFromPlatforms(c *gin.Context) {
 		rows.Close()
 	}
 
-	// Fallback to basic gsc_data.keywords_json / bing_data.queries_json / yandex_data.keywords_json
-	// if deep tables have no data yet.
+	// Fallback to basic top-level JSON blobs if deep tables gave nothing.
+	// These columns are populated by the legacy syncGSCBasic/syncBingBasic/syncYandexBasic.
 	if len(keywords) == 0 {
+		// GSC: gsc_data.keywords_json — [{"keys":["kw"], "clicks":X, ...}]
 		var gscKW string
 		db.DB.QueryRow("SELECT COALESCE(keywords_json::text,'') FROM gsc_data WHERE site_id=$1 ORDER BY date DESC LIMIT 1", req.SiteID).Scan(&gscKW)
-		var gscRows []struct {
-			Keys []string `json:"keys"`
+		if gscKW != "" && gscKW != "null" && gscKW != "[]" {
+			var gscRows []struct {
+				Keys []string `json:"keys"`
+			}
+			if json.Unmarshal([]byte(gscKW), &gscRows) == nil {
+				for _, r := range gscRows {
+					if len(r.Keys) > 0 && r.Keys[0] != "" {
+						keywords[r.Keys[0]] = true
+					}
+				}
+			}
 		}
-		if gscKW != "" && gscKW != "null" {
-			_ = json.Unmarshal([]byte(gscKW), &gscRows)
-			for _, r := range gscRows {
-				if len(r.Keys) > 0 && r.Keys[0] != "" {
-					keywords[r.Keys[0]] = true
+		// Bing: bing_data.queries_json — shape varies (d.Results list or array)
+		var bingKW string
+		db.DB.QueryRow("SELECT COALESCE(queries_json::text,'') FROM bing_data WHERE site_id=$1 ORDER BY date DESC LIMIT 1", req.SiteID).Scan(&bingKW)
+		if bingKW != "" && bingKW != "null" {
+			// Try shape {"d":{"Results":[{"Query":"X"}]}}
+			var wrapped struct {
+				D struct {
+					Results []map[string]interface{} `json:"Results"`
+				} `json:"d"`
+			}
+			if json.Unmarshal([]byte(bingKW), &wrapped) == nil {
+				for _, r := range wrapped.D.Results {
+					if q, ok := r["Query"].(string); ok && q != "" {
+						keywords[q] = true
+					}
+				}
+			}
+			// Try shape {"d":[{"Query":"X"}]}
+			if len(keywords) == 0 {
+				var wrapped2 struct {
+					D []map[string]interface{} `json:"d"`
+				}
+				if json.Unmarshal([]byte(bingKW), &wrapped2) == nil {
+					for _, r := range wrapped2.D {
+						if q, ok := r["Query"].(string); ok && q != "" {
+							keywords[q] = true
+						}
+					}
+				}
+			}
+		}
+		// Yandex: yandex_data.keywords_json
+		var yandexKW string
+		db.DB.QueryRow("SELECT COALESCE(keywords_json::text,'') FROM yandex_data WHERE site_id=$1 ORDER BY date DESC LIMIT 1", req.SiteID).Scan(&yandexKW)
+		if yandexKW != "" && yandexKW != "null" && yandexKW != "[]" {
+			var yRows []struct {
+				QueryText string `json:"query_text"`
+			}
+			if json.Unmarshal([]byte(yandexKW), &yRows) == nil {
+				for _, r := range yRows {
+					if r.QueryText != "" {
+						keywords[r.QueryText] = true
+					}
 				}
 			}
 		}
 	}
 
 	if len(keywords) == 0 {
-		c.JSON(400, gin.H{"code": -1, "error": "该站点暂无关键词数据, 自动同步失败 — 请先在「数据管理」手动同步4大平台(深度同步)"})
+		c.JSON(400, gin.H{"code": -1, "error": fmt.Sprintf("该站点暂无关键词数据 (GSC深度=%d行, Bing深度=%d行, Yandex深度=%d行, 自动同步=%v) — 请先在「数据管理」手动同步4大平台, 或确认站点owner已授权4大平台", gscCount, bingCount, yandexCount, autoSynced)})
 		return
 	}
 
