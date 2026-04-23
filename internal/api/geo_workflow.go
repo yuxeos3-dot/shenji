@@ -650,17 +650,17 @@ func runKeywordWorkflow(jobID, userID int64, req StartKeywordWorkflowRequest) {
 		tail := string(runes[len(runes)-4500:])
 		excerpt = head + "\n\n[...中间内容省略...]\n\n" + tail
 	}
-	prompt2 := buildMetaExtractPrompt(req.Keyword, req.TitleText, excerpt)
+	prompt2 := buildMetaExtractPrompt(req.Keyword, req.TitleText, excerpt, req.DetailType)
 
 	metaRaw, _, err := CallAIWithUserConfig(userID, prompt2, 2500)
 	if err != nil {
 		// Step 2 failure is non-fatal: we still have the draft. Use
 		// simple fallbacks for meta so user can manually edit later.
 		log.Printf("[geo-workflow] job %d step2 failed (using fallback): %v", jobID, err)
-		finishJobWithFallback(jobID, draft, req.Keyword, req.TitleText)
+		finishJobWithFallbackEx(jobID, draft, req.Keyword, req.TitleText, req.DetailType)
 		return
 	}
-	mt, md, faqJSON := parseMetaResponse(metaRaw, req.Keyword, req.TitleText)
+	mt, md, faqJSON := parseMetaResponse(metaRaw, req.Keyword, req.TitleText, draft, req.DetailType)
 
 	// Step 3 (news only): generate images and inline them
 	finalContent := draft
@@ -690,9 +690,12 @@ func runKeywordWorkflow(jobID, userID int64, req StartKeywordWorkflowRequest) {
 // "对比" which carry commercial overtones). Keep in sync with the
 // tone in buildMetaExtractPrompt.
 func finishJobWithFallback(jobID int64, draft, keyword, title string) {
+	finishJobWithFallbackEx(jobID, draft, keyword, title, "")
+}
+
+func finishJobWithFallbackEx(jobID int64, draft, keyword, title, detailType string) {
 	year := fmt.Sprintf("%d", time.Now().Year())
-	mt := fmt.Sprintf("【%s】%s：概述与常见问题", year, keyword)
-	md := fmt.Sprintf("【%s】%s 相关信息整理：定义、背景、常见疑问与资料来源。内容为事实陈述，不作商业推荐。", year, keyword)
+	mt, md := buildFallbackMeta(year, keyword, title, draft, detailType)
 	db.DB.Exec(`UPDATE geo_workflow_jobs
 		SET status = 'done', current_step = 2,
 		    step_label = '⚠️ 完成（SEO 元数据使用默认值，建议手动编辑）',
@@ -1400,7 +1403,10 @@ func extractImagePrompts(draft string) []string {
 // structured array (for schema.org FAQ injection on the site).
 // We use string concatenation (not Sprintf) — a user-supplied keyword
 // containing "%" would otherwise corrupt the format directives.
-func buildMetaExtractPrompt(keyword, title, excerpt string) string {
+func buildMetaExtractPrompt(keyword, title, excerpt, detailType string) string {
+	if detailType == "news" {
+		return buildNewsMetaExtractPrompt(keyword, title, excerpt)
+	}
 	year := fmt.Sprintf("%d", time.Now().Year())
 	return `你是 SEO / GEO 元数据提取助手。下面是一篇已写好的信息型文章（主题偏成人娱乐产业分析，目标是被 AI 搜索引擎引用）。
 
@@ -1444,7 +1450,7 @@ func buildMetaExtractPrompt(keyword, title, excerpt string) string {
 // parseMetaResponse extracts meta_title, meta_desc, faq JSON from the
 // step-2 AI response. Forgiving parser — unwraps markdown fences,
 // falls back to keyword-based defaults if JSON is malformed.
-func parseMetaResponse(raw, keyword, title string) (mt, md, faqJSON string) {
+func parseMetaResponse(raw, keyword, title, draft, detailType string) (mt, md, faqJSON string) {
 	s := strings.TrimSpace(raw)
 	// Strip ```json / ``` fences
 	if strings.HasPrefix(s, "```") {
@@ -1471,18 +1477,20 @@ func parseMetaResponse(raw, keyword, title string) (mt, md, faqJSON string) {
 	year := fmt.Sprintf("%d", time.Now().Year())
 	if err := json.Unmarshal([]byte(s), &parsed); err != nil || strings.TrimSpace(parsed.MetaTitle) == "" {
 		log.Printf("[geo-workflow] meta JSON parse failed: %v", err)
-		mt = fmt.Sprintf("【%s】%s：概述与常见问题", year, keyword)
-		md = fmt.Sprintf("【%s】%s 相关信息整理，内容为事实陈述，不作商业推荐。", year, keyword)
+		mt, md = buildFallbackMeta(year, keyword, title, draft, detailType)
 		faqJSON = "[]"
 		return
 	}
 	mt = strings.TrimSpace(parsed.MetaTitle)
 	md = strings.TrimSpace(parsed.MetaDescription)
-	if mt == "" {
-		mt = fmt.Sprintf("【%s】%s：概述与常见问题", year, keyword)
-	}
-	if md == "" {
-		md = fmt.Sprintf("【%s】%s 相关信息整理，内容为事实陈述，不作商业推荐。", year, keyword)
+	if mt == "" || md == "" {
+		fmt1, fmd := buildFallbackMeta(year, keyword, title, draft, detailType)
+		if mt == "" {
+			mt = fmt1
+		}
+		if md == "" {
+			md = fmd
+		}
 	}
 	// Re-marshal FAQ to ensure it's valid JSON; on failure use '[]'.
 	if parsed.FAQ == nil {
@@ -1498,6 +1506,127 @@ func parseMetaResponse(raw, keyword, title string) (mt, md, faqJSON string) {
 	return
 }
 
+
+// buildNewsMetaExtractPrompt — news-tailored meta extractor. The main
+// prompt's "adult-industry analyst" framing triggers AI safety filters
+// on real news topics (kidnapping, crime, etc.) and makes the model
+// refuse → JSON parse fails → fallback ugly template. This variant
+// frames the task as news-agency SEO and expects reportage tone.
+func buildNewsMetaExtractPrompt(keyword, title, excerpt string) string {
+	year := fmt.Sprintf("%d", time.Now().Year())
+	return `你是新闻门户（新华社 / 澎湃 / 财新）的 SEO 编辑。下面是刚发布的一篇新闻稿，请提取搜索引擎展示用的元数据。
+
+【核心关键词】` + keyword + `
+【新闻标题】` + title + `
+
+【新闻正文】
+` + excerpt + `
+
+任务：输出纯 JSON（不要 markdown 代码块，不要解释文字），字段：
+- meta_title：SEO 标题，40-55 字
+    必须精准概括这篇新闻讲了什么（具体事件 + 当事人/地点 + 核心结果）
+    开头用【` + year + `】标签，不要重复完整标题
+    严格禁止"概述""相关信息整理""常见问题"这类套话
+- meta_description：Meta 描述，140-160 字
+    像新闻导语一样，用 1-2 句话说清事件经过 + 最新进展 + 官方/当事人回应
+    必须提及文中真实出现的关键事实（时间/地点/人物/数字）
+    禁止"不作商业推荐""相关信息整理"这类废话
+    禁止行动号召（"马上""立即""推荐"）
+- faq：从正文"## 常见问题"章节里提取 Q&A 数组
+    每个元素 {"q":"问题","a":"答案，至少 60 字"}
+    按正文里的顺序保留，不要改写问题
+    没有 FAQ 章节时返回空数组
+
+━━━━━ 硬性禁用词 ━━━━━
+促销类：马上、立即、限时、爆款、必选、最佳推荐、首选、抓紧、不容错过
+模板套话：概述与常见问题、相关信息整理、不作商业推荐、定义与背景、综合指南
+
+━━━━━ 语气要求 ━━━━━
+- 新闻媒体客观中立语气，像报社 SEO 写 SERP snippet
+- 让用户在搜索结果里一眼知道这篇是什么事件、发生了什么
+- meta_description 读起来像新闻导语，不是摘要目录
+
+直接输出 JSON，不要任何其他字符。
+
+示例（示意语气，请用本文实际内容生成）：
+{"meta_title":"【` + year + `】河南某19岁女孩柬埔寨务工失联 家属网络求助引关注","meta_description":"【` + year + `】4月中旬，河南一名19岁女孩经中介赴柬埔寨务工后失联，家属通过短视频平台发布求助信息，视频48小时内播放量破千万。警方与驻柬使馆已介入核查，初步调查显示事件细节与家属陈述存在出入，专家提醒境外务工需警惕非法中介。","faq":[{"q":"事件发生时间？","a":"据家属短视频披露..."}]}`
+}
+
+// buildFallbackMeta generates reasonable meta values when AI step 2
+// fails or returns empty. For news articles we pull the first H1 as
+// title and the first paragraph (skipping image placeholders) as
+// description, which is dramatically better than the old boilerplate.
+func buildFallbackMeta(year, keyword, title, draft, detailType string) (mt, md string) {
+	if detailType == "news" {
+		mt, md = extractNewsFallbackFromDraft(draft, year)
+		if mt != "" || md != "" {
+			if mt == "" {
+				if title != "" {
+					mt = fmt.Sprintf("【%s】%s", year, title)
+				} else {
+					mt = fmt.Sprintf("【%s】%s 最新进展", year, keyword)
+				}
+			}
+			if md == "" {
+				md = fmt.Sprintf("【%s】本文整理 %s 相关新闻的事件经过、各方回应与后续进展。", year, keyword)
+			}
+			return
+		}
+		// Truly nothing to extract — still use title-centric wording,
+		// not the generic "概述与常见问题" template.
+		if title != "" {
+			mt = fmt.Sprintf("【%s】%s", year, title)
+		} else {
+			mt = fmt.Sprintf("【%s】%s 最新进展", year, keyword)
+		}
+		md = fmt.Sprintf("【%s】本文整理 %s 相关新闻的事件经过、各方回应与后续进展。", year, keyword)
+		return
+	}
+	// Non-news fallback keeps existing tone.
+	mt = fmt.Sprintf("【%s】%s：概述与常见问题", year, keyword)
+	md = fmt.Sprintf("【%s】%s 相关信息整理，内容为事实陈述，不作商业推荐。", year, keyword)
+	return
+}
+
+// extractNewsFallbackFromDraft pulls meta_title / meta_description from
+// the draft body: first H1 line as title, first non-empty non-image
+// paragraph (trimmed to ~155 chars) as description.
+func extractNewsFallbackFromDraft(draft, year string) (mt, md string) {
+	lines := strings.Split(draft, "\n")
+	for _, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if strings.HasPrefix(t, "# ") {
+			h := strings.TrimSpace(strings.TrimPrefix(t, "# "))
+			if h != "" {
+				// Title already tends to include year; dedupe.
+				if strings.Contains(h, year) {
+					mt = h
+				} else {
+					mt = "【" + year + "】" + h
+				}
+				break
+			}
+		}
+	}
+	for _, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if t == "" || strings.HasPrefix(t, "#") || strings.HasPrefix(t, "[IMAGE:") ||
+			strings.HasPrefix(t, "!") || strings.HasPrefix(t, "━") ||
+			strings.HasPrefix(t, "---") || strings.HasPrefix(t, "**Q") {
+			continue
+		}
+		runes := []rune(t)
+		if len(runes) > 155 {
+			t = string(runes[:155]) + "..."
+		}
+		if !strings.Contains(t, year) {
+			t = "【" + year + "】" + t
+		}
+		md = t
+		break
+	}
+	return
+}
 
 // buildNewsPromptPreview returns a human-readable preview of the news
 // prompt structure shown in the wizard's step-3 editor when detail_type
