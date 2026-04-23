@@ -55,5 +55,32 @@ export const useUserStore = defineStore('user', () => {
 
   const isAdmin = (): boolean => user.value?.role === 'admin'
 
-  return { user, authed, login, fetchUser, logout, isAdmin }
+  // ── Role-based menu visibility ──────────────────────────────────────────
+  // Maps each role to the list of menu path prefixes it may see in the
+  // sidebar. Admin sees everything (special-cased). Dev/operations/product
+  // are deliberately NOT given '/settings' here so the sidebar hides it;
+  // the route itself remains reachable via direct URL for password changes
+  // and personal credential tabs (Settings.vue gates admin-only tabs).
+  const roleMenuPaths: Record<string, string[]> = {
+    admin: ['*'],
+    user: ['/dashboard', '/reports', '/settings'],
+    group_leader: ['/dashboard', '/site-analysis', '/coordination', '/reports', '/settings'],
+    dev: ['/coordination'],
+    operations: ['/geo-management', '/image-management', '/video-management', '/content-rewrite', '/external-links'],
+    product: ['/geo-management', '/image-management', '/video-management', '/content-rewrite', '/external-links'],
+  }
+
+  function canSeeMenu(path: string): boolean {
+    const role = user.value?.role || 'user'
+    if (role === 'admin') return true
+    const allowed = roleMenuPaths[role] || []
+    // Prefix match so e.g. '/reports/weekly' is visible when '/reports' is allowed.
+    return allowed.some(p => path === p || path.startsWith(p + '/'))
+  }
+
+  function hasRole(r: string): boolean {
+    return user.value?.role === r
+  }
+
+  return { user, authed, login, fetchUser, logout, isAdmin, canSeeMenu, hasRole }
 })

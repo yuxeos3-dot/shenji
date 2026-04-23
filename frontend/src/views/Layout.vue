@@ -216,20 +216,27 @@ const groups = [
   },
 ]
 
-const flatTop = computed(() => topItems)
+const flatTop = computed(() => topItems.filter(item => userStore.canSeeMenu(item.path)))
 
 // Per-role filtering. A group is visible when:
 //   - the group isn't admin-only, OR the user is admin, AND
 //   - at least one of its items is visible under the user's role.
 // Items can also be marked adminOnly individually. Non-admins see only
 // their own-scoped items (e.g. 个人中心) inside a mostly-admin group.
+// Role-based visibility (user/group_leader/dev/operations/product) is
+// delegated to userStore.canSeeMenu(path).
 const visibleGroups = computed(() => {
   const isAdmin = userStore.isAdmin()
   return groups
     .filter(g => !g.adminOnly || isAdmin)
     .map(g => ({
       ...g,
-      items: g.items.filter(it => !it.adminOnly || isAdmin),
+      items: g.items.filter(it => {
+        // Admin-only items still gated by admin
+        if (it.adminOnly && !isAdmin) return false
+        // Role-based visibility
+        return userStore.canSeeMenu(it.path)
+      }),
     }))
     .filter(g => g.items.length > 0)
 })

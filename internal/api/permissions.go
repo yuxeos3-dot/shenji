@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"seo-system/internal/db"
 
@@ -676,4 +677,95 @@ func GetMyPermissions(c *gin.Context) {
 		perms = []string{}
 	}
 	c.JSON(200, gin.H{"code": 0, "data": perms, "role": role})
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Role system (v2) — 6 predefined roles with default permissions
+// ═══════════════════════════════════════════════════════════════════
+
+// ValidRoles lists all supported role codes. Admins bypass permission
+// checks entirely; other roles get a default permission set that admins
+// can further customize via the user management page.
+var ValidRoles = []string{"admin", "user", "group_leader", "dev", "operations", "product"}
+
+// roleByDeptName maps a department name to a default role. Unmatched
+// department names default to "user". Admins are never auto-assigned
+// from a department — that happens manually via the user management page.
+var roleByDeptName = map[string]string{
+	"技术部": "dev",
+	"运营部": "operations",
+	"产品部": "product",
+	"支撑部": "user",
+}
+
+// defaultPermsByRole is the baseline permission set each role receives
+// on creation. Admin can grant/revoke individual permissions afterwards
+// via the user management page without affecting this baseline.
+var defaultPermsByRole = map[string][]string{
+	"user": {
+		"dashboard.view",
+		"reports.daily.view", "reports.daily.write", "reports.daily.export",
+		"reports.weekly.view", "reports.weekly.write",
+		"reports.monthly.view", "reports.monthly.write",
+		"settings.view",
+	},
+	"group_leader": {
+		"dashboard.view",
+		"reports.daily.view", "reports.daily.write", "reports.daily.export",
+		"reports.weekly.view", "reports.weekly.write",
+		"reports.monthly.view", "reports.monthly.write",
+		"data.view",
+		"coord.view", "coord.review", "coord.comment",
+		"settings.view",
+	},
+	"dev": {
+		"coord.view", "coord.submit", "coord.comment", "coord.attachment", "coord.test_pages",
+		"settings.view",
+	},
+	"operations": {
+		"geo.view", "geo.keywords", "geo.workflow", "geo.articles",
+		"ai_gen.view", "ai_gen.submit", "ai_gen.publish",
+		"rewrite.use",
+		"extlinks.view", "extlinks.create", "extlinks.edit", "extlinks.check",
+		"settings.view",
+	},
+	"product": {
+		"geo.view", "geo.keywords", "geo.workflow", "geo.articles",
+		"ai_gen.view", "ai_gen.submit", "ai_gen.publish",
+		"rewrite.use",
+		"extlinks.view", "extlinks.create", "extlinks.edit", "extlinks.check",
+		"settings.view",
+	},
+}
+
+// RoleFromDepartmentName returns the auto-assigned role for a given
+// department name. Returns "user" for unmatched department names.
+func RoleFromDepartmentName(deptName string) string {
+	deptName = strings.TrimSpace(deptName)
+	if r, ok := roleByDeptName[deptName]; ok {
+		return r
+	}
+	return "user"
+}
+
+// DefaultPermissionsForRole returns the baseline permission list for a
+// given role. Returns empty slice for unknown roles or admin (admin
+// bypasses permission checks at the middleware level).
+func DefaultPermissionsForRole(role string) []string {
+	if perms, ok := defaultPermsByRole[role]; ok {
+		out := make([]string, len(perms))
+		copy(out, perms)
+		return out
+	}
+	return []string{}
+}
+
+// IsValidRole returns true if the given role is one of the supported roles.
+func IsValidRole(role string) bool {
+	for _, r := range ValidRoles {
+		if r == role {
+			return true
+		}
+	}
+	return false
 }

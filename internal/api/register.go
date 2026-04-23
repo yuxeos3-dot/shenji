@@ -123,6 +123,15 @@ func Register(c *gin.Context) {
 		return
 	}
 
+	// Resolve department name → default role. User's role is auto-assigned
+	// from their department so new registrants land with the right menu
+	// visibility from day one; admin can adjust later if needed.
+	var deptName string
+	db.DB.QueryRow("SELECT name FROM departments WHERE id=$1", req.DepartmentID).Scan(&deptName)
+	assignedRole := RoleFromDepartmentName(deptName)
+	defaultPerms := DefaultPermissionsForRole(assignedRole)
+	permsJSON, _ := json.Marshal(defaultPerms)
+
 	// Check for collisions on email (always) and employee_id (only if provided).
 	// When employee_id is empty we skip the employee_id check — otherwise
 	// multiple users without employee_id would collide on the empty string.
@@ -176,12 +185,12 @@ func Register(c *gin.Context) {
 	err = tx.QueryRow(
 		`INSERT INTO users
 		 (name, email, password, role, telegram_id, department_id, group_id,
-		  tg_name, nickname, employee_id, invite_code, register_status)
-		 VALUES ($1, $2, $3, 'member', $4, $5, $6, $7, $8, $9, $10, 'pending')
+		  tg_name, nickname, employee_id, invite_code, register_status, permissions)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12)
 		 RETURNING id`,
-		req.Nickname, req.Email, string(hash), req.TGID,
+		req.Nickname, req.Email, string(hash), assignedRole, req.TGID,
 		req.DepartmentID, req.GroupID,
-		req.TGName, req.Nickname, req.EmployeeID, matched,
+		req.TGName, req.Nickname, req.EmployeeID, matched, string(permsJSON),
 	).Scan(&newID)
 	if err != nil {
 		log.Printf("[register] insert user failed: %v", err)

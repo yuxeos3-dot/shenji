@@ -175,7 +175,11 @@ func CreateUser(c *gin.Context) {
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 
 	if req.Role == "" {
-		req.Role = "member"
+		req.Role = "user"
+	}
+	if !isValidUserRole(req.Role) {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "角色无效"})
+		return
 	}
 
 	// Validate the dept/group pair. group_id > 0 requires that the group
@@ -213,13 +217,21 @@ func CreateUser(c *gin.Context) {
 	}
 
 	// Initial permissions - skip for admins (they have all perms implicitly).
-	if req.Role != "admin" && len(req.Permissions) > 0 {
-		cleaned, permErr := cleanPermissionList(req.Permissions)
-		if permErr == nil {
-			js, _ := json.Marshal(cleaned)
+	// If the caller passed an explicit list, validate & save that. Otherwise
+	// seed the role's default permission set so new users land with the
+	// right menu visibility without a second round-trip.
+	if req.Role != "admin" {
+		if len(req.Permissions) > 0 {
+			cleaned, permErr := cleanPermissionList(req.Permissions)
+			if permErr == nil {
+				js, _ := json.Marshal(cleaned)
+				tx.Exec("UPDATE users SET permissions=$1 WHERE id=$2", string(js), id)
+			} else {
+				log.Printf("[create_user] id=%d perms rejected: %v", id, permErr)
+			}
+		} else if defaults := DefaultPermissionsForRole(req.Role); len(defaults) > 0 {
+			js, _ := json.Marshal(defaults)
 			tx.Exec("UPDATE users SET permissions=$1 WHERE id=$2", string(js), id)
-		} else {
-			log.Printf("[create_user] id=%d perms rejected: %v", id, permErr)
 		}
 	}
 
@@ -238,12 +250,16 @@ func CreateUser(c *gin.Context) {
 // CreateUser substitutes its default before calling anything that would
 // care. Any other value is rejected so we never store something like
 // "admin2" that bypasses the admin-count guard rails.
+//
+// Under the v2 role system, "member" is no longer created for new users
+// (self-registration now picks a role based on department), but it's
+// still accepted here for backwards-compatibility with any tooling that
+// hasn't migrated yet.
 func isValidUserRole(role string) bool {
-	switch role {
-	case "", "admin", "member":
+	if role == "" || role == "member" {
 		return true
 	}
-	return false
+	return IsValidRole(role)
 }
 
 // validateDeptGroupPair ensures the provided (department, group) pair is
@@ -284,9 +300,11 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 
-	// #42: Validate that role is either "admin" or "member" (or empty = no change).
+	// Validate the requested role. Empty = no change. See isValidUserRole
+	// for the accepted set (admin, user, group_leader, dev, operations,
+	// product, plus legacy "member").
 	if !isValidUserRole(req.Role) {
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "角色只能是 admin 或 member"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "角色无效"})
 		return
 	}
 

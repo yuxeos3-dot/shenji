@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"log"
 	"os"
 	"strings"
@@ -1360,8 +1361,135 @@ func Init() {
 
 	seedDefaultAdmin()
 	seedDefaultSettings()
+	migrateMembersToRoles()
 
 	log.Println("Database initialized successfully")
+}
+
+// migrateMembersToRoles: one-time migration v1 → v2 role system.
+// Converts all role='member' users to their department-based role
+// and seeds default permissions. Idempotent via settings flag.
+//
+// Inlined role/perm tables here to avoid an import cycle with the api
+// package — the canonical copies live in internal/api/permissions.go.
+// Keep them in sync if the role system ever evolves; since this path
+// runs once per deploy (keyed off a settings flag) the duplication is
+// acceptable and keeps db/ free of circular deps.
+func migrateMembersToRoles() {
+	flag := "role_system_v2_migrated"
+	var done string
+	DB.QueryRow("SELECT value FROM settings WHERE key=$1", flag).Scan(&done)
+	if done == "1" {
+		return
+	}
+
+	// For each non-admin approved user, pick role from their department name.
+	rows, err := DB.Query(`
+		SELECT u.id, u.role, COALESCE(u.permissions,''), COALESCE(d.name,'')
+		FROM users u
+		LEFT JOIN departments d ON d.id = u.department_id
+		WHERE u.role != 'admin'`)
+	if err != nil {
+		log.Printf("[migration] role_system_v2 query failed: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	type userRow struct {
+		id       int64
+		role     string
+		perms    string
+		deptName string
+	}
+	var users []userRow
+	for rows.Next() {
+		var u userRow
+		if err := rows.Scan(&u.id, &u.role, &u.perms, &u.deptName); err == nil {
+			users = append(users, u)
+		}
+	}
+	rows.Close()
+
+	deptToRole := map[string]string{
+		"技术部": "dev",
+		"运营部": "operations",
+		"产品部": "product",
+		"支撑部": "user",
+	}
+	rolePerms := map[string][]string{
+		"user": {
+			"dashboard.view",
+			"reports.daily.view", "reports.daily.write", "reports.daily.export",
+			"reports.weekly.view", "reports.weekly.write",
+			"reports.monthly.view", "reports.monthly.write",
+			"settings.view",
+		},
+		"group_leader": {
+			"dashboard.view",
+			"reports.daily.view", "reports.daily.write", "reports.daily.export",
+			"reports.weekly.view", "reports.weekly.write",
+			"reports.monthly.view", "reports.monthly.write",
+			"data.view",
+			"coord.view", "coord.review", "coord.comment",
+			"settings.view",
+		},
+		"dev": {
+			"coord.view", "coord.submit", "coord.comment", "coord.attachment", "coord.test_pages",
+			"settings.view",
+		},
+		"operations": {
+			"geo.view", "geo.keywords", "geo.workflow", "geo.articles",
+			"ai_gen.view", "ai_gen.submit", "ai_gen.publish",
+			"rewrite.use",
+			"extlinks.view", "extlinks.create", "extlinks.edit", "extlinks.check",
+			"settings.view",
+		},
+		"product": {
+			"geo.view", "geo.keywords", "geo.workflow", "geo.articles",
+			"ai_gen.view", "ai_gen.submit", "ai_gen.publish",
+			"rewrite.use",
+			"extlinks.view", "extlinks.create", "extlinks.edit", "extlinks.check",
+			"settings.view",
+		},
+	}
+
+	updated := 0
+	for _, u := range users {
+		newRole := u.role
+		// Map legacy 'member' (or empty) to department-based role.
+		if u.role == "member" || u.role == "" {
+			if r, ok := deptToRole[strings.TrimSpace(u.deptName)]; ok {
+				newRole = r
+			} else {
+				newRole = "user"
+			}
+		}
+		// If user has no permissions, seed defaults for their (new) role.
+		needsPerms := u.perms == "" || u.perms == "[]" || u.perms == "null"
+		var permsToSet string
+		if needsPerms {
+			if p, ok := rolePerms[newRole]; ok {
+				pj, _ := json.Marshal(p)
+				permsToSet = string(pj)
+			}
+		}
+
+		if newRole != u.role || permsToSet != "" {
+			if permsToSet != "" {
+				if _, err := DB.Exec("UPDATE users SET role=$1, permissions=$2 WHERE id=$3", newRole, permsToSet, u.id); err == nil {
+					updated++
+				}
+			} else {
+				if _, err := DB.Exec("UPDATE users SET role=$1 WHERE id=$2", newRole, u.id); err == nil {
+					updated++
+				}
+			}
+		}
+	}
+
+	DB.Exec(`INSERT INTO settings (key, value) VALUES ($1, '1')
+		ON CONFLICT (key) DO UPDATE SET value='1'`, flag)
+	log.Printf("[migration] role_system_v2: migrated %d users", updated)
 }
 
 func seedDefaultAdmin() {
