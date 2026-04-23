@@ -138,87 +138,16 @@
       </div>
     </div>
 
-    <!-- Admin detail drawer — shows platform detail for the clicked card -->
-    <el-drawer v-model="detailOpen" :title="detailCard?.display_name || '详情'" size="60%" direction="rtl">
-      <div v-if="detailLoading" class="drawer-loading">加载中...</div>
-      <div v-else-if="!detailData" class="drawer-empty">暂无数据</div>
-      <div v-else class="drawer-content">
-        <!-- Site info -->
-        <div class="drawer-meta">
-          <div><strong>归属：</strong>{{ detailCard?.owner_name || '—' }}</div>
-          <div><strong>站点：</strong>{{ detailCard?.site_url || detailCard?.host_id || detailCard?.property_id }}</div>
-          <div><strong>周期：</strong>{{ dateRange[0] }} ~ {{ dateRange[1] }}</div>
-        </div>
-
-        <!-- KPI summary -->
-        <div class="drawer-kpis" v-if="platform !== 'ga4'">
-          <div class="kpi-box"><div class="kpi-label">总点击</div><div class="kpi-value sv-blue">{{ fmt(detailCard?.clicks) }}</div></div>
-          <div class="kpi-box"><div class="kpi-label">总展示</div><div class="kpi-value sv-green">{{ fmt(detailCard?.impressions) }}</div></div>
-          <div class="kpi-box"><div class="kpi-label">CTR</div><div class="kpi-value sv-orange">{{ (detailCard?.ctr * 100 || 0).toFixed(2) }}%</div></div>
-          <div class="kpi-box"><div class="kpi-label">平均排名</div><div class="kpi-value sv-purple">{{ (detailCard?.position || 0).toFixed(1) }}</div></div>
-        </div>
-        <div class="drawer-kpis" v-else>
-          <div class="kpi-box"><div class="kpi-label">会话数</div><div class="kpi-value sv-blue">{{ fmt(detailCard?.sessions) }}</div></div>
-          <div class="kpi-box"><div class="kpi-label">用户数</div><div class="kpi-value sv-green">{{ fmt(detailCard?.users) }}</div></div>
-          <div class="kpi-box"><div class="kpi-label">PV</div><div class="kpi-value sv-orange">{{ fmt(detailCard?.pageviews) }}</div></div>
-          <div class="kpi-box"><div class="kpi-label">新用户</div><div class="kpi-value sv-purple">{{ fmt(detailCard?.newUsers) }}</div></div>
-        </div>
-
-        <!-- Top keywords (for search platforms) -->
-        <div v-if="platform !== 'ga4' && detailData?.keywords?.rows?.length" class="drawer-section">
-          <h3>TOP 关键词</h3>
-          <table class="drawer-table">
-            <thead><tr><th>关键词</th><th>点击</th><th>展示</th><th>CTR</th><th>排名</th></tr></thead>
-            <tbody>
-              <tr v-for="(k, i) in detailData.keywords.rows.slice(0, 30)" :key="i">
-                <td>{{ k.keys?.[0] || k.query || '—' }}</td>
-                <td>{{ fmt(k.clicks) }}</td>
-                <td>{{ fmt(k.impressions) }}</td>
-                <td>{{ ((k.ctr || 0) * 100).toFixed(2) }}%</td>
-                <td>{{ (k.position || 0).toFixed(1) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Top pages -->
-        <div v-if="detailData?.pages?.rows?.length" class="drawer-section">
-          <h3>TOP 页面</h3>
-          <table class="drawer-table">
-            <thead><tr><th>页面</th><th>点击</th><th>展示</th></tr></thead>
-            <tbody>
-              <tr v-for="(p, i) in detailData.pages.rows.slice(0, 20)" :key="i">
-                <td class="url-cell">{{ p.keys?.[0] || p.page || p.url || '—' }}</td>
-                <td>{{ fmt(p.clicks) }}</td>
-                <td>{{ fmt(p.impressions) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Landing pages for GA4 -->
-        <div v-if="platform === 'ga4' && detailData?.landing_pages?.length" class="drawer-section">
-          <h3>TOP 落地页</h3>
-          <table class="drawer-table">
-            <thead><tr><th>页面</th><th>会话</th><th>用户</th></tr></thead>
-            <tbody>
-              <tr v-for="(p, i) in detailData.landing_pages.slice(0, 20)" :key="i">
-                <td class="url-cell">{{ p.page || p.landing_page || '—' }}</td>
-                <td>{{ fmt(p.sessions) }}</td>
-                <td>{{ fmt(p.users) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+
+const router = useRouter()
 
 // ── Platforms ────────────────────────────────────────────────────────────
 const platforms = [
@@ -278,10 +207,6 @@ const dayCount = computed(() => {
 const loading = ref(false)
 const error = ref('')
 const cards = ref([])
-const detailOpen = ref(false)
-const detailLoading = ref(false)
-const detailCard = ref<any>(null)
-const detailData = ref<any>(null)
 const summary = ref(null)
 const userErrors = ref([])
 const users = ref([])
@@ -329,51 +254,30 @@ async function load(bypassCache) {
   }
 }
 
-// Provider-side sites aren't rows in our `sites` table so they don't have
-// a route to drill into. For now clicking a card just shows a toast with
-// the provider's identifier — the admin uses this page for at-a-glance
-// health check, not deep per-site analysis. Deep drilldown stays in the
-// owner's own 数据管理 page where they can click from.
-async function openCard(c) {
-  if (c.error || !c.has_data) {
+function openCard(c: any) {
+  if (c.error) {
     ElMessage.info(c.error || '该站点暂无数据')
     return
   }
-  detailCard.value = c
-  detailData.value = null
-  detailOpen.value = true
-  detailLoading.value = true
-  try {
-    const params: any = {
-      start_date: dateRange.value[0],
-      end_date: dateRange.value[1],
-      user_id: c.owner_id,
-    }
-    let res: any
-    switch (platform.value) {
-      case 'gsc':
-        params.site_url = c.site_url
-        res = await api.dashGSCSiteDetail(params)
-        break
-      case 'ga4':
-        params.property_id = c.property_id
-        res = await api.dashGAPropertyDetail(params)
-        break
-      case 'bing':
-        params.site_url = c.site_url
-        res = await api.dashBingSiteDetail(params)
-        break
-      case 'yandex':
-        params.host_id = c.host_id
-        res = await api.dashYandexHostDetail(params)
-        break
-    }
-    detailData.value = res?.data || null
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.error || '加载详情失败')
-  } finally {
-    detailLoading.value = false
+  if (!c.has_data) {
+    ElMessage.info('该站点暂无数据')
+    return
   }
+  const siteKey = c.site_url || c.host_id || c.property_id || ''
+  if (!siteKey) return
+  // Navigate to DataManagement with "view as user" query params.
+  // DataManagement will detect these, use user_id in API calls, and
+  // auto-open the specified site's detail view.
+  router.push({
+    path: '/data-management',
+    query: {
+      viewAsUser: String(c.owner_id || ''),
+      viewAsName: c.owner_name || '',
+      platform: platform.value,
+      openSite: siteKey,
+      siteName: c.display_name || siteKey,
+    },
+  })
 }
 
 function cardSubtitle(c) {
@@ -501,23 +405,4 @@ onMounted(async () => {
 .err-user { font-weight: 700; color: #92400E; min-width: 120px; }
 .err-msg { color: #78350F; font-family: 'JetBrains Mono', monospace; }
 
-.drawer-loading, .drawer-empty { padding: 40px; text-align: center; color: var(--ink-hint); }
-.drawer-content { padding: 0 20px 40px; }
-.drawer-meta { background: var(--surface-2, #f9fafb); padding: 14px 18px; border-radius: 10px; margin-bottom: 16px; }
-.drawer-meta div { font-size: 13px; color: var(--ink-mid); margin-bottom: 6px; }
-.drawer-meta strong { color: var(--ink); margin-right: 6px; }
-.drawer-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
-.kpi-box { padding: 12px; background: var(--surface); border: 1.5px solid var(--border-light); border-radius: 8px; text-align: center; }
-.kpi-box .kpi-label { font-size: 11px; color: var(--ink-hint); margin-bottom: 4px; font-weight: 600; }
-.kpi-box .kpi-value { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
-.sv-blue { color: #2563eb; }
-.sv-green { color: #16a34a; }
-.sv-orange { color: #ea580c; }
-.sv-purple { color: #9333ea; }
-.drawer-section { margin-bottom: 24px; }
-.drawer-section h3 { font-size: 14px; font-weight: 700; margin-bottom: 10px; color: var(--ink); }
-.drawer-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.drawer-table th { text-align: left; padding: 8px 10px; background: var(--surface-2, #f9fafb); font-weight: 700; color: var(--ink-mid); border-bottom: 1.5px solid var(--border-light); }
-.drawer-table td { padding: 8px 10px; border-bottom: 1px solid var(--border-light); color: var(--ink); }
-.drawer-table .url-cell { max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-mid); }
 </style>

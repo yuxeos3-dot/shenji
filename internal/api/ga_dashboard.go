@@ -138,7 +138,15 @@ func GAOverview(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	token, err := getGAAccessToken(c.GetInt64("user_id"))
+	effectiveUserID := c.GetInt64("user_id")
+	if v := c.Query("user_id"); v != "" {
+		if role, _ := c.Get("role"); role == "admin" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				effectiveUserID = n
+			}
+		}
+	}
+	token, err := getGAAccessToken(effectiveUserID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
@@ -147,7 +155,7 @@ func GAOverview(c *gin.Context) {
 	// Reuse the Admin API once to get the property list.
 	rawProps, err := gaAdminGET(token, "https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200")
 	if err != nil {
-		log.Printf("[ga4] Admin API error uid=%d: %v", c.GetInt64("user_id"), err)
+		log.Printf("[ga4] Admin API error uid=%d: %v", effectiveUserID, err)
 		msg := translateGAError(err.Error())
 		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "error": msg})
 		return

@@ -470,10 +470,14 @@ const api = {
     instance.get('/v1/resolve-site-id', { params: { domain }, _silent: true } as any),
 
   // GSC Deep
-  syncGSCDeep: (siteId: Id, date?: string) =>
-    instance.post(`/v1/sites/${siteId}/gsc/deep-sync`, date ? { date } : {}, { timeout: 300000 } as any),
-  syncGSCURLInspection: (siteId: Id) =>
-    instance.post(`/v1/sites/${siteId}/gsc/url-inspection`, {}, { timeout: 300000 } as any),
+  syncGSCDeep: (siteId: Id, userId?: number | null, date?: string) => {
+    const q = userId ? `?user_id=${userId}` : ''
+    return instance.post(`/v1/sites/${siteId}/gsc/deep-sync${q}`, date ? { date } : {}, { timeout: 300000 } as any)
+  },
+  syncGSCURLInspection: (siteId: Id, userId?: number | null) => {
+    const q = userId ? `?user_id=${userId}` : ''
+    return instance.post(`/v1/sites/${siteId}/gsc/url-inspection${q}`, {}, { timeout: 300000 } as any)
+  },
   getGSCOverviewDeep: (siteId: Id, days?: number) =>
     instance.get(`/v1/sites/${siteId}/deep/gsc/overview`, { params: { days } }),
   getGSCRankBuckets: (siteId: Id, days?: number) =>
@@ -501,8 +505,10 @@ const api = {
     instance.get(`/v1/sites/${siteId}/deep/gsc/keywords/export`, { params: { days }, responseType: 'blob' } as any),
 
   // GA4 Deep
-  syncGA4Deep: (siteId: Id) =>
-    instance.post(`/v1/sites/${siteId}/ga/deep-sync`, {}, { timeout: 300000 } as any),
+  syncGA4Deep: (siteId: Id, userId?: number | null) => {
+    const q = userId ? `?user_id=${userId}` : ''
+    return instance.post(`/v1/sites/${siteId}/ga/deep-sync${q}`, {}, { timeout: 300000 } as any)
+  },
   getGA4Extended: (siteId: Id, days?: number) =>
     instance.get(`/v1/sites/${siteId}/deep/ga/extended`, { params: { days } }),
   getGA4LandingPages: (siteId: Id, params?: Record<string, any>) =>
@@ -527,8 +533,10 @@ const api = {
     instance.get(`/v1/sites/${siteId}/deep/ga/conversions`, { params: { days } }),
 
   // Bing Deep
-  syncBingDeep: (siteId: Id) =>
-    instance.post(`/v1/sites/${siteId}/bing/deep-sync`, {}, { timeout: 300000 } as any),
+  syncBingDeep: (siteId: Id, userId?: number | null) => {
+    const q = userId ? `?user_id=${userId}` : ''
+    return instance.post(`/v1/sites/${siteId}/bing/deep-sync${q}`, {}, { timeout: 300000 } as any)
+  },
   getBingKeywords: (siteId: Id, params?: Record<string, any>) =>
     instance.get(`/v1/sites/${siteId}/deep/bing/keywords`, { params }),
   getBingDeepPages: (siteId: Id, params?: Record<string, any>) =>
@@ -539,8 +547,10 @@ const api = {
     instance.get(`/v1/sites/${siteId}/deep/bing/sitemaps`),
 
   // Yandex Deep
-  syncYandexDeep: (siteId: Id) =>
-    instance.post(`/v1/sites/${siteId}/yandex/deep-sync`, {}, { timeout: 300000 } as any),
+  syncYandexDeep: (siteId: Id, userId?: number | null) => {
+    const q = userId ? `?user_id=${userId}` : ''
+    return instance.post(`/v1/sites/${siteId}/yandex/deep-sync${q}`, {}, { timeout: 300000 } as any)
+  },
   getYandexKeywords: (siteId: Id, params?: Record<string, any>) =>
     instance.get(`/v1/sites/${siteId}/deep/yandex/keywords`, { params }),
   getYandexIndexEvents: (siteId: Id, days?: number) =>

@@ -139,7 +139,15 @@ func GSCOverview(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	token, err := getGoogleAccessToken(c.GetInt64("user_id"))
+	effectiveUserID := c.GetInt64("user_id")
+	if v := c.Query("user_id"); v != "" {
+		if role, _ := c.Get("role"); role == "admin" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				effectiveUserID = n
+			}
+		}
+	}
+	token, err := getGoogleAccessToken(effectiveUserID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
@@ -152,7 +160,7 @@ func GSCOverview(c *gin.Context) {
 		// Google error body when a user reports a 502. err.Error()
 		// carries the HTTP status + the Google JSON payload (scope
 		// mismatch / invalid_grant / quota exhausted etc.).
-		log.Printf("[gsc-overview] /sites list failed user=%d: %v", c.GetInt64("user_id"), err)
+		log.Printf("[gsc-overview] /sites list failed user=%d: %v", effectiveUserID, err)
 		c.JSON(http.StatusBadGateway, gin.H{"code": -1, "error": "获取 GSC 站点列表失败：" + err.Error()})
 		return
 	}

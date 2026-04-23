@@ -1,5 +1,9 @@
 <template>
   <div class="data-mgmt">
+    <div v-if="viewAsUser" class="view-as-banner">
+      <span>👁️ 正在查看：<strong>{{ viewAsName }}</strong> 的数据</span>
+      <button class="banner-close-btn" @click="exitViewAs">× 返回全局数据</button>
+    </div>
     <!-- ─── Top toolbar ─────────────────────────────────────────── -->
     <div class="panel toolbar">
       <div class="tb-row">
@@ -355,8 +359,23 @@
 <script setup lang="ts">
 defineOptions({ name: 'DataManagement' })
 import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+
+const route = useRoute()
+const router = useRouter()
+const viewAsUser = ref<number>(0)
+const viewAsName = ref<string>('')
+function withViewAs(params: Record<string, any>): Record<string, any> {
+  if (viewAsUser.value > 0) {
+    return { ...params, user_id: viewAsUser.value }
+  }
+  return params
+}
+function exitViewAs() {
+  router.push('/global-data')
+}
 
 // ── Config ──
 const platforms = [{ code: 'gsc', label: 'GSC' }, { code: 'ga4', label: 'GA4' }, { code: 'bing', label: 'Bing' }, { code: 'yandex', label: 'Yandex' }]
@@ -404,10 +423,10 @@ async function loadOverview() {
   try {
     let res: any
     switch (platform.value) {
-      case 'gsc': res = await api.dashGSCOverview(params); break
-      case 'ga4': res = await api.dashGAOverview(params); break
-      case 'bing': res = await api.dashBingOverview(params); break
-      case 'yandex': res = await api.dashYandexOverview(params); break
+      case 'gsc': res = await api.dashGSCOverview(withViewAs(params)); break
+      case 'ga4': res = await api.dashGAOverview(withViewAs(params)); break
+      case 'bing': res = await api.dashBingOverview(withViewAs(params)); break
+      case 'yandex': res = await api.dashYandexOverview(withViewAs(params)); break
     }
     overview.value.cards = res.data?.cards || []
   } catch (e: any) { error.value = e?.message || '加载失败'; overview.value.cards = [] }
@@ -511,10 +530,10 @@ async function loadFromPlatformAPI() {
   try {
     let res: any
     switch (platform.value) {
-      case 'gsc':    res = await api.dashGSCSiteDetail({ ...baseParams, site_url: sk }); break
-      case 'ga4':    res = await api.dashGAPropertyDetail({ ...baseParams, property_id: sk }); break
-      case 'bing':   res = await api.dashBingSiteDetail({ ...baseParams, site_url: sk }); break
-      case 'yandex': res = await api.dashYandexHostDetail({ ...baseParams, host_id: sk }); break
+      case 'gsc':    res = await api.dashGSCSiteDetail(withViewAs({ ...baseParams, site_url: sk })); break
+      case 'ga4':    res = await api.dashGAPropertyDetail(withViewAs({ ...baseParams, property_id: sk })); break
+      case 'bing':   res = await api.dashBingSiteDetail(withViewAs({ ...baseParams, site_url: sk })); break
+      case 'yandex': res = await api.dashYandexHostDetail(withViewAs({ ...baseParams, host_id: sk })); break
     }
     digestPlatformData(res.data)
   } catch (e: any) { error.value = e?.response?.data?.error || e?.message || '加载失败' }
@@ -606,10 +625,11 @@ async function syncAndReload() {
   const sid = detail.value.siteId
   if (sid) {
     try {
-      if (platform.value === 'gsc') await api.syncGSCDeep(sid)
-      else if (platform.value === 'ga4') await api.syncGA4Deep(sid)
-      else if (platform.value === 'bing') await api.syncBingDeep(sid)
-      else if (platform.value === 'yandex') await api.syncYandexDeep(sid)
+      const uid = viewAsUser.value || null
+      if (platform.value === 'gsc') await api.syncGSCDeep(sid, uid)
+      else if (platform.value === 'ga4') await api.syncGA4Deep(sid, uid)
+      else if (platform.value === 'bing') await api.syncBingDeep(sid, uid)
+      else if (platform.value === 'yandex') await api.syncYandexDeep(sid, uid)
     } catch {} // Deep sync failure is OK — platform data is already loaded
     // Reload deep data
     resolveAndLoadDeep()
@@ -676,9 +696,28 @@ async function loadSubTab() {
 }
 async function openKwDetail(q: string) { const sid = detail.value.siteId; if (!sid) return; try { const r: any = await api.getGSCKeywordDetail(sid, q); kwDlg.value = r.data; kwDlgShow.value = true } catch {} }
 async function exportCSV() { const sid = detail.value.siteId; if (!sid) return; try { const r: any = await api.getGSCKeywordsExport(sid, days.value); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([r.data])); a.download = 'keywords.csv'; a.click() } catch { ElMessage.error('导出失败') } }
-async function runInspection() { const sid = detail.value.siteId; if (!sid) return; inspecting.value = true; try { await api.syncGSCURLInspection(sid); ElMessage.success('检查完成'); loadSubTab() } catch {} finally { inspecting.value = false } }
+async function runInspection() { const sid = detail.value.siteId; if (!sid) return; inspecting.value = true; try { await api.syncGSCURLInspection(sid, viewAsUser.value || null); ElMessage.success('检查完成'); loadSubTab() } catch {} finally { inspecting.value = false } }
 
-onMounted(() => loadOverview())
+onMounted(async () => {
+  const q = route.query
+  if (q.viewAsUser) {
+    viewAsUser.value = Number(q.viewAsUser) || 0
+    viewAsName.value = String(q.viewAsName || '')
+    if (q.platform) platform.value = String(q.platform)
+    await loadOverview()
+    if (q.openSite) {
+      const siteKey = String(q.openSite)
+      const siteName = String(q.siteName || siteKey)
+      const fakeCard: any = { display_name: siteName }
+      if (platform.value === 'gsc' || platform.value === 'bing') fakeCard.site_url = siteKey
+      else if (platform.value === 'ga4') fakeCard.property_id = siteKey
+      else if (platform.value === 'yandex') fakeCard.host_id = siteKey
+      await openDetail(fakeCard)
+    }
+  } else {
+    loadOverview()
+  }
+})
 </script>
 
 <style scoped>
@@ -777,4 +816,29 @@ h4 { margin:0 0 8px; font-size:14px; color:#555; }
 .state-placeholder,.state-empty,.state-error { padding:50px 20px; text-align:center; color:var(--ink-hint); font-size:14px; }
 .state-error { color:#B91C1C; }
 .loading-text { text-align:center; padding:30px; color:#aaa; }
+.view-as-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(90deg, #fef3c7, #fed7aa);
+  border: 1.5px solid #f59e0b;
+  border-radius: 10px;
+  padding: 10px 16px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #92400e;
+}
+.view-as-banner strong { color: #78350f; }
+.banner-close-btn {
+  background: #fff;
+  border: 1.5px solid #f59e0b;
+  color: #92400e;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+.banner-close-btn:hover { background: #fef3c7; }
 </style>

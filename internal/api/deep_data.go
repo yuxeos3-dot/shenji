@@ -35,12 +35,20 @@ func SyncGSCDeep(c *gin.Context) {
 		return
 	}
 
-	token, err := getGoogleAccessToken(c.GetInt64("user_id"))
+	effectiveUserID := c.GetInt64("user_id")
+	if v := c.Query("user_id"); v != "" {
+		if role, _ := c.Get("role"); role == "admin" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				effectiveUserID = n
+			}
+		}
+	}
+	token, err := getGoogleAccessToken(effectiveUserID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	gscSiteURL, err := resolveGSCProperty(token, domain, c.GetInt64("user_id"))
+	gscSiteURL, err := resolveGSCProperty(token, domain, effectiveUserID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": err.Error()})
 		return
@@ -904,12 +912,20 @@ func SyncGA4Deep(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点不存在"})
 		return
 	}
-	token, err := getGAAccessToken(c.GetInt64("user_id"))
+	effectiveUserID := c.GetInt64("user_id")
+	if v := c.Query("user_id"); v != "" {
+		if role, _ := c.Get("role"); role == "admin" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				effectiveUserID = n
+			}
+		}
+	}
+	token, err := getGAAccessToken(effectiveUserID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	gaPropertyID, err := resolveGAProperty(token, domain, c.GetInt64("user_id"))
+	gaPropertyID, err := resolveGAProperty(token, domain, effectiveUserID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": err.Error()})
 		return
@@ -1388,12 +1404,20 @@ func SyncBingDeep(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点不存在"})
 		return
 	}
-	apiKey, _ := LoadUserBingKey(c.GetInt64("user_id"))
+	effectiveUserID := c.GetInt64("user_id")
+	if v := c.Query("user_id"); v != "" {
+		if role, _ := c.Get("role"); role == "admin" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				effectiveUserID = n
+			}
+		}
+	}
+	apiKey, _ := LoadUserBingKey(effectiveUserID)
 	if apiKey == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "请先在「个人中心 → Bing」填写 API Key"})
 		return
 	}
-	bingSiteURL, err := resolveBingSiteURL(apiKey, domain, c.GetInt64("user_id"))
+	bingSiteURL, err := resolveBingSiteURL(apiKey, domain, effectiveUserID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": err.Error()})
 		return
@@ -1708,17 +1732,25 @@ func SyncYandexDeep(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点不存在"})
 		return
 	}
-	token, err := getYandexAccessToken(c.GetInt64("user_id"))
+	effectiveUserID := c.GetInt64("user_id")
+	if v := c.Query("user_id"); v != "" {
+		if role, _ := c.Get("role"); role == "admin" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				effectiveUserID = n
+			}
+		}
+	}
+	token, err := getYandexAccessToken(effectiveUserID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	yandexUserID, err := getYandexUserIDCached(c.GetInt64("user_id"), token)
+	yandexUserID, err := getYandexUserIDCached(effectiveUserID, token)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	yandexHostID, err := resolveYandexHost(token, yandexUserID, domain, c.GetInt64("user_id"))
+	yandexHostID, err := resolveYandexHost(token, yandexUserID, domain, effectiveUserID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": err.Error()})
 		return
@@ -2082,12 +2114,20 @@ func SyncGSCURLInspection(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "站点不存在"})
 		return
 	}
-	token, err := getGoogleAccessToken(c.GetInt64("user_id"))
+	effectiveUserID := c.GetInt64("user_id")
+	if v := c.Query("user_id"); v != "" {
+		if role, _ := c.Get("role"); role == "admin" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				effectiveUserID = n
+			}
+		}
+	}
+	token, err := getGoogleAccessToken(effectiveUserID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": err.Error()})
 		return
 	}
-	gscSiteURL, err := resolveGSCProperty(token, domain, c.GetInt64("user_id"))
+	gscSiteURL, err := resolveGSCProperty(token, domain, effectiveUserID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": err.Error()})
 		return
