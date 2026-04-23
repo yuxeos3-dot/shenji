@@ -407,6 +407,7 @@ const api = {
   getFRWGeneration: (id: Id) => instance.get(`/v1/frw/generations/${id}`),
   publishFRWGeneration: (id: Id) => instance.post(`/v1/frw/generations/${id}/publish`, {}),
   downloadFRWGeneration: (id: Id) => `/api/v1/frw/generations/${id}/download`,
+  previewFRWGeneration: (id: Id) => `/api/v1/frw/generations/${id}/download?inline=1`,
   deleteFRWGeneration: (id: Id) => instance.delete(`/v1/frw/generations/${id}`),
 
   // Upload local file as media asset

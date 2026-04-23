@@ -64,13 +64,13 @@
               <template v-if="item.result_url || item.output_url">
                 <img
                   v-if="item.kind === 'image'"
-                  :src="item.result_url || item.output_url"
+                  :src="api.previewFRWGeneration(item.id)"
                   class="thumb"
                   @click="previewItem = item"
                 />
                 <video
                   v-else
-                  :src="item.result_url || item.output_url"
+                  :src="api.previewFRWGeneration(item.id)"
                   class="thumb"
                   muted
                   preload="metadata"
@@ -190,8 +190,8 @@
     <el-dialog v-model="showDetailDialog" :title="'任务 #' + (detailItem?.id || '')" width="620px">
       <div v-if="detailItem" class="detail-view">
         <div class="detail-preview" v-if="detailItem.result_url || detailItem.output_url">
-          <img v-if="detailItem.kind === 'image'" :src="detailItem.result_url || detailItem.output_url" class="detail-media" />
-          <video v-else :src="detailItem.result_url || detailItem.output_url" class="detail-media" controls></video>
+          <img v-if="detailItem.kind === 'image'" :src="api.previewFRWGeneration(detailItem.id)" class="detail-media" />
+          <video v-else :src="api.previewFRWGeneration(detailItem.id)" class="detail-media" controls preload="metadata"></video>
         </div>
         <div class="detail-preview detail-placeholder" v-else-if="isProcessing(detailItem.status)">
           <div class="detail-loading">
@@ -229,8 +229,8 @@
     <Teleport to="body">
       <div class="lightbox-overlay" v-if="previewItem" @click="previewItem = null">
         <div class="lightbox-content" @click.stop>
-          <img v-if="kind === 'image'" :src="previewItem.result_url || previewItem.output_url" />
-          <video v-else :src="previewItem.result_url || previewItem.output_url" controls autoplay></video>
+          <img v-if="kind === 'image'" :src="api.previewFRWGeneration(previewItem.id)" />
+          <video v-else :src="api.previewFRWGeneration(previewItem.id)" controls autoplay preload="metadata"></video>
           <button class="lightbox-close" @click="previewItem = null">&times;</button>
         </div>
       </div>

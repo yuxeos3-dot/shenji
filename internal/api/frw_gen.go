@@ -637,33 +637,22 @@ func DownloadFRWGeneration(c *gin.Context) {
 		return
 	}
 
-	// Build filename: {prompt-slug}-{id}.{ext}
-	ext := "jpg"
-	if kind == "video" {
-		ext = "mp4"
-	}
-	// Derive extension from URL if present
-	if resultURL != "" {
-		if i := strings.LastIndex(resultURL, "."); i > 0 && i > strings.LastIndex(resultURL, "/") {
-			guess := resultURL[i+1:]
-			if q := strings.Index(guess, "?"); q > 0 {
-				guess = guess[:q]
-			}
-			if len(guess) > 0 && len(guess) <= 5 {
-				ext = guess
-			}
-		}
-	}
-	slug := sanitizeFilenameSlug(prompt)
-	if slug == "" {
-		slug = kind
-	}
-	filename := fmt.Sprintf("%s-%d.%s", slug, id, ext)
+	// inline=1 → Content-Disposition: inline (for HTML <video>/<img> preview)
+	// otherwise → attachment (triggers download)
+	inline := c.Query("inline") == "1"
+
+	// Range header forwarding for video seeking (video tags send range requests)
+	rangeHdr := c.GetHeader("Range")
 
 	// Prefer local file if already downloaded via publish
 	if localPath != "" {
 		if abs, err := filepath.Abs(localPath); err == nil {
-			c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
+			filename := buildDownloadFilename(prompt, kind, id, "")
+			if inline {
+				c.Header("Content-Disposition", `inline; filename="`+filename+`"`)
+			} else {
+				c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
+			}
 			c.File(abs)
 			return
 		}
@@ -679,7 +668,11 @@ func DownloadFRWGeneration(c *gin.Context) {
 		c.JSON(500, gin.H{"code": -1, "error": "构造请求失败"})
 		return
 	}
-	client := &http.Client{Timeout: 120 * time.Second}
+	// Forward Range header so <video> seeking works through the proxy
+	if rangeHdr != "" {
+		req.Header.Set("Range", rangeHdr)
+	}
+	client := &http.Client{Timeout: 180 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("[frw-download] fetch %s failed: %v", resultURL, err)
@@ -687,21 +680,88 @@ func DownloadFRWGeneration(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != 200 && resp.StatusCode != 206 {
 		c.JSON(502, gin.H{"code": -1, "error": fmt.Sprintf("源 URL 返回 %d", resp.StatusCode)})
 		return
 	}
 
-	// Stream response
-	c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		c.Header("Content-Type", ct)
+	// Determine extension from upstream Content-Type (FRW URL has no ext)
+	upstreamCT := resp.Header.Get("Content-Type")
+	ext := extFromUpstreamCT(upstreamCT, kind)
+	filename := buildDownloadFilename(prompt, kind, id, ext)
+
+	// Forward relevant headers
+	if upstreamCT != "" {
+		c.Header("Content-Type", upstreamCT)
 	}
 	if cl := resp.Header.Get("Content-Length"); cl != "" {
 		c.Header("Content-Length", cl)
 	}
-	c.Status(200)
+	if cr := resp.Header.Get("Content-Range"); cr != "" {
+		c.Header("Content-Range", cr)
+	}
+	if ar := resp.Header.Get("Accept-Ranges"); ar != "" {
+		c.Header("Accept-Ranges", ar)
+	} else {
+		c.Header("Accept-Ranges", "bytes")
+	}
+
+	if inline {
+		c.Header("Content-Disposition", `inline; filename="`+filename+`"`)
+		c.Header("Cache-Control", "private, max-age=3600")
+	} else {
+		c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
+	}
+
+	c.Status(resp.StatusCode)
 	_, _ = io.Copy(c.Writer, resp.Body)
+}
+
+// buildDownloadFilename composes the download filename. ext falls back
+// to kind-specific default if empty.
+func buildDownloadFilename(prompt, kind string, id int64, ext string) string {
+	if ext == "" {
+		if kind == "video" {
+			ext = "mp4"
+		} else {
+			ext = "jpg"
+		}
+	}
+	slug := sanitizeFilenameSlug(prompt)
+	if slug == "" {
+		slug = kind
+	}
+	return fmt.Sprintf("%s-%d.%s", slug, id, ext)
+}
+
+// extFromUpstreamCT maps common MIME types to bare file extensions (no dot).
+// Falls back to kind-based default when CT is missing/unknown.
+// Note: distinct from the existing extFromContentType which returns ".ext".
+func extFromUpstreamCT(ct, kind string) string {
+	ct = strings.ToLower(strings.TrimSpace(ct))
+	if idx := strings.Index(ct, ";"); idx >= 0 {
+		ct = strings.TrimSpace(ct[:idx])
+	}
+	switch ct {
+	case "video/mp4":
+		return "mp4"
+	case "video/webm":
+		return "webm"
+	case "video/quicktime":
+		return "mov"
+	case "image/jpeg", "image/jpg":
+		return "jpg"
+	case "image/png":
+		return "png"
+	case "image/webp":
+		return "webp"
+	case "image/gif":
+		return "gif"
+	}
+	if kind == "video" {
+		return "mp4"
+	}
+	return "jpg"
 }
 
 // sanitizeFilenameSlug strips filesystem-unsafe chars and trims length for
