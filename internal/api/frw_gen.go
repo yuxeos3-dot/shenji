@@ -12,6 +12,7 @@ package api
 //   DELETE /api/v1/frw/generations/:id          — delete task
 
 import (
+	"io"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -599,4 +600,128 @@ func truncStr(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// DownloadFRWGeneration streams the generated asset to the client with
+// Content-Disposition: attachment so the browser saves it to disk.
+// - If local_path is present (user previously "published"), serve that file.
+// - Otherwise, proxy-fetch from result_url (FRW-hosted) and stream to client.
+// GET /v1/frw/generations/:id/download
+func DownloadFRWGeneration(c *gin.Context) {
+	userID := c.GetInt64("user_id")
+	role, _ := c.Get("role")
+	isAdmin := role == "admin"
+	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	if id <= 0 {
+		c.JSON(400, gin.H{"code": -1, "error": "无效 id"})
+		return
+	}
+
+	var ownerID int64
+	var kind, resultURL, localPath, prompt string
+	var status int
+	err := db.DB.QueryRow(
+		`SELECT user_id, kind, COALESCE(status,0), COALESCE(result_url,''), COALESCE(local_path,''), COALESCE(prompt,'')
+		 FROM ai_generations WHERE id=$1`, id,
+	).Scan(&ownerID, &kind, &status, &resultURL, &localPath, &prompt)
+	if err != nil {
+		c.JSON(404, gin.H{"code": -1, "error": "任务不存在"})
+		return
+	}
+	if !isAdmin && ownerID != userID {
+		c.JSON(403, gin.H{"code": -1, "error": "无权下载该任务"})
+		return
+	}
+	if status != 2 {
+		c.JSON(400, gin.H{"code": -1, "error": "任务未完成, 无法下载"})
+		return
+	}
+
+	// Build filename: {prompt-slug}-{id}.{ext}
+	ext := "jpg"
+	if kind == "video" {
+		ext = "mp4"
+	}
+	// Derive extension from URL if present
+	if resultURL != "" {
+		if i := strings.LastIndex(resultURL, "."); i > 0 && i > strings.LastIndex(resultURL, "/") {
+			guess := resultURL[i+1:]
+			if q := strings.Index(guess, "?"); q > 0 {
+				guess = guess[:q]
+			}
+			if len(guess) > 0 && len(guess) <= 5 {
+				ext = guess
+			}
+		}
+	}
+	slug := sanitizeFilenameSlug(prompt)
+	if slug == "" {
+		slug = kind
+	}
+	filename := fmt.Sprintf("%s-%d.%s", slug, id, ext)
+
+	// Prefer local file if already downloaded via publish
+	if localPath != "" {
+		if abs, err := filepath.Abs(localPath); err == nil {
+			c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
+			c.File(abs)
+			return
+		}
+	}
+
+	// Fall back to proxy-fetch from FRW URL
+	if resultURL == "" {
+		c.JSON(404, gin.H{"code": -1, "error": "结果 URL 为空"})
+		return
+	}
+	req, err := http.NewRequest("GET", resultURL, nil)
+	if err != nil {
+		c.JSON(500, gin.H{"code": -1, "error": "构造请求失败"})
+		return
+	}
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[frw-download] fetch %s failed: %v", resultURL, err)
+		c.JSON(502, gin.H{"code": -1, "error": "下载源 URL 失败: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		c.JSON(502, gin.H{"code": -1, "error": fmt.Sprintf("源 URL 返回 %d", resp.StatusCode)})
+		return
+	}
+
+	// Stream response
+	c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		c.Header("Content-Type", ct)
+	}
+	if cl := resp.Header.Get("Content-Length"); cl != "" {
+		c.Header("Content-Length", cl)
+	}
+	c.Status(200)
+	_, _ = io.Copy(c.Writer, resp.Body)
+}
+
+// sanitizeFilenameSlug strips filesystem-unsafe chars and trims length for
+// use as a download filename base.
+func sanitizeFilenameSlug(s string) string {
+	var b strings.Builder
+	count := 0
+	for _, r := range s {
+		if count >= 32 {
+			break
+		}
+		if r == '/' || r == '\\' || r == ':' || r == '*' || r == '?' ||
+			r == '"' || r == '<' || r == '>' || r == '|' {
+			continue
+		}
+		if r < 32 {
+			continue
+		}
+		b.WriteRune(r)
+		count++
+	}
+	return strings.TrimSpace(b.String())
 }

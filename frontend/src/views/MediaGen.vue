@@ -97,6 +97,7 @@
               <button class="btn-sm" @click="openDetail(item)">详情</button>
               <button class="btn-sm" @click="publishOne(item)" :disabled="!isCompleted(item.status)">发布</button>
               <button class="btn-sm" @click="copyURL(item)" :disabled="!(item.result_url || item.output_url)">复制</button>
+              <button class="btn-sm btn-ok" @click="downloadItem(item)" :disabled="!isCompleted(item.status)">下载</button>
               <button class="btn-sm btn-warn" v-if="isFailed(item.status)" @click="retryItem(item)">重试</button>
               <button class="btn-sm btn-danger" @click="deleteOne(item)">删除</button>
             </td>
@@ -219,6 +220,7 @@
       <template #footer>
         <button class="btn btn-secondary" @click="showDetailDialog = false">关闭</button>
         <button v-if="detailItem && isFailed(detailItem.status)" class="btn btn-primary" @click="retryItem(detailItem); showDetailDialog = false">重试</button>
+        <button v-if="detailItem && isCompleted(detailItem.status)" class="btn btn-ok" @click="downloadItem(detailItem)">下载</button>
         <button v-if="detailItem && isCompleted(detailItem.status)" class="btn btn-primary" @click="publishOne(detailItem)">发布</button>
       </template>
     </el-dialog>
@@ -283,7 +285,21 @@ const kindShort = computed(() => props.kind === "image" ? "图" : "视频")
 const genMode = ref("")
 
 watch(() => props.kind, () => {
+  // Reset state when switching between image and video management.
+  // These are separate logical pages even though they share the component.
   genMode.value = textModeKey.value
+  list.value = []
+  page.value = 1
+  checked.value = new Set()
+  filterMode.value = ""
+  filterStatus.value = ""
+  searchText.value = ""
+  genPrompt.value = ""
+  genSourceUrl.value = ""
+  detailItem.value = null
+  showDetailDialog.value = false
+  previewItem.value = null
+  loadList()
 }, { immediate: true })
 
 // Polling
@@ -392,6 +408,23 @@ async function retryItem(item: any) {
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.error || "重试失败")
   }
+}
+
+// Download asset to local computer
+function downloadItem(item: any) {
+  if (!item || !isCompleted(item.status)) {
+    ElMessage.warning("任务未完成, 无法下载")
+    return
+  }
+  const url = api.downloadFRWGeneration(item.id)
+  // Open in new tab — browser auto-saves thanks to Content-Disposition: attachment
+  const a = document.createElement("a")
+  a.href = url
+  a.target = "_blank"
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  ElMessage.success("开始下载")
 }
 
 // Detail dialog state
@@ -733,4 +766,8 @@ function formatSize(bytes: number): string {
 .detail-val a { color: #1890ff; }
 .detail-err { color: #f5222d; }
 .detail-prog { margin-left: 8px; font-weight: 600; color: #1890ff; }
+
+.btn-ok { background: #52c41a; color: #fff; border-color: #52c41a; }
+.btn-ok:hover { background: #389e0d; }
+.btn-ok:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

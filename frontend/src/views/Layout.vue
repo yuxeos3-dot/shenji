@@ -55,7 +55,7 @@
       <div class="page-body">
         <router-view v-slot="{ Component }">
           <keep-alive include="DataManagement">
-            <component :is="Component" />
+            <component :is="Component" :key="$route.fullPath" />
           </keep-alive>
         </router-view>
       </div>

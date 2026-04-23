@@ -19,6 +19,7 @@ func registerFRWRoutes(v1 *gin.RouterGroup) {
 		frw.POST("/generations", RequirePermission("ai_gen.submit"), middleware.UserRateLimit(10), SubmitFRWGeneration)
 		frw.GET("/generations/:id", RequirePermission("ai_gen.view"), GetFRWGeneration)
 		frw.POST("/generations/:id/publish", RequirePermission("ai_gen.publish"), PublishFRWGeneration)
+		frw.GET("/generations/:id/download", RequirePermission("ai_gen.view"), DownloadFRWGeneration)
 		frw.DELETE("/generations/:id", RequirePermission("ai_gen.delete"), DeleteFRWGeneration)
 		frw.POST("/upload", RequirePermission("ai_gen.submit"), UploadFRWMedia)
 	}
