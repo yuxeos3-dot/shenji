@@ -511,20 +511,59 @@ async function openDetail(c: any) {
   detail.value.siteId = 0
   view.value = 'detail'; subTab.value = 'overview'; activeBucket.value = ''
   d.value = {}
+  loading.value = true
+  error.value = ''
 
-  // Step 1: Load data from platform API immediately (always works, no site_id needed)
-  await loadFromPlatformAPI()
+  // CACHE-FIRST strategy: resolve site_id + read DB cache first (instant),
+  // then refresh from platform API in background. This ensures user sees
+  // data immediately even before realtime sync completes.
+  try {
+    // Step 1: Resolve site_id to enable DB cache reads
+    try {
+      const r: any = await api.resolveSiteId(siteKey)
+      detail.value.siteId = r.data?.site_id || 0
+    } catch {
+      try {
+        const r2: any = await api.resolveSiteId(detail.value.siteName)
+        detail.value.siteId = r2.data?.site_id || 0
+      } catch { /* no site_id → skip cache */ }
+    }
 
-  // Step 2: Try to resolve site_id in background for deep data (non-blocking, fire-and-forget)
-  resolveAndLoadDeep().catch(() => {})
+    // Step 2: Load cached unified data from DB (fast, always show something)
+    let hasCachedData = false
+    if (detail.value.siteId) {
+      try {
+        const res: any = await api.getUnifiedData(detail.value.siteId, platform.value, days.value)
+        const deep = res?.data || {}
+        if (deep.has_deep_data || deep.total_clicks > 0 || deep.sessions > 0 || (deep.trend && deep.trend.length > 0)) {
+          d.value = deep
+          hasCachedData = true
+          loading.value = false // show cached immediately
+        }
+      } catch {}
+    }
+
+    // Step 3: If no cache, fall back to realtime platform API for first-time view
+    if (!hasCachedData) {
+      await loadFromPlatformAPI()
+    } else {
+      // Step 4 (cache path): background refresh from platform API — merges
+      // any fresher data without blocking UI. User sees cache first.
+      loadFromPlatformAPI({ background: true }).catch(() => {})
+    }
+  } finally {
+    loading.value = false
+  }
 }
 
 // Load data directly from platform dashboard API (GSC/GA4/Bing/Yandex)
 // This is the primary data source — always works regardless of site_id
 function daysAgo(n: number) { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10) }
 
-async function loadFromPlatformAPI() {
-  loading.value = true; error.value = ''
+async function loadFromPlatformAPI(opts: { background?: boolean } = {}) {
+  if (!opts.background) {
+    loading.value = true; error.value = ''
+  }
   const sk = detail.value.siteKey
   const baseParams = { start_date: daysAgo(days.value + 1), end_date: daysAgo(2) }
   try {
@@ -535,9 +574,51 @@ async function loadFromPlatformAPI() {
       case 'bing':   res = await api.dashBingSiteDetail(withViewAs({ ...baseParams, site_url: sk })); break
       case 'yandex': res = await api.dashYandexHostDetail(withViewAs({ ...baseParams, host_id: sk })); break
     }
-    digestPlatformData(res.data)
-  } catch (e: any) { error.value = e?.response?.data?.error || e?.message || '加载失败' }
-  finally { loading.value = false }
+    if (res?.data) {
+      if (opts.background) {
+        // Merge only — preserve cache fields that platform API doesn't return
+        const old = d.value
+        digestPlatformData(res.data)
+        // If fresh has no trend/keywords but cache did, restore them
+        if (!d.value.trend?.length && old.trend?.length) d.value.trend = old.trend
+        if (!d.value.top_keywords?.length && old.top_keywords?.length) d.value.top_keywords = old.top_keywords
+        if (!d.value.top_pages?.length && old.top_pages?.length) d.value.top_pages = old.top_pages
+      } else {
+        digestPlatformData(res.data)
+      }
+    }
+    // Also trigger a silent deep-sync to populate DB tables for next cache-first load.
+    // Fire-and-forget — don't block UI. Only on non-background call (explicit refresh).
+    if (!opts.background && detail.value.siteId) {
+      triggerDeepSync().catch(() => {})
+    }
+  } catch (e: any) {
+    if (!opts.background) {
+      error.value = e?.response?.data?.error || e?.message || '加载失败'
+    }
+    // Background errors are silent — user already sees cache
+  } finally {
+    if (!opts.background) {
+      loading.value = false
+    }
+  }
+}
+
+// Fire the deep-sync endpoint for the current platform in background.
+// Populates DB tables (gsc_query_page_daily etc.) so next cache-first
+// load has fresh data. No UI feedback — user sees cache immediately.
+async function triggerDeepSync() {
+  const sid = detail.value.siteId
+  if (!sid) return
+  const uid = viewAsUser.value || null
+  try {
+    switch (platform.value) {
+      case 'gsc':    await api.syncGSCDeep(sid, uid); break
+      case 'ga4':    await api.syncGA4Deep(sid, uid); break
+      case 'bing':   await api.syncBingDeep(sid, uid); break
+      case 'yandex': await api.syncYandexDeep(sid, uid); break
+    }
+  } catch { /* silent */ }
 }
 
 // Parse platform API response into unified d.value
@@ -589,30 +670,21 @@ function digestPlatformData(raw: any) {
   }
 }
 
-// Try to resolve site_id and load deep data in background (optional, enhances with buckets/appearance/etc)
+// Deprecated: cache-first logic now runs inside openDetail.
+// Keeping thin stub so any older callers don't break.
 async function resolveAndLoadDeep() {
   try {
-    const r: any = await api.resolveSiteId(detail.value.siteKey)
-    detail.value.siteId = r.data?.site_id || 0
-  } catch {
-    try { const r2: any = await api.resolveSiteId(detail.value.siteName); detail.value.siteId = r2.data?.site_id || 0 } catch { detail.value.siteId = 0 }
-  }
-  const sid = detail.value.siteId
-  if (!sid) return // No site_id — platform API data is sufficient
-
-  // Load deep data to enhance the view (buckets, appearances, etc.)
-  try {
-    const res: any = await api.getUnifiedData(sid, platform.value, days.value)
-    const deep = res.data || {}
-    // Merge deep data on top of platform data (deep data has more detail)
-    if (deep.has_deep_data) {
-      d.value = { ...d.value, ...deep }
-    } else {
-      // Only add supplementary fields from unified (buckets/appearances) without overwriting
+    if (!detail.value.siteId) {
+      const r: any = await api.resolveSiteId(detail.value.siteKey)
+      detail.value.siteId = r.data?.site_id || 0
+    }
+    if (detail.value.siteId) {
+      const res: any = await api.getUnifiedData(detail.value.siteId, platform.value, days.value)
+      const deep = res.data || {}
       if (deep.buckets?.length) d.value.buckets = deep.buckets
       if (deep.appearances?.length) d.value.appearances = deep.appearances
     }
-  } catch {} // Silently fail — platform API data is already showing
+  } catch {}
 }
 
 // Refresh: reload platform data + trigger deep sync if site_id available
