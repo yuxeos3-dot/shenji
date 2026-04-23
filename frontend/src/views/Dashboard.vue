@@ -41,7 +41,7 @@
         <table class="table">
           <thead><tr><th>站点</th><th>归属</th><th>状态</th><th>时间</th></tr></thead>
           <tbody>
-            <tr v-for="s in sites.filter(s => s.last_audit_status)" :key="s.id">
+            <tr v-for="s in auditPaged" :key="s.id">
               <td style="font-weight:700">{{ s.name }}</td>
               <td class="owner-cell">
                 <span class="owner-name">{{ s.owner_name || '—' }}</span>
@@ -52,14 +52,23 @@
               <td><span class="badge" :class="s.last_audit_status==='done'?'badge-ok':s.last_audit_status==='running'?'badge-warn':'badge-err'">{{ s.last_audit_status }}</span></td>
               <td style="color:var(--ink-soft);font-size:12px">{{ s.last_audit_time || '-' }}</td>
             </tr>
-            <tr v-if="!sites.filter(s => s.last_audit_status).length"><td colspan="4" style="text-align:center;color:var(--ink-hint);padding:30px">暂无审计记录</td></tr>
+            <tr v-if="!auditTotal"><td colspan="4" style="text-align:center;color:var(--ink-hint);padding:30px">暂无审计记录</td></tr>
           </tbody>
         </table>
+        <el-pagination
+          v-if="auditTotal > auditSize"
+          class="pager-bar"
+          :total="auditTotal"
+          :page-size="auditSize"
+          v-model:current-page="auditPage"
+          layout="prev, pager, next, total"
+          small
+        />
       </div>
 
       <div class="panel" style="flex:1">
         <div class="panel-header"><h2>站点健康</h2></div>
-        <div v-for="site in sites" :key="site.id" class="health-item" @click="$router.push(`/sites/${site.id}`)">
+        <div v-for="site in healthPaged" :key="site.id" class="health-item" @click="$router.push(`/sites/${site.id}`)">
           <div class="health-left">
             <span class="health-name">{{ site.name }}</span>
             <span v-if="site.owner_name || site.department_name" class="health-owner">
@@ -75,6 +84,15 @@
         <div v-if="!sites.length" style="text-align:center;color:var(--ink-hint);padding:30px;font-size:13px">
           暂无站点，<router-link to="/sites">去添加</router-link>
         </div>
+        <el-pagination
+          v-if="healthTotal > healthSize"
+          class="pager-bar"
+          :total="healthTotal"
+          :page-size="healthSize"
+          v-model:current-page="healthPage"
+          layout="prev, pager, next"
+          small
+        />
       </div>
     </div>
   </div>
@@ -83,6 +101,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useSites, useOnlineUsers } from '../composables/useApi'
+import { usePagination } from '../composables/usePagination'
 import { useUserStore } from '../stores/user'
 
 const userStore = useUserStore()
@@ -97,6 +116,10 @@ const { data: onlineData } = useOnlineUsers(isAdmin)
 
 const sites = computed(() => sitesData.value || [])
 const online = computed(() => onlineData.value || { online_count: 0, user_count: 0, users: [] })
+
+const auditedSites = computed(() => sites.value.filter(s => s.last_audit_status))
+const { page: auditPage, pageSize: auditSize, total: auditTotal, paged: auditPaged } = usePagination(auditedSites, 15)
+const { page: healthPage, pageSize: healthSize, total: healthTotal, paged: healthPaged } = usePagination(sites, 15)
 
 // Stats row: "在线人数" card is admin-only for the same reason the
 // online panel is. Members see the three site-related cards only.
@@ -198,4 +221,6 @@ const stats = computed(() => {
 .online-ips { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
 .ip-tag { font-size: 11px; font-family: 'Consolas', monospace; color: var(--sun); background: rgba(249,115,22,.08); padding: 1px 6px; border-radius: 4px; }
 .online-sessions { font-size: 11px; font-weight: 700; color: var(--sun); background: rgba(249,115,22,.1); padding: 3px 8px; border-radius: 6px; flex-shrink: 0; }
+
+.pager-bar { margin-top: 12px; display: flex; justify-content: center; }
 </style>

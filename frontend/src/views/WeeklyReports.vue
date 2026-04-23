@@ -42,7 +42,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="r in reports" :key="r.id">
+          <tr v-for="r in reportsPaged" :key="r.id">
             <td v-if="userStore.isAdmin()" style="font-weight:700">
               {{ r.user_name }}
               <div v-if="r.department_name || r.group_name" class="sub-meta">
@@ -75,6 +75,15 @@
           </tr>
         </tbody>
       </table>
+      <el-pagination
+        v-if="reportsTotal > reportsSize"
+        class="pager-bar"
+        :total="reportsTotal"
+        :page-size="reportsSize"
+        v-model:current-page="reportsPage"
+        layout="prev, pager, next, total"
+        background
+      />
     </div>
   </div>
 </template>
@@ -83,9 +92,11 @@
 import { ref, computed, onMounted } from 'vue'
 import { useUserStore } from '../stores/user'
 import api from '../api'
+import { usePagination } from '../composables/usePagination'
 
 const userStore = useUserStore()
 const reports = ref([])
+const { page: reportsPage, pageSize: reportsSize, total: reportsTotal, paged: reportsPaged } = usePagination(reports, 15)
 const users = ref([])
 const filterUser = ref(null)
 // Admin team filters: 部门 / 组 / 姓名. For admin, we route through the
@@ -189,4 +200,6 @@ onMounted(async () => {
 .sub-meta { font-size:11px; color:var(--ink-hint); font-weight:500; margin-top:2px; }
 .mono { font-family:'JetBrains Mono', monospace; font-size:12px; color:var(--ink-soft); }
 .empty-cell { text-align:center; color:var(--ink-hint); padding:40px !important; line-height:1.7; }
+
+.pager-bar { margin-top: 16px; display: flex; justify-content: flex-end; }
 </style>

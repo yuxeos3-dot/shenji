@@ -38,7 +38,7 @@
       <table class="table">
         <thead><tr><th>提交人</th><th>日期</th><th>内容摘要</th><th>提交时间</th><th>操作</th></tr></thead>
         <tbody>
-          <tr v-for="r in reports" :key="r.id">
+          <tr v-for="r in reportsPaged" :key="r.id">
             <td style="font-weight:700">{{ r.user_name }}</td>
             <td><span class="date-badge">{{ r.report_date }}</span></td>
             <td style="color:var(--ink-mid);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.content }}</td>
@@ -48,6 +48,15 @@
           <tr v-if="!reports.length"><td colspan="5" class="empty-cell">暂无汇报</td></tr>
         </tbody>
       </table>
+      <el-pagination
+        v-if="reportsTotal > reportsSize"
+        class="pager-bar"
+        :total="reportsTotal"
+        :page-size="reportsSize"
+        v-model:current-page="reportsPage"
+        layout="prev, pager, next, total"
+        background
+      />
     </div>
 
     <el-dialog v-model="showDetail" title="📋 汇报详情" width="720px" top="5vh">
@@ -84,9 +93,11 @@ import { ref, computed, onMounted } from 'vue'
 import { useUserStore } from '../stores/user'
 import api from '../api'
 import EvaluationsPanel from '../components/EvaluationsPanel.vue'
+import { usePagination } from '../composables/usePagination'
 
 const userStore = useUserStore()
 const reports = ref([])
+const { page: reportsPage, pageSize: reportsSize, total: reportsTotal, paged: reportsPaged } = usePagination(reports, 15)
 const filterDate = ref('')
 const filterUser = ref(null)
 const users = ref([])
@@ -170,4 +181,6 @@ onMounted(async () => {
 .report-section ul { padding-left:20px; font-size:13px; color:var(--ink-mid); }
 .report-section li { margin-bottom:4px; }
 .report-section p { font-size:13px; color:var(--ink-mid); }
+
+.pager-bar { margin-top: 16px; display: flex; justify-content: flex-end; }
 </style>

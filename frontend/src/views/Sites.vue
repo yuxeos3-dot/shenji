@@ -159,7 +159,7 @@
 
     <template v-else>
       <div class="panel table-panel">
-        <el-table :data="sites" v-loading="loading" class="sunrise-table" :header-cell-style="headerCellStyle" :row-class-name="tableRowClassName">
+        <el-table :data="sitesPaged" v-loading="loading" class="sunrise-table" :header-cell-style="headerCellStyle" :row-class-name="tableRowClassName">
           <el-table-column prop="name" label="站点名称" min-width="160">
             <template #default="{ row }">
               <div class="site-name-cell">
@@ -198,6 +198,15 @@
             </template>
           </el-table-column>
         </el-table>
+        <el-pagination
+          v-if="sitesTotal > sitesSize"
+          class="pager-bar"
+          :total="sitesTotal"
+          :page-size="sitesSize"
+          v-model:current-page="sitesPage"
+          layout="prev, pager, next, total"
+          background
+        />
       </div>
     </template>
 
@@ -310,6 +319,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '../stores/user'
 import api from '../api'
+import { usePagination } from '../composables/usePagination'
 
 const userStore = useUserStore()
 
@@ -325,6 +335,7 @@ function fmtTime(s) {
 }
 
 const sites = ref([])
+const { page: sitesPage, pageSize: sitesSize, total: sitesTotal, paged: sitesPaged } = usePagination(sites, 15)
 const loading = ref(false)
 const showDialog = ref(false)
 const editId = ref(null)
@@ -712,4 +723,6 @@ onMounted(loadSites)
 :deep(.sunrise-form .el-input__wrapper) { border-radius:var(--r-xs); border:1.5px solid var(--border); box-shadow:none !important; padding:4px 12px; transition:border-color .2s; }
 :deep(.sunrise-form .el-input__wrapper:hover) { border-color:var(--peach); }
 :deep(.sunrise-form .el-input__wrapper.is-focus) { border-color:var(--sun) !important; box-shadow:0 0 0 3px rgba(255,140,0,.12) !important; }
+
+.pager-bar { margin: 16px 0; display: flex; justify-content: flex-end; padding: 0 16px; }
 </style>

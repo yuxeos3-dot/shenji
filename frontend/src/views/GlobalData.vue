@@ -67,7 +67,7 @@
 
     <div v-else class="card-grid">
       <div
-        v-for="(c, idx) in cards"
+        v-for="(c, idx) in cardsPaged"
         :key="idx"
         :class="['site-card', !c.has_data && 'site-card-empty', c.error && 'site-card-err']"
         @click="openCard(c)"
@@ -129,6 +129,16 @@
       </div>
     </div>
 
+    <el-pagination
+      v-if="cardsTotal > cardsSize"
+      class="pager-bar"
+      :total="cardsTotal"
+      :page-size="cardsSize"
+      v-model:current-page="cardsPage"
+      layout="prev, pager, next, total, jumper"
+      background
+    />
+
     <!-- Per-user error toast list so admin knows who needs to re-auth -->
     <div v-if="userErrors.length" class="user-errors panel">
       <div class="err-head">⚠ 部分用户数据获取失败</div>
@@ -146,6 +156,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import { usePagination } from '../composables/usePagination'
 
 const router = useRouter()
 
@@ -211,6 +222,8 @@ const summary = ref(null)
 const userErrors = ref([])
 const users = ref([])
 const filterUser = ref(null)
+
+const { page: cardsPage, pageSize: cardsSize, total: cardsTotal, paged: cardsPaged } = usePagination(cards, 15)
 
 // 5-min in-memory cache keyed by platform:start:end:user
 const cache = new Map()
@@ -405,4 +418,5 @@ onMounted(async () => {
 .err-user { font-weight: 700; color: #92400E; min-width: 120px; }
 .err-msg { color: #78350F; font-family: 'JetBrains Mono', monospace; }
 
+.pager-bar { margin: 20px 0; display: flex; justify-content: center; }
 </style>

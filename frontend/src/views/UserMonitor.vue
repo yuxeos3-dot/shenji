@@ -16,7 +16,7 @@
         </div>
         <div class="user-rows">
           <div
-            v-for="u in filteredUsers"
+            v-for="u in userListPaged"
             :key="u.id"
             :class="['user-row', selected?.id === u.id && 'selected']"
             @click="selectUser(u)"
@@ -29,6 +29,15 @@
           </div>
           <div v-if="!filteredUsers.length" class="empty-cell">没有匹配的用户</div>
         </div>
+        <el-pagination
+          v-if="userListTotal > userListSize"
+          class="pager-bar"
+          :total="userListTotal"
+          :page-size="userListSize"
+          v-model:current-page="userListPage"
+          layout="prev, pager, next"
+          small
+        />
       </div>
 
       <!-- Right: selected user details -->
@@ -86,7 +95,7 @@
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="s in sites" :key="s.id">
+                    <tr v-for="s in sitesPaged" :key="s.id">
                       <td style="font-weight:600">{{ s.name }}</td>
                       <td style="color:var(--ink-soft);font-size:12px">{{ s.domain }}</td>
                       <td>
@@ -104,7 +113,16 @@
                     </tr>
                   </tbody>
                 </table>
-                <div v-else class="empty-cell">该用户还没有绑定站点</div>
+                <el-pagination
+                  v-if="sitesTotal > sitesSize"
+                  class="pager-bar"
+                  :total="sitesTotal"
+                  :page-size="sitesSize"
+                  v-model:current-page="sitesPage"
+                  layout="prev, pager, next, total"
+                  small
+                />
+                <div v-if="!loading.sites && !sites.length" class="empty-cell">该用户还没有绑定站点</div>
               </el-tab-pane>
 
               <!-- ─── 协同任务 ─── -->
@@ -122,7 +140,7 @@
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="t in coordTasks" :key="t.id">
+                    <tr v-for="t in coordPaged" :key="t.id">
                       <td>
                         <div style="font-weight:600">{{ t.issue_title || '未命名任务' }}</div>
                         <div v-if="t.issue_severity" style="font-size:11px;color:var(--ink-hint)">
@@ -145,7 +163,16 @@
                     </tr>
                   </tbody>
                 </table>
-                <div v-else class="empty-cell">该用户没有相关的协同任务</div>
+                <el-pagination
+                  v-if="coordTotal > coordSize"
+                  class="pager-bar"
+                  :total="coordTotal"
+                  :page-size="coordSize"
+                  v-model:current-page="coordPage"
+                  layout="prev, pager, next, total"
+                  small
+                />
+                <div v-if="!loading.coord && !coordTasks.length" class="empty-cell">该用户没有相关的协同任务</div>
               </el-tab-pane>
 
               <!-- ─── 平台配置 ─── -->
@@ -172,6 +199,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import { usePagination } from '../composables/usePagination'
 
 const users = ref([])
 const search = ref('')
@@ -179,6 +207,8 @@ const selected = ref(null)
 const overview = ref(null)
 const sites = ref([])
 const coordTasks = ref([])
+const { page: sitesPage, pageSize: sitesSize, total: sitesTotal, paged: sitesPaged } = usePagination(sites, 15)
+const { page: coordPage, pageSize: coordSize, total: coordTotal, paged: coordPaged } = usePagination(coordTasks, 15)
 const activeTab = ref('sites')
 const loading = ref({ sites: false, coord: false })
 
@@ -190,6 +220,7 @@ const filteredUsers = computed(() => {
     (u.email || '').toLowerCase().includes(q),
   )
 })
+const { page: userListPage, pageSize: userListSize, total: userListTotal, paged: userListPaged } = usePagination(filteredUsers, 15)
 
 const platformBoundCount = computed(() => {
   const p = overview.value?.platforms
@@ -440,4 +471,6 @@ function coordBadge(s) {
 .platform-status { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 12px; }
 .platform-status.ok { background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-border); }
 .platform-status.off { background: var(--surface); color: var(--ink-hint); border: 1px solid var(--border); }
+
+.pager-bar { margin-top: 12px; display: flex; justify-content: center; }
 </style>

@@ -138,7 +138,7 @@
       <table class="table">
         <thead><tr><th>姓名</th><th>邮箱</th><th>角色</th><th>部门 / 组</th><th>Telegram ID</th><th>最后登录</th><th>操作</th></tr></thead>
         <tbody>
-          <tr v-for="u in users" :key="u.id">
+          <tr v-for="u in usersPaged" :key="u.id">
             <td style="font-weight:700">{{ u.name }}</td>
             <td style="color:var(--ink-mid)">{{ u.email }}</td>
             <td><span class="role-badge" :class="'role-' + (u.role || 'user')">{{ roleLabel(u.role) }}</span></td>
@@ -163,6 +163,15 @@
           <tr v-if="!users.length"><td colspan="7" class="empty-cell">暂无用户</td></tr>
         </tbody>
       </table>
+      <el-pagination
+        v-if="usersTotal > usersSize"
+        class="pager-bar"
+        :total="usersTotal"
+        :page-size="usersSize"
+        v-model:current-page="usersPage"
+        layout="prev, pager, next, total"
+        background
+      />
     </div>
 
     <el-dialog v-model="showDialog" :title="editId ? '✏️ 编辑用户' : '👤 添加用户'" width="480px" @close="clearFieldErrors">
@@ -385,8 +394,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import { usePagination } from '../composables/usePagination'
 
 const users = ref([])
+const { page: usersPage, pageSize: usersSize, total: usersTotal, paged: usersPaged } = usePagination(users, 15)
 const departments = ref([])
 const groups = ref([])
 // Guard flag so a rapid sequence of mutations (e.g. clicking Save twice) can't
@@ -961,4 +972,6 @@ onMounted(loadAll)
 /* Two-column form row used for dept + group side-by-side in the user dialog */
 .form-row { display:flex; gap:12px; }
 .form-row .form-group { flex:1; }
+
+.pager-bar { margin-top: 18px; display: flex; justify-content: flex-end; }
 </style>

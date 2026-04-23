@@ -29,7 +29,7 @@
           <div class="tab-bar">
             <el-button type="primary" @click="showLibForm = true">+ 新建关键词 / 话题库</el-button>
           </div>
-          <el-table :data="titleLibs" stripe>
+          <el-table :data="libsPaged" stripe>
             <el-table-column prop="name" label="名称" />
             <el-table-column prop="description" label="描述" />
             <el-table-column prop="title_count" label="关键词数" width="120" />
@@ -40,6 +40,15 @@
               </template>
             </el-table-column>
           </el-table>
+          <el-pagination
+            v-if="libsTotal > libsSize"
+            class="pager-bar"
+            :total="libsTotal"
+            :page-size="libsSize"
+            v-model:current-page="libsPage"
+            layout="prev, pager, next, total"
+            background
+          />
 
           <el-dialog v-model="showLibForm" title="新建关键词 / 话题库" width="460px">
             <el-form label-width="80px">
@@ -92,6 +101,7 @@ import api from '../api'
 import AIGenerateWizard from '../components/AIGenerateWizard.vue'
 import DraftReviewPanel from '../components/DraftReviewPanel.vue'
 import KeywordListView from '../components/KeywordListView.vue'
+import { usePagination } from '../composables/usePagination'
 
 const sites = ref([])
 const siteId = ref(null)
@@ -99,6 +109,7 @@ const activeTab = ref('libs')
 const stats = ref({ total_articles: 0, drafts: 0, pending_review: 0, published: 0 })
 
 const titleLibs = ref([])
+const { page: libsPage, pageSize: libsSize, total: libsTotal, paged: libsPaged } = usePagination(titleLibs, 15)
 const curLib = ref(null)
 
 const showLibForm = ref(false)
@@ -230,4 +241,6 @@ function onWizardApplied() {
 .green { color: var(--ok); }
 
 .tab-bar { margin-bottom: 14px; display: flex; gap: 8px; align-items: center; }
+
+.pager-bar { margin-top: 14px; display: flex; justify-content: flex-end; }
 </style>

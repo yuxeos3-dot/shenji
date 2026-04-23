@@ -32,7 +32,7 @@
               <div class="tab-bar">
                 <el-button type="primary" @click="showLibForm = true">+ 新建关键词 / 话题库</el-button>
               </div>
-              <el-table :data="titleLibs" stripe>
+              <el-table :data="libsPaged" stripe>
                 <el-table-column prop="name" label="库名" />
                 <el-table-column prop="description" label="描述" show-overflow-tooltip />
                 <el-table-column prop="title_count" label="关键词数" width="120" />
@@ -43,6 +43,15 @@
                   </template>
                 </el-table-column>
               </el-table>
+              <el-pagination
+                v-if="libsTotal > libsSize"
+                class="pager-bar"
+                :total="libsTotal"
+                :page-size="libsSize"
+                v-model:current-page="libsPage"
+                layout="prev, pager, next, total"
+                background
+              />
 
               <el-dialog v-model="showLibForm" title="新建关键词 / 话题库" width="420px">
                 <el-form label-width="70px">
@@ -82,7 +91,7 @@
           <h2>📦 公共外链库 <span style="font-size:12px;font-weight:400;color:var(--ink-hint);margin-left:8px">所有用户共享</span></h2>
           <button class="btn btn-primary btn-sm" @click="showPoolImport = true">＋ 批量添加</button>
         </div>
-        <el-table :data="pool" stripe max-height="400" size="small">
+        <el-table :data="poolPaged" stripe max-height="400" size="small">
           <el-table-column type="index" label="#" width="50" />
           <el-table-column prop="name" label="网站名称" width="200" />
           <el-table-column prop="url" label="URL" show-overflow-tooltip />
@@ -96,6 +105,15 @@
         <div v-if="!pool.length" style="text-align:center;padding:30px;color:var(--ink-hint);font-size:13px">
           暂无外链库数据，点击「批量添加」导入
         </div>
+        <el-pagination
+          v-if="poolTotal > poolSize"
+          class="pager-bar"
+          :total="poolTotal"
+          :page-size="poolSize"
+          v-model:current-page="poolPage"
+          layout="prev, pager, next, total"
+          background
+        />
       </div>
 
       <el-dialog v-model="showPoolImport" title="批量添加外链到公共库" width="560px">
@@ -130,6 +148,7 @@ import api from '../api'
 import AIGenerateWizard from '../components/AIGenerateWizard.vue'
 import DraftReviewPanel from '../components/DraftReviewPanel.vue'
 import KeywordListView from '../components/KeywordListView.vue'
+import { usePagination } from '../composables/usePagination'
 
 const sites = ref([])
 const siteId = ref(null)
@@ -137,6 +156,7 @@ const activeTab = ref('libs')
 const stats = ref({ total_articles: 0, drafts: 0, pending_review: 0, published: 0 })
 
 const titleLibs = ref([])
+const { page: libsPage, pageSize: libsSize, total: libsTotal, paged: libsPaged } = usePagination(titleLibs, 15)
 const curLib = ref(null)
 
 const showLibForm = ref(false)
@@ -148,6 +168,7 @@ const reviewPanel = ref(null)
 
 // Public backlink pool (unique to extlink)
 const pool = ref([])
+const { page: poolPage, pageSize: poolSize, total: poolTotal, paged: poolPaged } = usePagination(pool, 15)
 const showPoolImport = ref(false)
 const poolImportText = ref('')
 const poolImporting = ref(false)
@@ -317,4 +338,6 @@ async function delPoolItem(r) {
 .btn-sm { padding: 6px 14px; font-size: 12px; }
 .btn-primary { background: linear-gradient(135deg, var(--sun), var(--coral)); color: #fff; border-color: transparent; }
 .btn-primary:hover { background: linear-gradient(135deg, var(--sun-deep), var(--sun)); color: #fff; }
+
+.pager-bar { margin-top: 14px; display: flex; justify-content: flex-end; }
 </style>
