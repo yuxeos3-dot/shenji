@@ -574,14 +574,15 @@ func GetUserOverview(c *gin.Context) {
 	var name, email, role, deptName, groupName string
 	var lastLogin sql.NullString
 	err := db.DB.QueryRow(`
-		SELECT u.name, u.email, u.role, COALESCE(u.last_login,''),
-		       COALESCE(d.name,''), COALESCE(g.name,'')
+		SELECT u.name, u.email, u.role, COALESCE(u.last_login::text, ''),
+		       COALESCE(d.name, ''), COALESCE(g.name, '')
 		FROM users u
 		LEFT JOIN departments d ON d.id = u.department_id
 		LEFT JOIN dept_groups g ON g.id = u.group_id
 		WHERE u.id = $1`, uid,
 	).Scan(&name, &email, &role, &lastLogin, &deptName, &groupName)
 	if err != nil {
+		log.Printf("[user_overview] query user %d failed: %v", uid, err)
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "error": "用户不存在"})
 		return
 	}
