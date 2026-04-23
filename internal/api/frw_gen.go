@@ -389,6 +389,8 @@ func pollFRWTask(id int64) {
 			time.Sleep(interval)
 			continue
 		}
+		log.Printf("[frw-poll] task %d (frw_id=%s): status=%d progress=%.1f result=%s msg=%s",
+			id, taskID, q.Status, q.Progress, truncStr(q.OutData, 60), truncStr(q.Message, 60))
 		_, _ = db.DB.Exec(`UPDATE ai_generations SET status=$1, progress=$2, result_url=$3, error_msg=$4, updated_at=CURRENT_TIMESTAMP WHERE id=$5`,
 			q.Status, q.Progress, q.OutData, q.Message, id)
 		if q.Status == 2 || q.Status == -1 || q.Status == 4 {
@@ -588,4 +590,13 @@ func UploadFRWMedia(c *gin.Context) {
 	db.DB.Exec("UPDATE ai_generations SET local_path=$1, result_url=$2 WHERE id=$3", localPath, localPath, genID)
 
 	c.JSON(200, gin.H{"code": 0, "data": gin.H{"id": genID, "local_path": localPath, "filename": filename}})
+}
+
+
+// truncStr is a tiny helper for debug logging.
+func truncStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }

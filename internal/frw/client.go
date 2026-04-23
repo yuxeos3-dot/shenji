@@ -14,6 +14,7 @@ package frw
 // (failed) / 4 (timeout).
 
 import (
+	"log"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -327,6 +328,8 @@ func (c *Client) Query(taskID string) (*QueryResult, error) {
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 
+	log.Printf("[frw-client] Query task=%s status=%d body=%s", taskID, resp.StatusCode, truncate(string(raw), 400))
+
 	if resp.StatusCode == 401 {
 		return nil, fmt.Errorf("FRW 401, token 失效")
 	}
@@ -343,6 +346,7 @@ func (c *Client) Query(taskID string) (*QueryResult, error) {
 			return e, nil
 		}
 		// empty but success — treat as still pending.
+		log.Printf("[frw-client] WARN task %s: envMap data empty, treating as pending", taskID)
 		return &QueryResult{TaskID: taskID, Status: 0}, nil
 	}
 	var envList struct {
@@ -355,6 +359,7 @@ func (c *Client) Query(taskID string) (*QueryResult, error) {
 				return e, nil
 			}
 		}
+		log.Printf("[frw-client] WARN task %s: envList has no matching entry, treating as pending", taskID)
 		return &QueryResult{TaskID: taskID, Status: 0}, nil
 	}
 
