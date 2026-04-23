@@ -485,8 +485,21 @@ func ListCoordTasks(c *gin.Context) {
 		role, _ := c.Get("role")
 		if role != "admin" {
 			userID := c.GetInt64("user_id")
-			where = append(where, "t.site_id IN (SELECT id FROM sites WHERE created_by = $1)")
-			args = append(args, userID)
+			// Non-admin can see tasks where they are:
+			//   - site owner (created the site)
+			//   - task creator
+			//   - task assignee (currently in progress)
+			//   - pending assignee (during review phase)
+			//   - reviewer (on the roster)
+			n := len(args) + 1
+			where = append(where, fmt.Sprintf(
+				`(t.site_id IN (SELECT id FROM sites WHERE created_by = $%d)
+				  OR t.created_by = $%d
+				  OR t.assignee_id = $%d
+				  OR COALESCE(t.pending_assignee_id,0) = $%d
+				  OR EXISTS (SELECT 1 FROM coord_task_reviewers r WHERE r.task_id = t.id AND r.reviewer_id = $%d))`,
+				n, n+1, n+2, n+3, n+4))
+			args = append(args, userID, userID, userID, userID, userID)
 		}
 	}
 	if s := c.Query("status"); s != "" {
@@ -1507,16 +1520,20 @@ func CoordStats(c *gin.Context) {
 		Status string `json:"status"`
 		Count  int    `json:"count"`
 	}
-	q := "SELECT status, COUNT(*) FROM coordination_tasks"
+	q := "SELECT status, COUNT(*) FROM coordination_tasks t"
 	args := []interface{}{}
 	if siteID != "" {
-		q += " WHERE site_id = $1"
+		q += " WHERE t.site_id = $1"
 		args = append(args, siteID)
 	} else {
 		role, _ := c.Get("role")
 		if role != "admin" {
 			userID := c.GetInt64("user_id")
-			q += " WHERE site_id IN (SELECT id FROM sites WHERE created_by = $1)"
+			q += ` WHERE (t.site_id IN (SELECT id FROM sites WHERE created_by = $1)
+				OR t.created_by = $1
+				OR t.assignee_id = $1
+				OR COALESCE(t.pending_assignee_id,0) = $1
+				OR EXISTS (SELECT 1 FROM coord_task_reviewers r WHERE r.task_id = t.id AND r.reviewer_id = $1))`
 			args = append(args, userID)
 		}
 	}

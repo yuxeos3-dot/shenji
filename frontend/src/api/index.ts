@@ -115,7 +115,7 @@ const api = {
   listUsers: () => instance.get('/v1/users'),
   // Member-safe team directory — id + name + dept + group, no email or role.
   // Used by the coord assignee / reviewer pickers from a member context.
-  listTeamMembers: () => instance.get('/v1/team/members'),
+  listTeamMembers: (params?: { permission?: string }) => instance.get('/v1/team/members', { params }),
 
   // Per-user data-platform site-hide list. The × button on GSC / GA4 /
   // Bing / Yandex overview cards calls hidePlatformSite; the list is

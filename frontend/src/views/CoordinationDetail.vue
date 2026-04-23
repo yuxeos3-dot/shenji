@@ -622,6 +622,7 @@ const task = ref(null)
 const events = ref([])
 const attachments = ref([])
 const developers = ref([])
+const reviewerUsers = ref([])
 const reviewers = ref([])
 const loading = ref(false)
 const sending = ref(false)
@@ -935,14 +936,21 @@ async function confirmReject() {
 
 async function loadDevelopers() {
   try {
-    // Use the member-safe team directory rather than /v1/users (admin-only).
-    // Coord workflow runs entirely in member-land — creator, assignee,
-    // and reviewers can all be regular users — so a non-admin clicking
-    // 「分配给开发」 must be able to load the candidate list themselves.
-    const res = await api.listTeamMembers()
+    // Developers: users with coord.submit permission (or admins)
+    const res = await api.listTeamMembers({ permission: 'coord.submit' })
     developers.value = res.data || []
   } catch {
     developers.value = []
+  }
+}
+
+async function loadReviewerUsers() {
+  try {
+    // Reviewers: users with coord.review permission (or admins)
+    const res = await api.listTeamMembers({ permission: 'coord.review' })
+    reviewerUsers.value = res.data || []
+  } catch {
+    reviewerUsers.value = []
   }
 }
 
@@ -1041,7 +1049,7 @@ async function saveNote() {
 const reviewerCandidates = computed(() => {
   const creatorId = task.value?.created_by
   const assigneeId = assignForm.value.assignee_id
-  return developers.value.filter(u => u.id !== creatorId && u.id !== assigneeId)
+  return reviewerUsers.value.filter(u => u.id !== creatorId && u.id !== assigneeId)
 })
 
 // Open dialog with form hydrated from the task's current review state so
@@ -1316,7 +1324,7 @@ async function doDelete() {
 }
 
 onMounted(async () => {
-  await Promise.all([load(), loadDevelopers()])
+  await Promise.all([load(), loadDevelopers(), loadReviewerUsers()])
 })
 </script>
 

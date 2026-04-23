@@ -99,14 +99,27 @@ func ListUsers(c *gin.Context) {
 // on a coord task assignee/creator field anyway, plus department/group
 // for picker labels.
 func ListTeamMembers(c *gin.Context) {
-	rows, err := db.DB.Query(`
+	permFilter := strings.TrimSpace(c.Query("permission"))
+
+	baseQuery := `
 		SELECT u.id, u.name,
 		       COALESCE(d.name, ''), COALESCE(g.name, '')
 		FROM users u
 		LEFT JOIN departments d ON d.id = u.department_id
 		LEFT JOIN dept_groups g ON g.id = u.group_id
-		WHERE COALESCE(u.register_status, 'approved') = 'approved'
-		ORDER BY u.name`)
+		WHERE COALESCE(u.register_status, 'approved') = 'approved'`
+
+	args := []interface{}{}
+	if permFilter != "" {
+		// Admins implicitly have all permissions; members need explicit code in JSON array.
+		// users.permissions is stored as JSON like ["coord.view","coord.submit"] —
+		// LIKE '%"<code>"%' matches the quoted code inside the array string.
+		baseQuery += ` AND (u.role = 'admin' OR COALESCE(u.permissions,'') LIKE $1)`
+		args = append(args, "%\""+permFilter+"\"%")
+	}
+	baseQuery += " ORDER BY u.name"
+
+	rows, err := db.DB.Query(baseQuery, args...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "查询失败"})
 		return
