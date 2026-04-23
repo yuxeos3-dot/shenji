@@ -432,7 +432,7 @@ func GeoApplyWorkflowJob(c *gin.Context) {
 	// Wrap article INSERT + title/job UPDATEs in a single transaction.
 	tx, txErr := db.DB.Begin()
 	if txErr != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存文章失败: tx begin: " + txErr.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存文章失败"})
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -440,15 +440,15 @@ func GeoApplyWorkflowJob(c *gin.Context) {
 	var articleID int64
 	err = tx.QueryRow(
 		`INSERT INTO geo_articles
-		 (task_id, title_id, site_id, title, content, excerpt, keywords,
+		 (title_id, site_id, title, content, excerpt, keywords,
 		  meta_title, meta_description, ai_model, word_count, status, review_status, content_type)
-		 VALUES (0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft', 'pending', $11) RETURNING id`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft', 'pending', $11) RETURNING id`,
 		job.TitleID, job.SiteID, title, content, excerpt, kwField,
 		metaTitle, metaDesc, job.AIModel, wc, job.ContentType,
 	).Scan(&articleID)
 	if err != nil {
 		log.Printf("[geo-workflow] apply insert: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存文章失败: insert: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存文章失败"})
 		return
 	}
 
@@ -461,7 +461,7 @@ func GeoApplyWorkflowJob(c *gin.Context) {
 
 	if err := tx.Commit(); err != nil {
 		log.Printf("[geo-workflow] apply commit: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存文章失败: commit: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "error": "保存文章失败"})
 		return
 	}
 
