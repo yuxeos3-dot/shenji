@@ -430,13 +430,13 @@ func BuildTechPromptBatch(batch TechBatch, domain string, sitePages []SitePageFo
 // CallAIChapters calls the AI with a batched prompt and returns just the
 // chapters array (no top-level stats). This is the preferred form for the
 // split-call architecture.
-// normalizeAIEndpoint ensures the API URL points to the chat completions endpoint.
+// NormalizeAIEndpoint ensures the API URL points to the chat completions endpoint.
 // Handles various user input formats:
 //   - "https://api.example.com"                     → "https://api.example.com/v1/chat/completions"
 //   - "https://api.example.com/v1"                  → "https://api.example.com/v1/chat/completions"
 //   - "https://api.example.com/v1/"                 → "https://api.example.com/v1/chat/completions"
 //   - "https://api.example.com/v1/chat/completions" → "https://api.example.com/v1/chat/completions" (unchanged)
-func normalizeAIEndpoint(apiURL string) string {
+func NormalizeAIEndpoint(apiURL string) string {
 	u := strings.TrimRight(apiURL, "/")
 	// Already ends with /chat/completions — use as-is
 	if strings.HasSuffix(u, "/chat/completions") {
@@ -478,7 +478,7 @@ func postAIWithRetry(httpClient *http.Client, apiURL, apiKey string, body []byte
 	const maxAttempts = 3
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		req, err := http.NewRequest("POST", normalizeAIEndpoint(apiURL), bytes.NewReader(body))
+		req, err := http.NewRequest("POST", NormalizeAIEndpoint(apiURL), bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
@@ -1280,7 +1280,8 @@ func CallAIChaptersWithConfig(apiURL, apiKey, model, prompt string) ([]V6Chapter
 	var apiResp struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
@@ -1292,6 +1293,12 @@ func CallAIChaptersWithConfig(apiURL, apiKey, model, prompt string) ([]V6Chapter
 		return nil, "", model, fmt.Errorf("AI 无返回")
 	}
 	raw := apiResp.Choices[0].Message.Content
+	if raw == "" {
+		raw = apiResp.Choices[0].Message.ReasoningContent
+	}
+	if raw == "" {
+		return nil, "", model, fmt.Errorf("AI 返回空内容（模型 %s 在当前网关可能未正确配置，请换一个模型重试）", model)
+	}
 	jsonContent := extractJSON(raw)
 	jsonContent = repairJSON(jsonContent)
 
@@ -1339,7 +1346,8 @@ func CallAIStrategyWithConfig(apiURL, apiKey, model, prompt string) (*V6Chapter,
 	var apiResp struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
 			} `json:"message"`
 		} `json:"choices"`
 	}
@@ -1349,7 +1357,14 @@ func CallAIStrategyWithConfig(apiURL, apiKey, model, prompt string) (*V6Chapter,
 	if len(apiResp.Choices) == 0 {
 		return nil, model, fmt.Errorf("策略 AI 无返回")
 	}
-	jsonContent := extractJSON(apiResp.Choices[0].Message.Content)
+	rawContent := apiResp.Choices[0].Message.Content
+	if rawContent == "" {
+		rawContent = apiResp.Choices[0].Message.ReasoningContent
+	}
+	if rawContent == "" {
+		return nil, model, fmt.Errorf("策略 AI 返回空内容（模型 %s 可能未正确配置）", model)
+	}
+	jsonContent := extractJSON(rawContent)
 	jsonContent = repairJSON(jsonContent)
 
 	var chapter V6Chapter
@@ -1486,17 +1501,27 @@ func CallSimple(apiURL, apiKey, model, prompt string, maxTokens int) (string, er
 	var parsed struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(resp.body, &parsed); err != nil {
 		return "", fmt.Errorf("parse AI response: %w", err)
 	}
 	if len(parsed.Choices) == 0 {
-		return "", fmt.Errorf("AI returned no choices")
+		return "", fmt.Errorf("AI 无返回")
 	}
-	return parsed.Choices[0].Message.Content, nil
+	// Fallback to reasoning_content for reasoning models that put output there
+	content := parsed.Choices[0].Message.Content
+	if content == "" {
+		content = parsed.Choices[0].Message.ReasoningContent
+	}
+	if content == "" {
+		return "", fmt.Errorf("AI 返回空内容（模型 %s 在当前网关可能未正确配置，请换一个模型重试）", model)
+	}
+	return content, nil
 }
 
 func MaxTokensKey(model string) string {

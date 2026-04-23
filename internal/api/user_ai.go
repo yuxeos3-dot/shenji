@@ -139,7 +139,7 @@ func testAISlot(slot AISlot) error {
 		ai.MaxTokensKey(model): 5,
 	}
 	bj, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", strings.TrimRight(slot.APIURL, "/")+"/chat/completions", bytes.NewReader(bj))
+	req, _ := http.NewRequest("POST", ai.NormalizeAIEndpoint(slot.APIURL), bytes.NewReader(bj))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+slot.APIKey)
 	client := httpx.Outbound(15 * time.Second)
@@ -151,6 +151,25 @@ func testAISlot(slot AISlot) error {
 	if resp.StatusCode != 200 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 500))
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(b))
+	}
+	// Verify the response contains actual content — some gateways return 200 with empty content
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 10000))
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(b, &parsed); err != nil {
+		return fmt.Errorf("响应不是合法JSON（可能是HTML错误页）: %s", string(b[:min(200, len(b))]))
+	}
+	if len(parsed.Choices) == 0 {
+		return fmt.Errorf("响应无choices字段")
+	}
+	if parsed.Choices[0].Message.Content == "" && parsed.Choices[0].Message.ReasoningContent == "" {
+		return fmt.Errorf("模型返回空内容（%s在此网关可能未配置好）", model)
 	}
 	return nil
 }

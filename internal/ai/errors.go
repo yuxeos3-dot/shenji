@@ -52,6 +52,10 @@ func ExplainError(raw string) string {
 // status code first (most reliable), then by keyword fallback.
 func classifyError(raw, low string) (headline, action string) {
 	switch {
+	case strings.Contains(raw, "返回空内容"), strings.Contains(raw, "AI 无返回"),
+		strings.Contains(raw, "空响应"):
+		return "❌ AI 调用失败：模型返回空内容",
+			"你当前配置的模型在此网关可能未正确配置（常见于自建网关 + 推理型模型如 gpt-5 系列）。请到「个人 AI 设置」切换到稳定模型（推荐 qwen3.6-plus / claude-sonnet-4-5 / gpt-4o / deepseek-chat）"
 	case strings.Contains(raw, "HTTP 401"), strings.Contains(low, "unauthorized"),
 		strings.Contains(low, "invalid api key"), strings.Contains(low, "invalid_api_key"),
 		strings.Contains(low, "authentication"):
@@ -111,6 +115,12 @@ func classifyError(raw, low string) (headline, action string) {
 	case strings.Contains(low, "ai 无返回"), strings.Contains(raw, "AI 无返回"):
 		return "❌ AI 调用失败：模型返回了空响应",
 			"通常是内容被供应商安全策略过滤；换一个模型重试"
+	}
+	// HTML returned where JSON expected — a very common failure mode where
+	// the gateway URL is wrong or returns error pages
+	if strings.Contains(raw, "invalid character '<'") {
+		return "❌ AI 调用失败：网关返回HTML页面（不是JSON）",
+			"可能原因：1) API URL配置错误（应含/v1路径）; 2) 模型名不存在于网关; 3) Cloudflare/WAF拦截。建议到「个人 AI 设置」检查URL和模型"
 	}
 	return "❌ AI 调用失败：未识别的错误类型", "对照下方原始响应片段判断，必要时登录服务器 journalctl -u seo-system 查详细日志"
 }
