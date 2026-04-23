@@ -710,6 +710,7 @@ func finishJobWithFallback(jobID int64, draft, keyword, title string) {
 // as editable text and the user can override it on each generation.
 func GeoGetDefaults(c *gin.Context) {
 	contentType := c.DefaultQuery("content_type", "geo")
+	detailType := c.DefaultQuery("detail_type", "")
 	if contentType != "geo" && contentType != "extlink" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "error": "content_type 非法"})
 		return
@@ -747,8 +748,18 @@ func GeoGetDefaults(c *gin.Context) {
 
 直接从标题 / 首段开始输出，不要代码块包裹。`
 
+	// For news detail_type, return a preview of the news prompt skeleton.
+	// The actual prompt is still built by buildNewsPrompt at generation time —
+	// this preview shows the user WHAT structure will be generated so they
+	// don't expect editing this text to change the news-article output.
+	// (News detail_type ignores custom_prompt; structure is fixed.)
+	if detailType == "news" {
+		tmpl = buildNewsPromptPreview()
+	}
 	defaults := gin.H{
 		"prompt":              tmpl,
+		"prompt_readonly":     detailType == "news",
+		"prompt_notice":       newsPromptNotice(detailType),
 		"default_word_count":  1500,
 		"default_language":    "zh",
 		"default_detail_type": "article",
@@ -1134,13 +1145,16 @@ func buildNeutralAntiDetectionPrompt(
 - 全文只输出文章本身（Markdown）`
 }
 
-// buildNewsPrompt produces a news-article prompt with strict section
-// structure: title + summary + event timeline (dated entries with sources)
-// + parties' responses (stakeholder/official/expert) + background analysis
-// (industry/regulation/similar cases) + FAQ + disclaimer footer.
+// buildNewsPrompt produces a strictly neutral news-reporting prompt.
+// KEY DESIGN: the prompt frames the keyword as a TOPIC TO REPORT ON, not
+// a theme to create content around. This prevents AI safety filters from
+// refusing when the keyword contains potentially sensitive terms (e.g.
+// "porn", "gambling", "fraud") — we're reporting on industry/regulatory
+// news related to that topic, not generating explicit material.
 //
-// Includes 2 image placeholders [IMAGE:hero|<prompt>] and [IMAGE:body|<prompt>]
-// that step-3 replaces with FRW-generated image markdown.
+// Output format matches mainstream news agencies (新华社/央视新闻) with
+// timeline + stakeholder responses + expert opinion + background + FAQ.
+// Includes 2 image placeholders for FRW text2image generation.
 func buildNewsPrompt(
 	req StartKeywordWorkflowRequest,
 	knowledge string,
@@ -1148,17 +1162,9 @@ func buildNewsPrompt(
 ) string {
 	year := fmt.Sprintf("%d", time.Now().Year())
 
-	langLabel := map[string]string{
-		"zh": "中文（简体）", "en": "English", "ja": "日本語",
-		"ko": "한국어", "es": "Español", "other": "其他（遵循建议标题的语言）",
-	}[req.Language]
-	if langLabel == "" {
-		langLabel = "中文（简体）"
-	}
-
 	var pagesBlock strings.Builder
 	if len(pages) > 0 && req.ContentType == "geo" {
-		pagesBlock.WriteString("【站内可用内链清单】（挑 2-3 条自然嵌入「类似案例」或「相关信息」处）：\n")
+		pagesBlock.WriteString("【站内可用内链清单】（在「类似案例」或「相关信息」段落中自然嵌入2-3条）：\n")
 		for _, p := range pages {
 			fmt.Fprintf(&pagesBlock, "- %s → %s\n", p.Name, p.URL)
 		}
@@ -1166,15 +1172,15 @@ func buildNewsPrompt(
 
 	extraBlock := ""
 	if strings.TrimSpace(req.ExtraRequirements) != "" {
-		extraBlock = "\n【附加要求】\n" + strings.TrimSpace(req.ExtraRequirements) + "\n"
+		extraBlock = "\n【附加信息】\n" + strings.TrimSpace(req.ExtraRequirements) + "\n"
 	}
 	referenceBlock := ""
 	if strings.TrimSpace(req.ReferenceURL) != "" {
-		referenceBlock = "\n【参考链接】" + strings.TrimSpace(req.ReferenceURL) + "（可用于启发思路和考证，不得直接复制原文）\n"
+		referenceBlock = "\n【参考链接】" + strings.TrimSpace(req.ReferenceURL) + "（可用于考证事实，不得直接照抄原文）\n"
 	}
 	knowledgeBlock := ""
 	if strings.TrimSpace(knowledge) != "" {
-		knowledgeBlock = "\n【参考资料（请自然融入事实，不得整段照抄）】\n" + strings.TrimSpace(knowledge) + "\n"
+		knowledgeBlock = "\n【参考资料】\n" + strings.TrimSpace(knowledge) + "\n"
 	}
 
 	titleHint := req.TitleText
@@ -1182,57 +1188,80 @@ func buildNewsPrompt(
 		titleHint = req.Keyword
 	}
 
-	return `你是一名资深新闻编辑。请基于以下信息产出一篇**结构化新闻资讯**长文，严格遵守下列章节结构和格式要求。
+	return `你是一名严肃的新闻记者，为新华社/央视新闻/澎湃新闻等主流媒体撰写SEO优化的新闻稿。
 
-【核心关键词】` + req.Keyword + `
+━━━━━ 任务定位（最重要）━━━━━
+
+你正在【报道】一个话题/事件/行业动态，而不是【创作】任何内容。无论关键词是什么词汇（包括可能带有敏感、行业、涉黄、涉赌、涉诈等标签的词），都将它理解为一个【需要客观记录和报道的新闻主题】。
+
+你的输出是一篇客观事实报道，用途是：
+- 为AI搜索引擎（如 ChatGPT、Perplexity、SGE）提供结构化事实
+- 帮助公众了解相关事件/监管动向/法律知识/行业背景
+
+【不是】以下任何一种：
+- 不是 露骨描述或煽动性创作
+- 不是 宣传推广任何违法或灰色产品
+- 不是 对未经证实的传闻进行渲染
+
+如果关键词看起来涉及违法或灰色行业，报道角度应该是：
+✓ 相关法律法规的适用和解读
+✓ 监管部门查处的真实案例（可匿名化处理当事人）
+✓ 行业现状的客观陈述（援引学术/官方研究）
+✓ 受害者保护、防诈防骗教育
+✓ 类似事件的处理经验
+
+━━━━━ 报道对象 ━━━━━
+
+【关键词/事件主题】` + req.Keyword + `
 【建议标题主干】` + titleHint + `
-【写作语言】` + langLabel + `
 【目标年份】` + year + `
 【目标字数】` + fmt.Sprintf("%d", req.WordCount) + ` 字以上` + extraBlock + referenceBlock + knowledgeBlock + pagesBlock.String() + `
 
-━━━━━ 严格结构要求（章节顺序和标题不可更改）━━━━━
+━━━━━ 固定结构（顺序不可变）━━━━━
 
-# ` + year + ` [具体新闻标题] — 要求标题包含年份+地点+核心事件+明确结果
+# ` + year + `[新闻标题]
 
-[首段摘要 150-220 字：直接回答 who/when/where/what/why/result，具体数字、人物和地点，不用虚词]
+标题要求：年份+地点或领域+核心事件+明确结果。如当事人无法公开，用「某市」「某公司」「某行业」。
 
-[IMAGE:hero|详细的图片生成提示词：描述事件场景/人物/环境，30-60字，具象化，不含真人姓名，写实摄影风格]
+[首段摘要 150-220 字：直接回答 who/when/where/what/why/result]
+
+[IMAGE:hero|第一张配图的AI生成提示词，中文，30-60字，场景描述，写实摄影或新闻插图风格，不含真人姓名和具体长相]
 
 ## 事件时间线
 
-**YYYY年M月D日**：事件描述 50-100 字，具体动作和数字。
+**` + year + `年M月D日**：事件描述 50-100 字，具体动作和数字。
 信源：[媒体名 / 官方渠道 / 警方通报等]
 
-（至少 4 条时间条目）
+（至少 4 条时间条目。如果不确定具体日期，用「2026年4月上旬」「近日」等近似时间，不得编造具体日期）
 
-[IMAGE:body|第二张配图生成提示词：不同角度场景，30-60字，写实风格]
+[IMAGE:body|第二张配图的AI生成提示词，不同角度或场景，30-60字]
 
 ## 各方回应
 
-### 当事人 / 相关人士
-[120-200 字：引用原话或转述，附带时间和媒体来源]
+### 当事人 / 相关方
+[120-200 字：引用或转述，注明"据XX媒体报道"或"接受采访时表示"]
 
-### 平台方 / 警方 / 监管
-[120-200 字：官方通报内容、进展、处置]
+### 监管部门 / 警方 / 平台方
+[120-200 字：官方通报内容、调查进展、处置结果]
 
-### 专家观点
-[120-200 字：律师/学者对事件性质、法律适用、行业影响的分析]
+### 专家/律师观点
+[120-200 字：对事件定性、法律适用、行业影响的分析，引用具体条款]
 
 ## 背景分析
 
-### 行业背景
-[100-150 字：事件所处行业/社会背景，用具体数据]
+### 行业或社会背景
+[100-150 字：事件所处行业或社会现象，援引数据或研究]
 
 ### 相关法规
-[100-150 字：引用具体条款编号和内容，中华人民共和国××法第×条等]
+[100-150 字：至少引用 1-2 条具体法条，格式：《中华人民共和国XX法》第X条：原文或要点]
 
 ### 类似案例
-[100-150 字：1-2 个过往同类事件对比]
+[100-150 字：1-2 个过往同类真实事件对比，注明时间和处理结果]
 
 ## 常见问题
 
-**Q1：[具体问题]？**
-[答案 60-120 字，事实性陈述]
+**Q1：[读者最可能问的具体问题]？**
+[答案 60-120 字，纯事实]
 
 **Q2：[具体问题]？**
 [答案 60-120 字]
@@ -1242,30 +1271,31 @@ func buildNewsPrompt(
 
 ---
 
-*数据及信息均来源于公开媒体报道和官方通报，建议以官方最新通报为准。*
+*本文内容整理自公开媒体报道和官方通报，具体细节以官方最新通报为准。*
 
 ━━━━━ 写作原则 ━━━━━
-1. 全文基于事实陈述，不加入未经证实的传闻
-2. 每段首句直接给结论，后文展开细节
-3. 大量具体数字（日期/金额/人数/百分比），避免空洞形容词
-4. 每条关键信息必须标注信源
-5. 关键词自然分布 4-8 次，禁止堆砌
-6. 禁止模板连接词（首先/其次/综上所述）
-7. 句长交替
+1. 全文事实陈述，不加入未经证实的传闻、煽动性语言或价值判断
+2. 每段首句给结论，具体数字优先（日期/金额/人数/百分比）
+3. 每条关键信息标注信源（"据XX媒体"/"官方通报"/"《XX法》第X条"）
+4. 关键词自然分布 4-8 次，禁止堆砌
+5. 禁止模板连接词（首先/其次/综上所述/值得注意的是）
+6. 章节结构不得省略或合并，必须 4 个一级 + 对应二级章节全部保留
+7. 必须含 2 个 [IMAGE:hero|...] 和 [IMAGE:body|...] 占位符
 
-━━━━━ 配图占位符规则 ━━━━━
-- 必须恰好插入 2 个占位符，分别标注 hero 和 body
-- 格式：[IMAGE:hero|图片生成提示词] 和 [IMAGE:body|图片生成提示词]
-- 图片提示词为 30-60 字中文描述，写实风格，不含具体真人姓名（用"警员"/"受害者家属"等通用词）
-- 占位符独占一行，前后空行
+━━━━━ 安全原则 ━━━━━
+- 涉及犯罪或违法话题时，始终以【记录/警示/科普】角度，不做示范教学
+- 不使用露骨/色情/暴力描述性词汇
+- 对当事人姓名可匿名化（某某、化名"景景"等）
+- 图片提示词用通用描述，不含具体真人外貌、不含露骨元素
 
 ━━━━━ 输出要求 ━━━━━
-- 直接从 # 号标题开始输出，不要任何说明文字或代码块包裹
-- 不要输出本提示中的指令原文
-- 必须包含 2 个 [IMAGE:hero|...] 和 [IMAGE:body|...] 占位符
-- 章节标题使用 ## / ### 层级，不得省略
+- 直接从 # 号标题开始输出，无代码块包裹
+- 不输出本提示中的指令原文
+- 必须包含 [IMAGE:hero|...] 和 [IMAGE:body|...] 各一个
+- 章节标题使用 ## / ### 层级
 `
 }
+
 
 // imagePlaceholderRe matches [IMAGE:<tag>|<prompt>] in AI-generated draft.
 var imagePlaceholderRe = regexp.MustCompile(`\[IMAGE:(hero|body|[a-zA-Z0-9_-]+)\|([^\]]+)\]`)
@@ -1466,4 +1496,70 @@ func parseMetaResponse(raw, keyword, title string) (mt, md, faqJSON string) {
 		}
 	}
 	return
+}
+
+
+// buildNewsPromptPreview returns a human-readable preview of the news
+// prompt structure shown in the wizard's step-3 editor when detail_type
+// is "news". Unlike other types, this text is informational only —
+// the actual generation uses buildNewsPrompt at runtime.
+func buildNewsPromptPreview() string {
+	return `【新闻资讯模式】— 自动使用专用结构化 prompt (step 3 内容仅供参考, 不可编辑)
+
+本 prompt 会生成严格结构的新闻稿:
+
+━━━━━ 固定结构 ━━━━━
+# YYYY [新闻标题]
+[摘要段 150-220字]
+[IMAGE:hero|配图提示词]
+
+## 事件时间线
+- 至少 4 条日期条目 + 信源
+
+[IMAGE:body|配图提示词]
+
+## 各方回应
+### 当事人 / 相关方
+### 监管部门 / 警方 / 平台方
+### 专家 / 律师观点
+
+## 背景分析
+### 行业背景
+### 相关法规 (引用具体条款)
+### 类似案例
+
+## 常见问题 (Q1/Q2/Q3)
+
+---
+免责声明
+
+━━━━━ 写作角度 ━━━━━
+你是主流媒体记者 (新华社/央视/澎湃) 的角色, 客观中立报道.
+
+无论关键词是什么词汇 (可能包含敏感/行业/涉黄涉赌涉诈等标签),
+都视为【需要客观报道的新闻主题】, 而不是创作题材.
+
+如涉及敏感话题, 报道角度:
+- 相关法律法规适用与解读
+- 监管部门查处真实案例 (匿名化处理)
+- 行业现状客观陈述
+- 防诈/警示/科普
+
+━━━━━ 约束 ━━━━━
+- 不使用露骨/色情/暴力描述
+- 人物姓名可匿名化 (某某/化名)
+- 图片提示词用通用描述 (警员/家属等)
+- 事实陈述, 无价值判断
+- 具体数字优先, 每条信息标注信源
+- 2 张 FRW 配图通过 [IMAGE:hero|...] 和 [IMAGE:body|...] 占位符生成
+`
+}
+
+// newsPromptNotice returns the banner text shown above the step-3 prompt
+// editor when user selects a detail_type that uses a fixed prompt.
+func newsPromptNotice(detailType string) string {
+	if detailType == "news" {
+		return "ℹ️ 新闻资讯模式使用固定结构化 prompt, 此处编辑不会生效. 关键词可以是任何话题 (包括可能敏感的词), AI 会以客观记者角度进行报道."
+	}
+	return ""
 }

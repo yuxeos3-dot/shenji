@@ -360,7 +360,7 @@ const api = {
   geoGetWorkflowJob: (id: Id) => instance.get(`/v1/geo/keyword/workflow/${id}`),
   geoApplyWorkflowJob: (id: Id, data?: Record<string, any>) => instance.post(`/v1/geo/keyword/workflow/${id}/apply`, data || {}),
   geoDiscardWorkflowJob: (id: Id) => instance.delete(`/v1/geo/keyword/workflow/${id}`),
-  geoGetDefaults: (contentType?: string) => instance.get('/v1/geo/defaults', { params: { content_type: contentType || 'geo' } }),
+  geoGetDefaults: (contentType?: string, detailType?: string) => instance.get('/v1/geo/defaults', { params: { content_type: contentType || 'geo', detail_type: detailType || '' } }),
 
   // Coordination (协同管理)
   coordStats: (params?: Record<string, any>) => instance.get('/v1/coord/stats', { params }),

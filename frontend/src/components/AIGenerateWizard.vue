@@ -96,18 +96,22 @@
 
     <!-- ─── Step 3: Prompt ─── -->
     <div v-show="step === 3" class="wiz-body">
-      <div class="prompt-hint">
+      <div v-if="promptNotice" class="prompt-notice" style="background:#fef3c7;border:1.5px solid #f59e0b;color:#92400e;padding:12px 16px;border-radius:8px;margin-bottom:12px;font-size:13px;line-height:1.6">
+        {{ promptNotice }}
+      </div>
+      <div v-else class="prompt-hint">
         下面是系统内置的默认 Prompt，你可以直接使用，也可以整段修改。
         可用变量：
         <code v-for="v in promptVars" :key="v.name">{{ v.name }}</code>
       </div>
       <el-input
         v-model="form.custom_prompt"
+        :disabled="promptReadonly"
         type="textarea"
         :rows="16"
         placeholder="加载中..."
       />
-      <div class="prompt-actions">
+      <div class="prompt-actions" v-if="!promptReadonly">
         <el-button size="small" @click="resetPrompt">↺ 恢复为默认</el-button>
         <el-button size="small" @click="form.custom_prompt = ''">清空（生成时走默认）</el-button>
       </div>
@@ -233,6 +237,8 @@ const defaults = ref({
   prompt: '', default_word_count: 1500,
 })
 const defaultPrompt = ref('')
+const promptReadonly = ref(false)
+const promptNotice = ref('')
 // Static so the template can render braces without Vue trying to
 // interpret {{ }} inside the mustaches as nested interpolation.
 const promptVars = [
@@ -278,11 +284,11 @@ async function resetState() {
     custom_prompt: '',
   }
   try {
-    const res = await api.geoGetDefaults(props.contentType)
+    const res = await api.geoGetDefaults(props.contentType, form.value.detail_type)
     defaults.value = res.data
     defaultPrompt.value = res.data.prompt || ''
-    // pre-fill step-3 editor with server default so user can see what
-    // will run if they don't touch anything.
+    promptReadonly.value = !!res.data.prompt_readonly
+    promptNotice.value = res.data.prompt_notice || ''
     form.value.custom_prompt = defaultPrompt.value
     if (res.data.default_word_count) form.value.word_count = res.data.default_word_count
   } catch (e) {
@@ -290,6 +296,13 @@ async function resetState() {
     ElMessage.error('加载默认 Prompt 失败')
   }
 }
+
+// Re-fetch defaults when detail_type changes — news type has a different prompt template
+watch(() => form.value.detail_type, (newType, oldType) => {
+  if (oldType !== undefined && newType !== oldType) {
+    loadDefaults()
+  }
+})
 
 onBeforeUnmount(stopPoll)
 
