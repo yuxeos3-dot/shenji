@@ -71,7 +71,12 @@ func GeoListTitleLibs(c *gin.Context) {
 	isAdmin := role == "admin"
 	siteID := c.Query("site_id")
 	contentType := c.DefaultQuery("content_type", "geo")
-	q := "SELECT id, name, description, title_count, created_at FROM geo_title_libs WHERE content_type = $1"
+	// Ensure default library exists for this user+site+content_type combo.
+	// Default libraries are auto-created, undeletable, and act as the target
+	// for "pull keywords from 4 platforms" actions.
+	ensureDefaultGeoLib(uid, siteID, contentType)
+
+	q := "SELECT id, name, description, title_count, COALESCE(is_default,FALSE), created_at FROM geo_title_libs WHERE content_type = $1"
 	args := []interface{}{contentType}
 	// Per-user isolation: admin sees user_id=self OR user_id=0 (orphan),
 	// member sees only user_id=self.
@@ -86,7 +91,7 @@ func GeoListTitleLibs(c *gin.Context) {
 		q += fmt.Sprintf(" AND site_id = $%d", len(args)+1)
 		args = append(args, siteID)
 	}
-	q += " ORDER BY id DESC LIMIT 200"
+	q += " ORDER BY is_default DESC, id DESC LIMIT 200"
 	rows, err := db.DB.Query(q, args...)
 	if err != nil {
 		c.JSON(500, gin.H{"code": -1, "error": "查询失败"})
@@ -97,8 +102,12 @@ func GeoListTitleLibs(c *gin.Context) {
 	for rows.Next() {
 		var id, cnt int64
 		var name, desc, cat string
-		rows.Scan(&id, &name, &desc, &cnt, &cat)
-		libs = append(libs, gin.H{"id": id, "name": name, "description": desc, "title_count": cnt, "created_at": cat})
+		var isDefault bool
+		rows.Scan(&id, &name, &desc, &cnt, &isDefault, &cat)
+		libs = append(libs, gin.H{
+			"id": id, "name": name, "description": desc,
+			"title_count": cnt, "is_default": isDefault, "created_at": cat,
+		})
 	}
 	if libs == nil {
 		libs = []gin.H{}
@@ -168,12 +177,172 @@ func GeoDeleteTitleLib(c *gin.Context) {
 		c.JSON(403, gin.H{"code": -1, "error": "无权删除"})
 		return
 	}
+	// Default libraries are auto-created per user+site, cannot be deleted
+	var isDefault bool
+	db.DB.QueryRow("SELECT COALESCE(is_default,FALSE) FROM geo_title_libs WHERE id=$1", id).Scan(&isDefault)
+	if isDefault {
+		c.JSON(400, gin.H{"code": -1, "error": "默认库不可删除"})
+		return
+	}
 	if libSiteID > 0 && !canAccessSite(c, fmt.Sprintf("%d", libSiteID)) {
 		return
 	}
 	db.DB.Exec("DELETE FROM geo_titles WHERE lib_id = $1", id)
 	db.DB.Exec("DELETE FROM geo_title_libs WHERE id = $1", id)
 	c.JSON(200, gin.H{"code": 0, "data": "删除成功"})
+}
+
+// ensureDefaultGeoLib creates the default library for the caller's
+// (user, site, content_type) combination if it doesn't already exist.
+// Idempotent via UNIQUE partial index. Named "geo库" or "link库" based
+// on content_type.
+func ensureDefaultGeoLib(userID int64, siteID string, contentType string) {
+	if userID <= 0 || siteID == "" {
+		return
+	}
+	var exists int
+	db.DB.QueryRow(
+		"SELECT 1 FROM geo_title_libs WHERE user_id=$1 AND COALESCE(site_id,0)::text=$2 AND content_type=$3 AND is_default=TRUE LIMIT 1",
+		userID, siteID, contentType,
+	).Scan(&exists)
+	if exists == 1 {
+		return
+	}
+	name := "geo库"
+	desc := "默认关键词库 · 自动包含该站点所有4大平台关键词"
+	if contentType == "extlink" {
+		name = "link库"
+		desc = "默认外链关键词库 · 自动包含该站点所有4大平台关键词"
+	}
+	db.DB.Exec(
+		"INSERT INTO geo_title_libs (name, description, site_id, content_type, user_id, is_default) VALUES ($1, $2, $3::int, $4, $5, TRUE) ON CONFLICT DO NOTHING",
+		name, desc, siteID, contentType, userID,
+	)
+}
+
+// GeoImportFromPlatforms pulls all keywords from the 4 platforms
+// (GSC/Bing/Yandex deep tables) into the target library.
+// POST /v1/geo/title-libs/:id/import-platforms
+func GeoImportFromPlatforms(c *gin.Context) {
+	libID := c.Param("id")
+	_, libSiteID, _, ok := assertGeoLibOwnership(c, libID)
+	if !ok {
+		return
+	}
+	var req struct {
+		SiteID int64 `json:"site_id"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	if req.SiteID == 0 {
+		req.SiteID = libSiteID
+	}
+	if req.SiteID == 0 {
+		c.JSON(400, gin.H{"code": -1, "error": "site_id 必填"})
+		return
+	}
+	if !canAccessSite(c, fmt.Sprintf("%d", req.SiteID)) {
+		return
+	}
+
+	// Collect distinct queries across all 4 platforms
+	keywords := map[string]bool{}
+
+	// GSC (deep)
+	if rows, err := db.DB.Query(
+		`SELECT DISTINCT query FROM gsc_query_page_daily
+		 WHERE site_id=$1 AND query<>'' AND search_type='web'
+		 LIMIT 5000`, req.SiteID,
+	); err == nil {
+		for rows.Next() {
+			var q string
+			if rows.Scan(&q) == nil && q != "" {
+				keywords[q] = true
+			}
+		}
+		rows.Close()
+	}
+
+	// Bing deep
+	if rows, err := db.DB.Query(
+		`SELECT DISTINCT query FROM bing_query_daily
+		 WHERE site_id=$1 AND query<>'' LIMIT 5000`, req.SiteID,
+	); err == nil {
+		for rows.Next() {
+			var q string
+			if rows.Scan(&q) == nil && q != "" {
+				keywords[q] = true
+			}
+		}
+		rows.Close()
+	}
+
+	// Yandex deep
+	if rows, err := db.DB.Query(
+		`SELECT DISTINCT query FROM yandex_query_daily
+		 WHERE site_id=$1 AND query<>'' LIMIT 5000`, req.SiteID,
+	); err == nil {
+		for rows.Next() {
+			var q string
+			if rows.Scan(&q) == nil && q != "" {
+				keywords[q] = true
+			}
+		}
+		rows.Close()
+	}
+
+	// Fallback to basic gsc_data.keywords_json / bing_data.queries_json / yandex_data.keywords_json
+	// if deep tables have no data yet.
+	if len(keywords) == 0 {
+		var gscKW string
+		db.DB.QueryRow("SELECT COALESCE(keywords_json::text,'') FROM gsc_data WHERE site_id=$1 ORDER BY date DESC LIMIT 1", req.SiteID).Scan(&gscKW)
+		var gscRows []struct {
+			Keys []string `json:"keys"`
+		}
+		if gscKW != "" && gscKW != "null" {
+			_ = json.Unmarshal([]byte(gscKW), &gscRows)
+			for _, r := range gscRows {
+				if len(r.Keys) > 0 && r.Keys[0] != "" {
+					keywords[r.Keys[0]] = true
+				}
+			}
+		}
+	}
+
+	if len(keywords) == 0 {
+		c.JSON(400, gin.H{"code": -1, "error": "该站点暂无关键词数据, 请先在「数据管理」同步4大平台"})
+		return
+	}
+
+	// Dedupe against existing titles in this lib
+	existing := map[string]bool{}
+	if rows, err := db.DB.Query("SELECT title FROM geo_titles WHERE lib_id=$1", libID); err == nil {
+		for rows.Next() {
+			var t string
+			rows.Scan(&t)
+			existing[t] = true
+		}
+		rows.Close()
+	}
+
+	inserted := 0
+	for kw := range keywords {
+		if existing[kw] {
+			continue
+		}
+		if _, err := db.DB.Exec(
+			"INSERT INTO geo_titles (lib_id, title, keyword) VALUES ($1, $2, $3)",
+			libID, kw, kw,
+		); err == nil {
+			inserted++
+		}
+	}
+	db.DB.Exec("UPDATE geo_title_libs SET title_count = (SELECT COUNT(*) FROM geo_titles WHERE lib_id = $1) WHERE id = $2", libID, libID)
+
+	c.JSON(200, gin.H{"code": 0, "data": gin.H{
+		"imported":     inserted,
+		"source_total": len(keywords),
+		"skipped":      len(keywords) - inserted,
+	}})
 }
 
 func GeoListTitles(c *gin.Context) {

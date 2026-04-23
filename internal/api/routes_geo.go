@@ -21,6 +21,7 @@ func registerGeoRoutes(v1 *gin.RouterGroup) {
 		geo.POST("/title-libs/:id/titles", RequirePermission("geo.keywords"), GeoAddTitles)
 		geo.POST("/title-libs/:id/import", RequirePermission("geo.keywords"), GeoImportTitles)
 		geo.POST("/title-libs/:id/import-gsc", RequirePermission("geo.keywords"), GeoImportFromGSC)
+		geo.POST("/title-libs/:id/import-platforms", RequirePermission("geo.keywords"), GeoImportFromPlatforms)
 		geo.DELETE("/titles/:id", RequirePermission("geo.keywords"), GeoDeleteTitle)
 
 		// Articles

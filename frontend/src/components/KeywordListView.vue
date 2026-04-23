@@ -12,6 +12,9 @@
         <button class="btn" @click="$emit('back')">← 返回库列表</button>
         <button class="btn" @click="showImport = true">✏️ 手动输入</button>
         <button class="btn btn-green" @click="doGSCImport">📥 从 GSC 获取</button>
+        <button class="btn btn-platforms" @click="doPlatformsImport" :disabled="platformsImporting">
+          {{ platformsImporting ? '拉取中...' : '🔄 从4平台拉取' }}
+        </button>
       </div>
     </div>
 
@@ -171,6 +174,28 @@ async function doGSCImport() {
   }
 }
 
+const platformsImporting = ref(false)
+async function doPlatformsImport() {
+  if (!props.siteId) {
+    ElMessage.warning('请先选择站点')
+    return
+  }
+  platformsImporting.value = true
+  try {
+    const res = await api.geoImportFromPlatforms(props.lib.id, { site_id: props.siteId })
+    const d = res.data || {}
+    ElMessage.success(
+      '✅ 从4平台导入 ' + (d.imported || 0) + ' 条关键词' +
+      ' · 来源 ' + (d.source_total || 0) + ' 条（已去重 ' + (d.skipped || 0) + ' 条）'
+    )
+    reload()
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.error || '拉取失败 — 请先在「数据管理」同步4大平台')
+  } finally {
+    platformsImporting.value = false
+  }
+}
+
 function openEdit(t) {
   editRow.value = { id: t.id, title: t.title, keyword: t.keyword || '' }
   showEdit.value = true
@@ -251,4 +276,8 @@ function genAI(t) {
 .pag-row { display: flex; justify-content: center; margin-top: 16px; }
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
 .field label { font-size: 12px; font-weight: 700; color: var(--ink-mid); }
+
+.btn-platforms { background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #fff; border-color: transparent; }
+.btn-platforms:hover { opacity: 0.9; }
+.btn-platforms:disabled { opacity: 0.6; cursor: not-allowed; }
 </style>

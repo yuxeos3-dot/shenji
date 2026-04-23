@@ -343,6 +343,7 @@ const api = {
   geoAddTitles: (libId: Id, data: Record<string, any>) => instance.post(`/v1/geo/title-libs/${libId}/titles`, data),
   geoImportTitles: (libId: Id, data: Record<string, any>) => instance.post(`/v1/geo/title-libs/${libId}/import`, data),
   geoImportFromGSC: (libId: Id, data: Record<string, any>) => instance.post(`/v1/geo/title-libs/${libId}/import-gsc`, data),
+  geoImportFromPlatforms: (libId: Id, data: Record<string, any>) => instance.post(`/v1/geo/title-libs/${libId}/import-platforms`, data),
   geoDeleteTitle: (id: Id) => instance.delete(`/v1/geo/titles/${id}`),
   // (Prompt 模板 / 知识库 / 生成任务 endpoints were removed in the
   // 4-step wizard refactor. Use geoStartKeywordWorkflow + geoGetDefaults.)

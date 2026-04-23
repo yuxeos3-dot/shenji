@@ -701,6 +701,8 @@ func Init() {
 		// 旧行 user_id=0 作为"orphan 管理员专属"处理。配合 handler
 		// 里按 user_id 过滤，避免 admin 和 member 互相看到 / 删除。
 		"DO $$ BEGIN ALTER TABLE geo_title_libs ADD COLUMN user_id INTEGER DEFAULT 0; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"DO $$ BEGIN ALTER TABLE geo_title_libs ADD COLUMN is_default BOOLEAN DEFAULT FALSE; EXCEPTION WHEN duplicate_column THEN NULL; END $$",
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_geo_default_lib ON geo_title_libs(user_id, COALESCE(site_id,0), content_type) WHERE is_default = TRUE",
 		`CREATE INDEX IF NOT EXISTS idx_geo_title_libs_user ON geo_title_libs(user_id)`,
 		// 协同任务 · 组长 / 经理审核环节。新人创建任务时先指定拟派开
 		// 发 (pending_assignee_id)，再勾选一个或多个审核人；任务进入

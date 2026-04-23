@@ -30,13 +30,21 @@
             <el-button type="primary" @click="showLibForm = true">+ 新建关键词 / 话题库</el-button>
           </div>
           <el-table :data="libsPaged" stripe>
-            <el-table-column prop="name" label="名称" />
+            <el-table-column label="名称">
+              <template #default="{ row }">
+                <span v-if="row.is_default" style="margin-right:6px" title="默认库">🔒</span>
+                <span>{{ row.name }}</span>
+                <span v-if="row.is_default" style="margin-left:8px;font-size:11px;color:#f97316;font-weight:700">默认</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="description" label="描述" />
             <el-table-column prop="title_count" label="关键词数" width="120" />
             <el-table-column label="操作" width="220">
               <template #default="{ row }">
                 <el-button size="small" type="primary" @click="enterLib(row)">进入</el-button>
-                <el-button size="small" type="danger" @click="deleteLib(row)">删除</el-button>
+                <el-button size="small" type="danger" :disabled="row.is_default" @click="deleteLib(row)">
+                  {{ row.is_default ? '不可删除' : '删除' }}
+                </el-button>
               </template>
             </el-table-column>
           </el-table>
