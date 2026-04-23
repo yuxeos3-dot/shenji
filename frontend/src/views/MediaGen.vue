@@ -61,12 +61,22 @@
               <input type="checkbox" :checked="checked.has(item.id)" @change="toggleCheck(item.id)" />
             </td>
             <td class="col-thumb">
-              <img
-                v-if="item.result_url || item.output_url"
-                :src="item.result_url || item.output_url"
-                class="thumb"
-                @click="previewItem = item"
-              />
+              <template v-if="item.result_url || item.output_url">
+                <img
+                  v-if="item.kind === 'image'"
+                  :src="item.result_url || item.output_url"
+                  class="thumb"
+                  @click="previewItem = item"
+                />
+                <video
+                  v-else
+                  :src="item.result_url || item.output_url"
+                  class="thumb"
+                  muted
+                  preload="metadata"
+                  @click="previewItem = item"
+                />
+              </template>
               <div v-else class="thumb-placeholder">--</div>
             </td>
             <td class="col-prompt">{{ item.prompt || "--" }}</td>
@@ -217,8 +227,8 @@
     <Teleport to="body">
       <div class="lightbox-overlay" v-if="previewItem" @click="previewItem = null">
         <div class="lightbox-content" @click.stop>
-          <img v-if="kind === 'image'" :src="previewItem.output_url" />
-          <video v-else :src="previewItem.output_url" controls autoplay></video>
+          <img v-if="kind === 'image'" :src="previewItem.result_url || previewItem.output_url" />
+          <video v-else :src="previewItem.result_url || previewItem.output_url" controls autoplay></video>
           <button class="lightbox-close" @click="previewItem = null">&times;</button>
         </div>
       </div>
