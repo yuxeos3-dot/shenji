@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -244,6 +245,39 @@ func GeoImportFromPlatforms(c *gin.Context) {
 		return
 	}
 
+	// Auto-sync: if gsc_query_page_daily is empty for this site, trigger
+	// a deep sync using the SITE OWNER's OAuth token (not the caller's —
+	// admin might be pulling for a site they don't own). This is the
+	// "admin view-as owner" pattern applied to keyword import.
+	autoSynced := false
+	var deepCount int
+	db.DB.QueryRow(
+		`SELECT COUNT(*) FROM gsc_query_page_daily WHERE site_id=$1 LIMIT 1`, req.SiteID,
+	).Scan(&deepCount)
+	if deepCount == 0 {
+		var ownerID int64
+		var domain string
+		db.DB.QueryRow(
+			"SELECT COALESCE(created_by,0), COALESCE(domain,'') FROM sites WHERE id=$1", req.SiteID,
+		).Scan(&ownerID, &domain)
+		if ownerID > 0 && domain != "" {
+			if token, err := getGoogleAccessToken(ownerID); err == nil {
+				if gscURL, err := resolveGSCProperty(token, domain, ownerID); err == nil {
+					if rows, err := syncGSCDeepInternal(req.SiteID, token, gscURL, 7); err == nil {
+						log.Printf("[geo-import] site %d auto-synced %d GSC rows via owner %d", req.SiteID, rows, ownerID)
+						autoSynced = true
+					} else {
+						log.Printf("[geo-import] site %d syncGSCDeep failed: %v", req.SiteID, err)
+					}
+				} else {
+					log.Printf("[geo-import] site %d resolveGSC failed: %v", req.SiteID, err)
+				}
+			} else {
+				log.Printf("[geo-import] site %d (owner %d) no Google token: %v", req.SiteID, ownerID, err)
+			}
+		}
+	}
+
 	// Collect distinct queries across all 4 platforms
 	keywords := map[string]bool{}
 
@@ -309,7 +343,7 @@ func GeoImportFromPlatforms(c *gin.Context) {
 	}
 
 	if len(keywords) == 0 {
-		c.JSON(400, gin.H{"code": -1, "error": "该站点暂无关键词数据, 请先在「数据管理」同步4大平台"})
+		c.JSON(400, gin.H{"code": -1, "error": "该站点暂无关键词数据, 自动同步失败 — 请先在「数据管理」手动同步4大平台(深度同步)"})
 		return
 	}
 
@@ -342,6 +376,7 @@ func GeoImportFromPlatforms(c *gin.Context) {
 		"imported":     inserted,
 		"source_total": len(keywords),
 		"skipped":      len(keywords) - inserted,
+		"auto_synced":  autoSynced,
 	}})
 }
 

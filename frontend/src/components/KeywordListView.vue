@@ -184,9 +184,10 @@ async function doPlatformsImport() {
   try {
     const res = await api.geoImportFromPlatforms(props.lib.id, { site_id: props.siteId })
     const d = res.data || {}
+    const syncNote = d.auto_synced ? '（已自动触发深度同步）' : ''
     ElMessage.success(
       '✅ 从4平台导入 ' + (d.imported || 0) + ' 条关键词' +
-      ' · 来源 ' + (d.source_total || 0) + ' 条（已去重 ' + (d.skipped || 0) + ' 条）'
+      ' · 来源 ' + (d.source_total || 0) + ' 条（已去重 ' + (d.skipped || 0) + ' 条）' + syncNote
     )
     reload()
   } catch (e) {
