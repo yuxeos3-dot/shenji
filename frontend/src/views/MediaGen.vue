@@ -286,7 +286,10 @@ const genMode = ref("")
 
 watch(() => props.kind, () => {
   // Reset state when switching between image and video management.
-  // These are separate logical pages even though they share the component.
+  // Note: refs declared BELOW this watch (detailItem/showDetailDialog)
+  // are NOT reset here — Vue's TDZ would throw if we tried during the
+  // immediate:true initial fire. The router-view :key binding handles
+  // full remount on route change, which fully resets those anyway.
   genMode.value = textModeKey.value
   list.value = []
   page.value = 1
@@ -296,8 +299,6 @@ watch(() => props.kind, () => {
   searchText.value = ""
   genPrompt.value = ""
   genSourceUrl.value = ""
-  detailItem.value = null
-  showDetailDialog.value = false
   previewItem.value = null
   loadList()
 }, { immediate: true })
