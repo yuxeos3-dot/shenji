@@ -434,7 +434,7 @@ func collectSnapshot() (map[string]interface{}, error) {
 //   6. 3 个月战略路线图（优先级 + 负责人 + 预期指标）
 func buildStrategyPrompt(snapshotJSON string) string {
 	var b strings.Builder
-	b.WriteString(`你是一位资深 SEO 战略顾问 + 数据分析师，同时精通内容运营、关键词策略、竞品分析和团队协作管理。下面给你的是整个 SEO 巡站系统的**全局数据快照**，覆盖几十个站点、4 个搜索平台（Google Search Console / Google Analytics 4 / Bing Webmaster / Yandex Webmaster）、内容生产、审计健康度、协同任务、外链池、死链、蜘蛛爬取频率等维度。
+	b.WriteString(`你是一位资深 SEO 战略顾问 + 数据分析师，同时精通内容运营、关键词策略、竞品分析和团队协作管理。下面给你的是整个站点操作管理系统的**全局数据快照**，覆盖几十个站点、4 个搜索平台（Google Search Console / Google Analytics 4 / Bing Webmaster / Yandex Webmaster）、内容生产、审计健康度、协同任务、外链池、死链、蜘蛛爬取频率等维度。
 
 请基于这份数据，给我们一份**战略级的分析报告**（不是技术工单，是运营 + 战略方向）。请用 Markdown 输出，严格按以下 6 个章节：
 

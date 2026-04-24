@@ -137,7 +137,7 @@ func BuildDocx(r *V6Report, domain string) ([]byte, error) {
 
 	// ── Footer note ──────────────────────────────────────────────────────
 	writeEmpty(&doc)
-	writeFooterLine(&doc, fmt.Sprintf("—— 报告由 SEO 巡站系统 v6 生成 · %s ——", r.GeneratedAt))
+	writeFooterLine(&doc, fmt.Sprintf("—— 报告由站点操作管理系统 v6 生成 · %s ——", r.GeneratedAt))
 
 	doc.WriteString(docSuffix)
 

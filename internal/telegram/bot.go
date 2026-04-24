@@ -103,7 +103,7 @@ func Test(botToken, chatID string) error {
 	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
 	params := url.Values{}
 	params.Set("chat_id", chatID)
-	params.Set("text", "SEO巡站系统测试通知 - 连接成功!")
+	params.Set("text", "站点操作管理系统测试通知 - 连接成功!")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.PostForm(apiURL, params)

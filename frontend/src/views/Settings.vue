@@ -180,7 +180,7 @@
             <div class="section-title">系统基本设置</div>
             <div class="field-row">
               <label class="field-label">系统标题</label>
-              <input class="field-input" v-model="adminSettings.site_title" placeholder="SEO巡站管理系统" />
+              <input class="field-input" v-model="adminSettings.site_title" placeholder="站点操作管理系统" />
               <div class="field-hint">显示在浏览器标签和页面顶部</div>
             </div>
           </div>

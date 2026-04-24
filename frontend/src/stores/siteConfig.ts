@@ -15,7 +15,7 @@ export const APP_VERSION = 'v13.2'
  * settings page calls refresh() so the new title propagates without a reload.
  */
 export const useSiteConfigStore = defineStore('siteConfig', () => {
-  const title = ref<string>('SEO 巡站管理系统') // safe fallback until first load
+  const title = ref<string>('站点操作管理系统') // safe fallback until first load
   const loaded = ref(false)
 
   async function refresh() {
@@ -49,7 +49,7 @@ export const useSiteConfigStore = defineStore('siteConfig', () => {
   }
 
   function applyDocumentTitle(section?: string) {
-    const base = title.value || 'SEO 巡站管理系统'
+    const base = title.value || '站点操作管理系统'
     document.title = section ? `${section} · ${base}` : base
   }
 

@@ -196,7 +196,7 @@ func main() {
 
 	serveErr := make(chan error, 1)
 	go func() {
-		log.Printf("SEO巡站系统启动，端口: %s (trusted_proxies=%v)", port, trusted)
+		log.Printf("站点操作管理系统启动，端口: %s (trusted_proxies=%v)", port, trusted)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serveErr <- err
 		}

@@ -1537,7 +1537,7 @@ func seedDefaultAdmin() {
 
 func seedDefaultSettings() {
 	defaults := map[string]string{
-		"site_title":                "SEOå·¡ç«ç®¡çç³»ç»",
+		"site_title":                "站点操作管理系统",
 		"auto_audit_enabled":        "false",
 		"auto_audit_cron":           "0 9 * * *",
 		"auto_audit_interval_hours": "0",
@@ -1553,6 +1553,12 @@ func seedDefaultSettings() {
 	for k, v := range defaults {
 		DB.Exec("INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT DO NOTHING", k, v)
 	}
+
+	// One-shot rename: migrate any legacy "SEO 巡站管理系统" variants to the
+	// new product name. Only matches old defaults so custom admin titles
+	// are preserved. Idempotent — after the first run the WHERE clause
+	// matches nothing.
+	DB.Exec(`UPDATE settings SET value = $1 WHERE key = 'site_title' AND value IN ('SEO巡站管理系统','SEO 巡站管理系统','SEO巡站系统','SEO 巡站系统')`, "站点操作管理系统")
 }
 
 func GetSetting(key string) string {
