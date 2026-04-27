@@ -12,7 +12,6 @@ import (
 	"seo-system/internal/ai"
 	"seo-system/internal/crawler"
 	"seo-system/internal/db"
-	"seo-system/internal/telegram"
 
 	"github.com/gin-gonic/gin"
 )
@@ -272,7 +271,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=$1, finished_at=$2 WHERE id=$3",
 			"AI 未配置：请先在「个人 AI 设置」中填写至少 1 组 API Key 后重试", time.Now(), taskID)
 		log.Printf("[audit %d] user %d has no AI config, abort", taskID, ownerUserID)
-		telegram.NotifyUser(ownerUserID, "审计失败", siteName+": 你尚未配置 AI API Key")
+		// telegram notifications removed in single-user slim mode
 		return
 	}
 	// Step 4: Run technical audit agents IN PARALLEL. Each agent focuses on
@@ -350,7 +349,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 		db.DB.Exec("UPDATE audit_tasks SET status='error', error_msg=$1, finished_at=$2 WHERE id=$3",
 			errMsg, time.Now(), taskID)
 		log.Printf("[audit %d] 所有技术审计批次均失败（%d 批次）", taskID, len(batchFailures))
-		telegram.NotifyUser(ownerUserID, "审计失败", siteName+"\n"+errMsg)
+		_ = errMsg // telegram notification removed
 		return
 	}
 
@@ -437,7 +436,7 @@ func runAuditTask(taskID int64, siteID string, ownerUserID int64, site crawler.S
 	}
 
 	log.Printf("[audit %d] 完成: %s", taskID, analysisResult.Summary)
-	telegram.NotifyUser(ownerUserID, "审计完成", siteName+" 审计完成: "+analysisResult.Summary)
+	// telegram notification removed in single-user slim mode
 }
 
 func DeleteAudit(c *gin.Context) {

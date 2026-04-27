@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"seo-system/internal/db"
-	"seo-system/internal/middleware"
-	"seo-system/internal/telegram"
 
 	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron/v3"
@@ -185,12 +183,7 @@ func SaveSettings(c *gin.Context) {
 			log.Printf("[settings] SetSetting(%q) failed: %v", key, err)
 			failed = append(failed, key)
 		}
-		// Eagerly invalidate the in-process IP whitelist cache whenever the
-		// setting is saved so the new list takes effect on the next request
-		// instead of waiting for the TTL to expire.
-		if key == "ip_whitelist" {
-			middleware.InvalidateIPWhitelistCache()
-		}
+		// IP whitelist removed in single-user slim mode.
 	}
 
 	WriteAuditLog(c, "save_settings", "settings", "", "批量更新系统设置")
@@ -222,18 +215,3 @@ func TestAI(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "AI接口连接成功（使用个人配置）"})
 }
 
-// TestTelegram exercises the CALLER'S own bot — each user has their own
-// under the per-user model. The admin-only legacy /settings/test-telegram
-// endpoint therefore tests the admin's Telegram config.
-func TestTelegram(c *gin.Context) {
-	botToken, chatID, err := LoadUserTelegram(c.GetInt64("user_id"))
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "error": "Telegram未配置"})
-		return
-	}
-	if err := telegram.Test(botToken, chatID); err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"code": 0, "data": "Telegram推送测试成功"})
-}

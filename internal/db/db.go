@@ -1503,6 +1503,11 @@ func migrateMembersToRoles() {
 	log.Printf("[migration] role_system_v3: migrated %d users", updated)
 }
 
+// seedDefaultAdmin in single-user mode just makes sure exactly one row
+// exists in the users table — at id=1 — so foreign-key columns (audits,
+// site_pages, oauth_tokens, etc.) keep referencing a valid principal.
+// The actual login password lives in APP_PASSWORD env var, not in this
+// row. The bcrypt hash is a placeholder and never used.
 func seedDefaultAdmin() {
 	var count int
 	if err := DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
@@ -1512,27 +1517,20 @@ func seedDefaultAdmin() {
 		return
 	}
 
-	email := os.Getenv("ADMIN_INIT_EMAIL")
-	password := os.Getenv("ADMIN_INIT_PASSWORD")
-	if email == "" || password == "" {
-		log.Fatal("First run requires ADMIN_INIT_EMAIL and ADMIN_INIT_PASSWORD environment variables. " +
-			"Example: ADMIN_INIT_EMAIL=you@example.com ADMIN_INIT_PASSWORD=secret ./server")
-	}
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+	hash, err := bcrypt.GenerateFromPassword([]byte("placeholder-not-used"), 4)
 	if err != nil {
-		log.Fatalf("Failed to hash password: %v", err)
+		log.Fatalf("Failed to hash placeholder password: %v", err)
 	}
 
 	_, err = DB.Exec(
-		"INSERT INTO users (name, email, password, role) VALUES ($1, $2, $3, $4)",
-		"Admin", email, string(hash), "admin",
+		"INSERT INTO users (id, name, email, password, role) VALUES (1, $1, $2, $3, $4) ON CONFLICT (id) DO NOTHING",
+		"admin", "admin@local", string(hash), "admin",
 	)
 	if err != nil {
-		log.Fatalf("Failed to create default admin: %v", err)
+		log.Fatalf("Failed to seed singleton user: %v", err)
 	}
 
-	log.Printf("Default admin created (email: %s)", email)
+	log.Println("Singleton user seeded (id=1)")
 }
 
 func seedDefaultSettings() {
