@@ -72,7 +72,6 @@
           </div>
           <div class="hp-actions">
             <button v-if="h.source === 'manual'" class="btn btn-xs btn-danger-xs" @click="deleteIncident(h)">删除</button>
-            <button v-else class="btn btn-xs" @click="$router.push(`/coordination/${h.coord_id}`)">查看任务</button>
           </div>
         </div>
       </div>

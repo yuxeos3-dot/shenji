@@ -4,7 +4,7 @@
     <div class="page-header">
       <div class="header-left">
         <h1 class="page-title">站点管理</h1>
-        <span class="page-subtitle">{{ userStore.isAdmin() ? '管理所有用户站点，触发深度巡检任务' : '管理我的监控站点，触发深度巡检任务' }}</span>
+        <span class="page-subtitle">管理监控站点，触发深度巡检任务</span>
       </div>
       <div class="header-actions">
         <el-button class="btn-secondary" @click="openImportDialog">
@@ -88,127 +88,55 @@
       </div>
     </div>
 
-    <!-- 站点列表 — admin sees a collapsible per-owner view so sites
-         with the same domain across users don't stack anonymously.
-         Members keep the flat single-owner table they had before. -->
-    <template v-if="userStore.isAdmin()">
-      <div class="panel owner-panel" v-loading="loading">
-        <div v-if="!sites.length" class="empty-cell" style="padding:40px;text-align:center;color:var(--ink-hint)">
-          暂无站点
-        </div>
-        <div v-else>
-          <div v-for="group in sitesByOwner" :key="group.ownerId" class="owner-group">
-            <div class="owner-head" @click="toggleOwner(group.ownerId)">
-              <div class="owner-left">
-                <span class="owner-caret">{{ openOwners.has(group.ownerId) ? '▼' : '▶' }}</span>
-                <span class="owner-avatar">{{ (group.ownerName || '?')[0] }}</span>
-                <span class="owner-name">{{ group.ownerName || '（未知用户）' }}</span>
-                <span class="owner-count">{{ group.sites.length }} 个站点</span>
-              </div>
+    <div class="panel table-panel">
+      <el-table :data="sitesPaged" v-loading="loading" class="sunrise-table" :header-cell-style="headerCellStyle" :row-class-name="tableRowClassName">
+        <el-table-column prop="name" label="站点名称" min-width="160">
+          <template #default="{ row }">
+            <div class="site-name-cell">
+              <span class="site-icon">🌐</span>
+              <span class="site-name-text">{{ row.name || row.domain }}</span>
             </div>
-            <div v-if="openOwners.has(group.ownerId)" class="owner-sites">
-              <el-table
-                :data="group.sites"
-                class="sunrise-table"
-                :header-cell-style="headerCellStyle"
-                :row-class-name="tableRowClassName"
-              >
-                <el-table-column prop="name" label="站点名称" min-width="160">
-                  <template #default="{ row }">
-                    <div class="site-name-cell">
-                      <span class="site-icon">🌐</span>
-                      <span class="site-name-text">{{ row.name || row.domain }}</span>
-                    </div>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="domain" label="域名" min-width="180">
-                  <template #default="{ row }"><span class="domain-text">{{ row.domain }}</span></template>
-                </el-table-column>
-                <el-table-column prop="status" label="状态" width="100">
-                  <template #default="{ row }">
-                    <span class="status-badge" :class="'status-' + row.status">
-                      {{ row.status === 'active' ? '🟢 启用' : '⚪ 停用' }}
-                    </span>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="last_audit_status" label="最近巡检" width="120">
-                  <template #default="{ row }">
-                    <span v-if="row.last_audit_status" class="audit-badge" :class="'audit-' + row.last_audit_status">{{ auditLabel(row.last_audit_status) }}</span>
-                    <span v-else class="no-audit">暂未巡检</span>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="created_at" label="添加时间" width="160">
-                  <template #default="{ row }"><span class="date-text">{{ fmtTime(row.created_at) }}</span></template>
-                </el-table-column>
-                <el-table-column label="操作" width="360" fixed="right">
-                  <template #default="{ row }">
-                    <div class="action-btns">
-                      <el-button class="btn-action btn-edit" size="small" @click="editSite(row)">✏️ 编辑</el-button>
-                      <el-button class="btn-action btn-detail" size="small" @click="$router.push(`/sites/${row.id}`)">📋 详情</el-button>
-                      <el-button class="btn-action btn-data" size="small" @click="$router.push(`/sites/${row.id}/data`)">📊 数据</el-button>
-                      <el-button class="btn-action btn-delete" size="small" @click="deleteSite(row)">🗑️ 删除</el-button>
-                    </div>
-                  </template>
-                </el-table-column>
-              </el-table>
+          </template>
+        </el-table-column>
+        <el-table-column prop="domain" label="域名" min-width="180">
+          <template #default="{ row }"><span class="domain-text">{{ row.domain }}</span></template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="100">
+          <template #default="{ row }">
+            <span class="status-badge" :class="'status-' + row.status">
+              {{ row.status === 'active' ? '🟢 启用' : '⚪ 停用' }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="last_audit_status" label="最近巡检" width="120">
+          <template #default="{ row }">
+            <span v-if="row.last_audit_status" class="audit-badge" :class="'audit-' + row.last_audit_status">{{ auditLabel(row.last_audit_status) }}</span>
+            <span v-else class="no-audit">暂未巡检</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="添加时间" width="160">
+          <template #default="{ row }"><span class="date-text">{{ fmtTime(row.created_at) }}</span></template>
+        </el-table-column>
+        <el-table-column label="操作" width="280" fixed="right">
+          <template #default="{ row }">
+            <div class="action-btns">
+              <el-button class="btn-action btn-edit" size="small" @click="editSite(row)">✏️ 编辑</el-button>
+              <el-button class="btn-action btn-detail" size="small" @click="$router.push(`/sites/${row.id}`)">📋 详情</el-button>
+              <el-button class="btn-action btn-delete" size="small" @click="deleteSite(row)">🗑️ 删除</el-button>
             </div>
-          </div>
-        </div>
-      </div>
-    </template>
-
-    <template v-else>
-      <div class="panel table-panel">
-        <el-table :data="sitesPaged" v-loading="loading" class="sunrise-table" :header-cell-style="headerCellStyle" :row-class-name="tableRowClassName">
-          <el-table-column prop="name" label="站点名称" min-width="160">
-            <template #default="{ row }">
-              <div class="site-name-cell">
-                <span class="site-icon">🌐</span>
-                <span class="site-name-text">{{ row.name || row.domain }}</span>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column prop="domain" label="域名" min-width="180">
-            <template #default="{ row }"><span class="domain-text">{{ row.domain }}</span></template>
-          </el-table-column>
-          <el-table-column prop="status" label="状态" width="100">
-            <template #default="{ row }">
-              <span class="status-badge" :class="'status-' + row.status">
-                {{ row.status === 'active' ? '🟢 启用' : '⚪ 停用' }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="last_audit_status" label="最近巡检" width="120">
-            <template #default="{ row }">
-              <span v-if="row.last_audit_status" class="audit-badge" :class="'audit-' + row.last_audit_status">{{ auditLabel(row.last_audit_status) }}</span>
-              <span v-else class="no-audit">暂未巡检</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="created_at" label="添加时间" width="160">
-            <template #default="{ row }"><span class="date-text">{{ fmtTime(row.created_at) }}</span></template>
-          </el-table-column>
-          <el-table-column label="操作" width="360" fixed="right">
-            <template #default="{ row }">
-              <div class="action-btns">
-                <el-button class="btn-action btn-edit" size="small" @click="editSite(row)">✏️ 编辑</el-button>
-                <el-button class="btn-action btn-detail" size="small" @click="$router.push(`/sites/${row.id}`)">📋 详情</el-button>
-                <el-button class="btn-action btn-data" size="small" @click="$router.push(`/sites/${row.id}/data`)">📊 数据</el-button>
-                <el-button class="btn-action btn-delete" size="small" @click="deleteSite(row)">🗑️ 删除</el-button>
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-pagination
-          v-if="sitesTotal > sitesSize"
-          class="pager-bar"
-          :total="sitesTotal"
-          :page-size="sitesSize"
-          v-model:current-page="sitesPage"
-          layout="prev, pager, next, total"
-          background
-        />
-      </div>
-    </template>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-pagination
+        v-if="sitesTotal > sitesSize"
+        class="pager-bar"
+        :total="sitesTotal"
+        :page-size="sitesSize"
+        v-model:current-page="sitesPage"
+        layout="prev, pager, next, total"
+        background
+      />
+    </div>
 
     <!-- 批量添加站点弹窗 — textarea 一行一条 URL|站点名称 -->
     <el-dialog v-model="showBulkAddDialog" title="🌐 添加站点（批量）" width="560px" class="sunrise-dialog" :close-on-click-modal="false">
@@ -317,11 +245,8 @@ https://another.com"
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useUserStore } from '../stores/user'
 import api from '../api'
 import { usePagination } from '../composables/usePagination'
-
-const userStore = useUserStore()
 
 // fmtTime renders RFC3339 (backend always returns UTC) as local
 // YYYY-MM-DD HH:mm for the site list's 添加时间 column. Falls back to
@@ -359,45 +284,6 @@ const bulkAdding = ref(false)
 
 const activeSites = computed(() => sites.value.filter(s => s.status === 'active').length)
 
-// Admin-only: group sites by their owner so two users sharing the same
-// domain (UNIQUE(domain, created_by) allows this intentionally) no
-// longer stack as anonymous duplicate rows. Each group is collapsible;
-// default all collapsed so cold load matches the "don't dump everyone's
-// data at once" product rule.
-const sitesByOwner = computed(() => {
-  const byId = new Map()
-  for (const s of sites.value) {
-    // created_by=0 happens for legacy rows from before the column had
-    // a value, or when a creator was deleted and the FK was set to 0.
-    // Group all such sites under a single "（无归属）" header so the
-    // admin can spot them easily rather than have them silently merge
-    // into whichever user happens to have id=0.
-    const key = s.created_by || 0
-    if (!byId.has(key)) {
-      byId.set(key, {
-        ownerId: key,
-        ownerName: key === 0
-          ? '（无归属 / 已注销用户）'
-          : (s.owner_name || `用户 #${key}`),
-        orphaned: key === 0,
-        sites: [],
-      })
-    }
-    byId.get(key).sites.push(s)
-  }
-  // Stable order: largest owner first, then by owner id ascending for
-  // ties so the layout doesn't reshuffle on every refresh.
-  return [...byId.values()].sort((a, b) => {
-    if (b.sites.length !== a.sites.length) return b.sites.length - a.sites.length
-    return a.ownerId - b.ownerId
-  })
-})
-const openOwners = ref(new Set())
-function toggleOwner(id) {
-  const next = new Set(openOwners.value)
-  if (next.has(id)) next.delete(id); else next.add(id)
-  openOwners.value = next
-}
 const auditedSites = computed(() => sites.value.filter(s => s.last_audit_status === 'done').length)
 
 const headerCellStyle = () => ({ background: 'linear-gradient(135deg, var(--sun), var(--coral))', color: '#FFFFFF', fontWeight: '800', fontSize: '12px', letterSpacing: '0.04em', border: 'none', padding: '14px 12px' })
