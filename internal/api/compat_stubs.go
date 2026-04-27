@@ -20,6 +20,16 @@ func WriteAuditLog(c *gin.Context, action, resource, resourceID, detail string) 
 	_ = detail
 }
 
+// loadPlatformHides used to look up the per-user × hidden-site list on
+// the data-management overview cards. Single-user mode never hid anything,
+// so the function returns an empty map. Kept so the four platform dashboard
+// files compile without a sweeping rewrite.
+func loadPlatformHides(userID int64, platform string) map[string]bool {
+	_ = userID
+	_ = platform
+	return map[string]bool{}
+}
+
 // canAccessSite used to enforce per-user / per-role site access. In single-
 // user mode the only check that still makes sense is "the site exists" —
 // otherwise a typo'd ID would silently no-op. Returns false (and writes a

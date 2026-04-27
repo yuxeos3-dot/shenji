@@ -119,13 +119,9 @@ var (
 )
 
 func initJSONNameCache() {
-	// Register request types whose fields we want auto-translated.
-	// Adding a new type here is the only maintenance step when a new
-	// struct gains binding validations that should flow back as
-	// "fields" to the UI.
-	registerForJSONCache(reflect.TypeOf(CreateUserRequest{}))
-	registerForJSONCache(reflect.TypeOf(RegisterRequest{}))
-	registerForJSONCache(reflect.TypeOf(ApproveUserRequest{}))
+	// Single-user slim mode no longer has user-creation / register /
+	// approve request structs. The cache is intentionally empty —
+	// remaining handlers do their own ad-hoc validation messaging.
 }
 
 func registerForJSONCache(t reflect.Type) {
