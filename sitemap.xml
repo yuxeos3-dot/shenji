@@ -1,7 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-    <url>
-        <loc>https://hltt2.com/</loc>
-        <lastmod>2026-09-30</lastmod>
-    </url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/download.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/list-145.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/list-146.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/list-148.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/list-149.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/list-315.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/post-1001.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/post-1067.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/post-1437.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/post-2619.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/post-4464.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/post-736.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/post-841.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/post-860.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/post-864.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/post-957.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/pricing.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/product.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/tutorial.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://yuxeos3-dot.github.io/shenji/wenda.html</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
 </urlset>

@@ -1,4 +1,3 @@
-Sitemap: https://hltt2.com/sitemap.xml
-
 User-agent: *
 Allow: /
+Sitemap: https://yuxeos3-dot.github.io/shenji/sitemap.xml
