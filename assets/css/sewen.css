@@ -225,6 +225,19 @@ p{margin:0}
 .article .step{display:flex;gap:14px;margin:14px 0}
 .article .step .n{flex:0 0 30px;height:30px;border-radius:50%;background:var(--grad);color:#fff;display:grid;place-items:center;font-weight:800;font-size:14px}
 
+/* ---------- FAQ ---------- */
+.faq-list{display:flex;flex-direction:column;gap:12px}
+.faq-grp{font-size:16px;font-weight:800;color:var(--blue-deep);margin:26px 0 6px}
+.faq-grp:first-child{margin-top:0}
+.faq-item{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;transition:border-color .2s,box-shadow .2s}
+.faq-item[open]{border-color:var(--blue-soft);box-shadow:var(--shadow-sm)}
+.faq-item summary{list-style:none;cursor:pointer;padding:17px 20px;font-size:16px;font-weight:700;color:var(--ink);
+  display:flex;justify-content:space-between;align-items:center;gap:14px}
+.faq-item summary::-webkit-details-marker{display:none}
+.faq-item summary::after{content:"+";font-size:22px;font-weight:700;color:var(--blue);flex:0 0 auto;line-height:1}
+.faq-item[open] summary::after{content:"\2013";color:var(--magenta)}
+.faq-item .faq-a{padding:0 20px 18px;color:var(--muted);font-size:15px;line-height:1.78}
+
 /* ---------- login (wenda) ---------- */
 .login-wrap{min-height:calc(100vh - var(--header-h));display:grid;place-items:center;padding:40px 20px;
   background:radial-gradient(60% 60% at 80% 10%,var(--magenta-soft),transparent 60%),var(--bg-soft)}
