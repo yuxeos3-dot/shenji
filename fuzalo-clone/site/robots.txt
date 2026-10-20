@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://fuzalo.com/sitemap.xml
+Agentmap: https://fuzalo.com/.well-known/ard.json

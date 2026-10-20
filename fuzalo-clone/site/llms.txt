@@ -1,0 +1,31 @@
+# 黄果短剧
+
+> 黄果短剧官网提供黄果AI短剧、每日更新片单、热门榜单、用户热评及黄果短剧网页版、Android、iOS App、TV版观看入口。
+
+## 官方网址
+
+- https://fuzalo.com/
+
+## 主要页面
+
+- [黄果短剧官网](https://fuzalo.com/)：黄果AI短剧、每日片单、黄果短剧网页版与多端观看入口
+- [黄果短剧客户端下载](https://fuzalo.com/download/)：Android、iOS、网页版与 TV 版官方入口
+- [黄果短剧今日更新](https://fuzalo.com/daily/)：按日期整理的每日更新短剧片单
+- [黄果短剧排行榜](https://fuzalo.com/ranking/)：本周热门AI短剧榜与排序口径说明
+- [黄果短剧用户热评](https://fuzalo.com/reviews/)：热门短剧口碑与追剧推荐
+- [黄果短剧常见问题](https://fuzalo.com/faq/)：App 下载、iOS、Android、网页版、媒体解析与安全说明
+- [创作者招募](https://fuzalo.com/creators/)：AI短剧作品与剧本Demo投稿方式
+- [网站地图](https://fuzalo.com/sitemap/)：全站重要页面索引
+
+## Agentic Resource Discovery
+
+- [ARD 资源清单](https://fuzalo.com/.well-known/ard.json)：符合 ARD 规范的 JSON-LD 资源入口
+
+## 内容与数据口径
+
+- 官网用于短剧发现、片单浏览、榜单与更新信息展示，不在内容卡片中直接播放完整剧集。
+- 完整观看入口包括网页端、Android、iOS 与 TV。
+
+## 联系方式
+
+- 创作者投稿：linnannan101@gmail.com

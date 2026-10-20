@@ -1,0 +1,188 @@
+{
+  "entries": [
+    {
+      "@context": "https://agenticresourcediscovery.org/context/v1",
+      "@id": "urn:air:fuzalo.com:site:home",
+      "identifier": "urn:air:fuzalo.com:site:home",
+      "displayName": "黄果短剧官网",
+      "type": "text/html",
+      "url": "https://fuzalo.com/",
+      "description": "黄果短剧官网提供 AI 原创短剧、每日更新片单、热门榜单、用户评论及多端观看入口。",
+      "representativeQueries": [
+        "黄果短剧官网在哪里",
+        "推荐近期热门 AI 短剧",
+        "在哪里查看黄果短剧片单"
+      ],
+      "tags": [
+        "黄果短剧",
+        "AI短剧",
+        "短剧推荐",
+        "短剧官网"
+      ],
+      "version": "2026.10.20",
+      "updatedAt": "2026-10-20T00:00:00+08:00",
+      "metadata": {
+        "language": "zh-CN",
+        "publisher": "fuzalo.com"
+      }
+    },
+    {
+      "@context": "https://agenticresourcediscovery.org/context/v1",
+      "@id": "urn:air:fuzalo.com:content:daily",
+      "identifier": "urn:air:fuzalo.com:content:daily",
+      "displayName": "黄果短剧今日更新",
+      "type": "text/html",
+      "url": "https://fuzalo.com/daily/",
+      "description": "按日期整理黄果短剧每日更新片单、题材、剧情简介和连载进度。",
+      "representativeQueries": [
+        "黄果短剧今天更新了哪些短剧",
+        "查看今日更新的 AI 短剧片单",
+        "最近几天有哪些短剧上新"
+      ],
+      "tags": [
+        "每日更新",
+        "今日短剧",
+        "短剧片单",
+        "AI短剧"
+      ],
+      "version": "2026.10.20",
+      "updatedAt": "2026-10-20T00:00:00+08:00",
+      "metadata": {
+        "language": "zh-CN",
+        "updateFrequency": "daily"
+      }
+    },
+    {
+      "@context": "https://agenticresourcediscovery.org/context/v1",
+      "@id": "urn:air:fuzalo.com:content:ranking",
+      "identifier": "urn:air:fuzalo.com:content:ranking",
+      "displayName": "黄果短剧本周热门榜",
+      "type": "text/html",
+      "url": "https://fuzalo.com/ranking/",
+      "description": "展示本周热门短剧、浏览量、剧情简介以及榜单计算规则。",
+      "representativeQueries": [
+        "本周最热门的短剧有哪些",
+        "黄果短剧热门榜单怎么计算",
+        "推荐浏览量高的 AI 短剧"
+      ],
+      "tags": [
+        "热门短剧",
+        "短剧排行榜",
+        "本周榜单",
+        "短剧推荐"
+      ],
+      "version": "2026.10.20",
+      "updatedAt": "2026-10-20T00:00:00+08:00",
+      "metadata": {
+        "language": "zh-CN",
+        "updateFrequency": "weekly"
+      }
+    },
+    {
+      "@context": "https://agenticresourcediscovery.org/context/v1",
+      "@id": "urn:air:fuzalo.com:content:reviews",
+      "identifier": "urn:air:fuzalo.com:content:reviews",
+      "displayName": "黄果短剧用户热评",
+      "type": "text/html",
+      "url": "https://fuzalo.com/reviews/",
+      "description": "汇集热门短剧口碑、剧情节奏、角色表现与用户追剧感受。",
+      "representativeQueries": [
+        "用户如何评价黄果短剧",
+        "哪些短剧口碑比较好",
+        "查看热门短剧观后评论"
+      ],
+      "tags": [
+        "用户热评",
+        "短剧口碑",
+        "观后感",
+        "追剧推荐"
+      ],
+      "version": "2026.10.20",
+      "updatedAt": "2026-10-20T00:00:00+08:00",
+      "metadata": {
+        "language": "zh-CN",
+        "contentType": "reviews"
+      }
+    },
+    {
+      "@context": "https://agenticresourcediscovery.org/context/v1",
+      "@id": "urn:air:fuzalo.com:support:faq",
+      "identifier": "urn:air:fuzalo.com:support:faq",
+      "displayName": "黄果短剧常见问题",
+      "type": "text/html",
+      "url": "https://fuzalo.com/faq/",
+      "description": "解答黄果短剧 App 下载、iOS 与 Android 安装、网页版、费用、播放缓存和安全问题。",
+      "representativeQueries": [
+        "黄果短剧 App 如何下载",
+        "黄果短剧网页版可以直接看吗",
+        "安装黄果短剧时提示风险怎么办",
+        "黄果短剧 App 要钱吗"
+      ],
+      "tags": [
+        "常见问题",
+        "App下载",
+        "安装安全",
+        "播放缓存"
+      ],
+      "version": "2026.10.20",
+      "updatedAt": "2026-10-20T00:00:00+08:00",
+      "metadata": {
+        "language": "zh-CN",
+        "contentType": "faq"
+      }
+    },
+    {
+      "@context": "https://agenticresourcediscovery.org/context/v1",
+      "@id": "urn:air:fuzalo.com:client:download",
+      "identifier": "urn:air:fuzalo.com:client:download",
+      "displayName": "黄果短剧客户端下载",
+      "type": "text/html",
+      "url": "https://fuzalo.com/download/",
+      "description": "提供 Android、iOS App Store、网页端与 TV 端观看入口及下载安装说明。",
+      "representativeQueries": [
+        "下载黄果短剧 Android 客户端",
+        "黄果短剧 iOS App Store 地址",
+        "黄果短剧有哪些观看方式"
+      ],
+      "tags": [
+        "客户端下载",
+        "Android",
+        "iOS",
+        "TV版",
+        "网页版"
+      ],
+      "version": "2026.10.20",
+      "updatedAt": "2026-10-20T00:00:00+08:00",
+      "metadata": {
+        "language": "zh-CN",
+        "supportedPlatforms": "Android,iOS,Web,TV"
+      }
+    },
+    {
+      "@context": "https://agenticresourcediscovery.org/context/v1",
+      "@id": "urn:air:fuzalo.com:creators:recruitment",
+      "identifier": "urn:air:fuzalo.com:creators:recruitment",
+      "displayName": "黄果短剧创作者招募",
+      "type": "text/html",
+      "url": "https://fuzalo.com/creators/",
+      "description": "面向 AI 短剧创作者和编剧的作品、剧本 Demo 投稿与合作计划。",
+      "representativeQueries": [
+        "如何加入黄果短剧创作者计划",
+        "AI 短剧作品可以投稿到哪里",
+        "短剧编剧如何提交剧本 Demo"
+      ],
+      "tags": [
+        "创作者招募",
+        "AI短剧创作",
+        "编剧投稿",
+        "剧本Demo"
+      ],
+      "version": "2026.10.20",
+      "updatedAt": "2026-10-20T00:00:00+08:00",
+      "metadata": {
+        "language": "zh-CN",
+        "contentType": "recruitment"
+      }
+    }
+  ]
+}
